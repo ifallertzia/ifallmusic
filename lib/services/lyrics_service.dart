@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../config/branding.dart';
 import 'lrc_parser.dart';
 import 'lyrics_query.dart';
 
@@ -117,7 +118,7 @@ class LyricsService {
                         headers: {
                           'Accept': 'application/json',
                           'User-Agent':
-                              'IfallMusic/2.2.0 (https://github.com/ifallertzia/Saxify-v1)',
+                              'IfallMusic/${IfallBranding.versionLabel} (https://github.com/ifallertzia/Saxify-v1)',
                         },
                       ),
                     )

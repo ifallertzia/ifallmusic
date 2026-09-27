@@ -251,4 +251,58 @@ void main() {
     expect(playback.current, b);
     expect(player.loaded, [b.id]);
   });
+  test('pausing a pending source load keeps the loaded song paused', () async {
+    final pending = Completer<String>();
+    playback.pendingResolve = pending;
+    final load = playback.playQueue([a]);
+    await drain();
+    await playback.pause();
+    pending.complete('https://stream.invalid/${a.id}');
+    await load;
+    await drain();
+    expect(playback.isLoading, isFalse);
+    expect(player.playing, isFalse);
+    await playback.resume();
+    expect(player.playing, isTrue);
+  });
+  test(
+    'mid-stream error retries once then advances; does not spin on same track',
+    () async {
+      await playback.playQueue([a, b, c]);
+      player.events.addError(
+        StateError('403 stream expired'),
+        StackTrace.empty,
+      );
+      await drain();
+      expect(playback.current, a);
+      expect(player.loaded, [a.id, a.id]);
+      player.events.addError(StateError('403 again'), StackTrace.empty);
+      await drain();
+      expect(playback.current, b);
+      expect(playback.lastError, isNotNull);
+    },
+  );
+  test(
+    'offline failure storm has a finite budget and exits loading state',
+    () async {
+      final tracks = [
+        a,
+        b,
+        c,
+        song('ddddddddddd'),
+        song('eeeeeeeeeee'),
+        song('fffffffffff'),
+        song('ggggggggggg'),
+      ];
+      for (final s in tracks) {
+        player.failures[s.id] = 2;
+      }
+      await playback.playQueue(tracks);
+      await drain();
+      expect(player.loaded.length, 12);
+      expect(playback.isLoading, isFalse);
+      expect(playback.notice, contains('Check your connection'));
+      expect(playback.current, tracks[5]);
+    },
+  );
 }

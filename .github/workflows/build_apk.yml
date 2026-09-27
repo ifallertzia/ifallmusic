@@ -46,7 +46,7 @@ jobs:
       # cannot be hidden behind a successful APK build.
       - name: Test (unit + widget)
         shell: bash
-        run: set -o pipefail && flutter test 2>&1 | tee test.log
+        run: set -o pipefail && flutter test --reporter expanded 2>&1 | tee test.log
 
       - name: Build APK (release)
         shell: bash
@@ -84,9 +84,13 @@ jobs:
             tr '\r' '\n' < test.log | tail -100 >> errors.log
           fi
           cat errors.log
-          head -100 errors.log | while IFS= read -r line; do
-            printf '::error::%s\n' "${line//%/\%}"
-          done
+          # One multiline annotation: GitHub limits annotations per step, and
+          # per-line notices can hide the actual failing test behind pass lines.
+          DETAILS="$(head -c 24000 errors.log)"
+          DETAILS="${DETAILS//%/%25}"
+          DETAILS="${DETAILS//$'\n'/%0A}"
+          DETAILS="${DETAILS//$'\r'/%0D}"
+          printf '::error title=Build diagnostics::%s\n' "$DETAILS"
 
       # Keep every analyzer/test/build log available if a blocking step fails.
       - name: Upload build diagnostics (failure)

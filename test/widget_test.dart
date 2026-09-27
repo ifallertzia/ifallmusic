@@ -83,9 +83,9 @@ void main() {
       WidgetTester tester,
     ) async {
       await tester.pumpWidget(
-        Theme(
-          data: ThemeData.dark(),
-          child: const Center(child: SaxifyLogo(size: 40)),
+        MaterialApp(
+          theme: ThemeData.dark(),
+          home: const Center(child: SaxifyLogo(size: 40)),
         ),
       );
       expect(find.byType(SaxifyLogo), findsOneWidget);
