@@ -33,12 +33,62 @@ class _LyricsViewState extends State<LyricsView> {
   Timer? _pause;
   bool _following = true;
   double _height = 300;
+  // Cache measured row sizes: the playback clock rebuilds this view frequently.
+  // Short lines no longer reserve 112px; wrapped/large text still has room.
+  List<LyricLine>? _measuredLines;
+  double? _measuredWidth;
+  TextScaler? _measuredScaler;
+  TextDirection? _measuredDirection;
+  final List<double> _rowHeights = [];
+  final List<double> _rowOffsets = [];
+  static const _lineStyle = TextStyle(fontSize: 19, height: 1.25);
+
+  void _measureRows(double width) {
+    final scaler = MediaQuery.textScalerOf(context);
+    final direction = Directionality.of(context);
+    if (identical(_measuredLines, widget.lines) &&
+        _measuredWidth == width &&
+        _measuredScaler == scaler &&
+        _measuredDirection == direction) {
+      return;
+    }
+    _measuredLines = widget.lines;
+    _measuredWidth = width;
+    _measuredScaler = scaler;
+    _measuredDirection = direction;
+    _rowHeights.clear();
+    _rowOffsets.clear();
+    double offset = 0;
+    for (final line in widget.lines) {
+      final painter = TextPainter(
+        text: TextSpan(
+          text: line.text,
+          style: _lineStyle.copyWith(fontWeight: FontWeight.w800),
+        ),
+        textDirection: direction,
+        textScaler: scaler,
+        maxLines: 4,
+        ellipsis: '…',
+      )..layout(maxWidth: (width - 44).clamp(1.0, double.infinity));
+      // Keep a 48px minimum tap target and space for the active-line scale.
+      final height = (painter.height * 1.035 + 12).clamp(48.0, double.infinity);
+      painter.dispose();
+      _rowOffsets.add(offset);
+      _rowHeights.add(height);
+      offset += height;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_following) _center();
+    });
+  }
+
   int get _active => activeLineIndex(widget.lines, widget.positionMs);
   @override
   void didUpdateWidget(LyricsView oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (activeLineIndex(oldWidget.lines, oldWidget.positionMs) != _active ||
-        oldWidget.mode != widget.mode) {
+        oldWidget.mode != widget.mode ||
+        !identical(oldWidget.lines, widget.lines)) {
       if (_following)
         WidgetsBinding.instance.addPostFrameCallback((_) => _center());
     }
@@ -48,9 +98,11 @@ class _LyricsViewState extends State<LyricsView> {
     if (!mounted ||
         !_scroll.hasClients ||
         _active < 0 ||
+        _active >= _rowHeights.length ||
         widget.mode != LyricsMode.synced)
       return;
-    final offset = (_height * .34 + _active * 112 + 56 - _height / 2).clamp(
+    // Top padding is half the viewport, so it cancels the centering offset.
+    final offset = (_rowOffsets[_active] + _rowHeights[_active] / 2).clamp(
       0.0,
       _scroll.position.maxScrollExtent,
     );
@@ -92,7 +144,7 @@ class _LyricsViewState extends State<LyricsView> {
         padding: const EdgeInsets.all(20),
         child: SelectableText(
           widget.plain,
-          style: const TextStyle(fontSize: 15, height: 1.9),
+          style: const TextStyle(fontSize: 15, height: 1.45),
         ),
       );
     }
@@ -101,6 +153,7 @@ class _LyricsViewState extends State<LyricsView> {
     return LayoutBuilder(
       builder: (context, constraints) {
         _height = constraints.maxHeight;
+        _measureRows(constraints.maxWidth);
         return Stack(
           children: [
             NotificationListener<ScrollNotification>(
@@ -114,10 +167,10 @@ class _LyricsViewState extends State<LyricsView> {
               },
               child: ListView.builder(
                 controller: _scroll,
-                itemExtent: 112,
+                itemExtentBuilder: (index, _) => _rowHeights[index],
                 padding: EdgeInsets.only(
-                  top: _height * .34,
-                  bottom: _height * .46,
+                  top: _height / 2,
+                  bottom: _height / 2,
                 ),
                 itemCount: widget.lines.length,
                 itemBuilder: (context, i) => Semantics(
@@ -147,9 +200,7 @@ class _LyricsViewState extends State<LyricsView> {
                               duration: Duration(
                                 milliseconds: reduced ? 0 : 350,
                               ),
-                              style: TextStyle(
-                                fontSize: 19,
-                                height: 1.35,
+                              style: _lineStyle.copyWith(
                                 fontWeight: i == active
                                     ? FontWeight.w800
                                     : FontWeight.w500,

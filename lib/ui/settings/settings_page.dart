@@ -276,11 +276,11 @@ class SettingsPage extends StatelessWidget {
                   ),
                   _SettingTile(
                     icon: Icons.language_rounded,
-                    title: 'Visit our website',
-                    subtitle: 'Discover the Ifallertzia platform, updates and more at sidify.vercel.app',
+                    title: 'Website & latest app download',
+                    subtitle: IfallBranding.latestDownloadMessage,
                     trailing: const Icon(Icons.open_in_new_rounded, size: 18),
                     onTap: () => launchUrl(
-                      Uri.parse('https://sidify.vercel.app'),
+                      Uri.parse(IfallBranding.websiteUrl),
                       mode: LaunchMode.externalApplication,
                     ),
                   ),

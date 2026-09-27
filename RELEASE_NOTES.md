@@ -1,16 +1,17 @@
-# IfallMusic 2.3.2
+# IfallMusic 2.3.3
 
 ## What's new
 
-- More compact, responsive lyric controls; lyrics now credit the Ifallertzia server.
-- Added player download progress next to Like, including an in-button percentage.
-- Equalizer opens directly from the player, remembers the active setup across tracks, and supports named custom presets.
-- 8D audio is marked Coming soon while the feature is being reworked.
-- Added a link to the Ifallertzia website in Settings.
+- Tighter lyric line spacing in Static and Synced modes, with room for wrapped lines and larger text.
+- Synced lyrics still follow the current line and support tap-to-seek.
+- Settings → Website & latest app download links to https://sidify.vercel.app, where the latest APK link will be maintained.
+- Restored APK builds without requiring release-signing secrets.
+- Keeps the recent player download progress, saved equalizer presets and compact lyrics controls.
 
-## Android updates
+## Installation note
 
-The package ID remains `com.saxify.app`, and this release increments the
-version code. A compatible update still requires the exact signing key used by
-the installed APK. This checkout does not include that private key; see
-[`docs/UPDATE_FIX.md`](docs/UPDATE_FIX.md) before producing a signed release.
+This build uses a temporary debug signing key when a permanent release key is
+not configured. Android may refuse to install it over an existing version.
+Back up your library in Settings first, then uninstall, install the latest APK
+and restore the backup. This may be needed again for future builds until stable
+signing is configured. The package ID remains `com.saxify.app`.

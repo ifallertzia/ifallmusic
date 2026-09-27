@@ -1,51 +1,58 @@
-# Android package identity and update signing
+# Android APK signing and manual updates
 
-The Android application ID is intentionally kept as `com.saxify.app`, and the
-version in `pubspec.yaml` is incremented for each release. That preserves the
-package identity and gives Android a higher `versionCode`.
+## Current distribution mode: no signing secrets required
 
-## Critical: updates require the original private signing key
+At the owner's request, release APK builds temporarily use the runner's debug
+key when no release keystore is configured. CI still runs Flutter analysis,
+all unit/widget tests, and **release-mode APK and AAB builds** on branches/PRs
+as well as main. Only a successful push build on main publishes a GitHub Release.
+The debug signing fallback does not turn the release build into a debug build.
 
-Android accepts an APK update only when its signing certificate matches the
-installed app's certificate. A package ID or version bump cannot fix a
-certificate mismatch. This checkout does **not** contain a signing keystore
-(`android/app/upload-keystore.jks` is gitignored), and a signing certificate
-cannot be reverse-engineered into its private key from an APK.
+**This is not stable production signing and is not suitable for Play Store
+publication.** Runner debug keys can change on every build. Keeping the package
+ID (`com.saxify.app`) and increasing the version code does not fix a certificate
+mismatch. In-place updates are not guaranteed, even between future releases.
 
-Before publishing, recover the exact keystore used to sign the app that users
-already have installed. Do **not** run `android/generate_keystore.sh` as a fix
-for a signature conflict: that generates a new identity and will make the
-conflict permanent for existing installs. If the app was previously released
-with an ephemeral GitHub Actions/debug key, the original key or its source
-machine's debug keystore is required; if it has been lost, Android cannot
-install a differently signed APK over that app. Users would need a one-time
-uninstall/reinstall and library restore.
+## Download and install
 
-## Local signed APK
+Settings → **Website & latest app download** opens https://sidify.vercel.app.
+The site owner maintains the current APK download link there; the app does not
+assume a download path or scrape the site. The existing GitHub update check is
+also available.
 
-Put the recovered key at `android/app/upload-keystore.jks` and create the
-ignored `android/key.properties` file:
+If Android reports a package/signature conflict:
+
+1. Back up the library from Settings **before uninstalling**.
+2. Uninstall the old app.
+3. Install the latest APK from the website's download link.
+4. Restore the library backup.
+
+This may be necessary again until a permanent signing key is configured.
+
+## Optional stable signing later
+
+Recover the original private signing key if possible. It cannot be reconstructed
+from a published APK. A newly generated key will not update an installation
+signed with another key.
+
+For local builds, put the key at `android/app/upload-keystore.jks` and create
+`android/key.properties` (both are ignored by Git):
 
 ```properties
 storeFile=upload-keystore.jks
-keyAlias=YOUR_ORIGINAL_ALIAS
+keyAlias=YOUR_ALIAS
 keyPassword=YOUR_KEY_PASSWORD
 storePassword=YOUR_STORE_PASSWORD
 ```
 
-Then build with `flutter build apk --release`. Release builds now refuse to
-fall back to the machine-specific debug key.
+For main-branch GitHub Actions builds, configure **all four** repository secrets:
 
-## GitHub Actions release signing
-
-Configure these repository Actions secrets with values for that **same** key:
-
-- `ANDROID_RELEASE_KEYSTORE_BASE64` — base64 of the original `.jks` file
+- `ANDROID_RELEASE_KEYSTORE_BASE64` — base64 of the `.jks` / `.keystore` file
 - `ANDROID_RELEASE_STORE_PASSWORD`
 - `ANDROID_RELEASE_KEY_ALIAS`
 - `ANDROID_RELEASE_KEY_PASSWORD`
 
-The workflow materializes the ignored key files only during the build. Never
-commit or paste a signing keystore or its passwords into source/chat. The
-published APK should be versioned above the installed one and signed with this
-same keystore on every release.
+No secrets: explicitly warned debug-key fallback. Partial/invalid configuration:
+build fails rather than silently ignoring a configured signing identity.
+Never commit private keys/passwords or paste them into chat. Back up the key and
+credentials securely and reuse the same key for all subsequent releases.
