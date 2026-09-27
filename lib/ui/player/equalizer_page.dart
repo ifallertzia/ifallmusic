@@ -55,6 +55,7 @@ class _EqualizerPageState extends State<EqualizerPage> {
       return;
     }
     final PlaybackService playback = context.read<PlaybackService>();
+    final SettingsService settings = context.read<SettingsService>();
     int? session = playback.player.androidAudioSessionId;
     if (session == null || session == 0) {
       try {
@@ -73,7 +74,6 @@ class _EqualizerPageState extends State<EqualizerPage> {
       });
       return;
     }
-    final SettingsService settings = context.read<SettingsService>();
     final EqualizerInfo? info = await NativeBridge.eqInit(session);
     if (!mounted) return;
     setState(() {
@@ -203,6 +203,7 @@ class _EqualizerPageState extends State<EqualizerPage> {
 
   @override
   Widget build(BuildContext context) {
+    final SettingsService settings = context.read<SettingsService>();
     return AuroraBackdrop(
       intensity: 0.5,
       child: Scaffold(
@@ -248,8 +249,9 @@ class _EqualizerPageState extends State<EqualizerPage> {
                       value: _enabled,
                       onChanged: (bool v) async {
                         await NativeBridge.eqSetEnabled(v);
+                        if (!mounted) return;
                         setState(() => _enabled = v);
-                        await context.read<SettingsService>().setEqualizerProfile(
+                        await settings.setEqualizerProfile(
                           name: v ? (_preset ?? 'Custom') : 'Original audio',
                           levels: _levels,
                           enabled: v,
@@ -308,7 +310,8 @@ class _EqualizerPageState extends State<EqualizerPage> {
                       if (_levels.length > i) _levels[i] = level;
                     });
                     await NativeBridge.eqSetBand(i, level);
-                    await context.read<SettingsService>().setEqualizerProfile(
+                    if (!mounted) return;
+                    await settings.setEqualizerProfile(
                       name: 'Custom',
                       levels: _levels,
                       enabled: _enabled,

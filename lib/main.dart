@@ -22,7 +22,6 @@ import 'core/services/playlist_sync_service.dart';
 import 'core/services/recommendation_service.dart';
 import 'core/services/recommendation_worker.dart';
 import 'core/services/settings_service.dart';
-import 'core/services/spatial_audio_service.dart';
 import 'core/services/youtube_service.dart';
 import 'core/theme/glass.dart';
 import 'core/theme/saxify_accents.dart';
@@ -128,7 +127,8 @@ Future<AppBoot> _initializeApp() async {
   final MusicDownloadService musicDownloads = MusicDownloadService(
     prefs: prefs,
   );
-  final SpatialAudioService spatial = SpatialAudioService(settings);
+  // Ensure an older saved 8D effect is disabled while the feature is Coming soon.
+  await NativeBridge.spatialDisable();
 
   playback.onTrackStarted = (Song song) {
     recommendations.notePlay(song);
@@ -158,7 +158,6 @@ Future<AppBoot> _initializeApp() async {
     recommendations: recommendations,
     artists: artists,
     musicDownloads: musicDownloads,
-    spatial: spatial,
     safeMode: native.safeMode,
   );
 }
@@ -202,7 +201,6 @@ class AppBoot {
     required this.recommendations,
     required this.artists,
     required this.musicDownloads,
-    required this.spatial,
     required this.safeMode,
   });
 
@@ -213,7 +211,6 @@ class AppBoot {
   final RecommendationService recommendations;
   final ArtistService artists;
   final MusicDownloadService musicDownloads;
-  final SpatialAudioService spatial;
   final bool safeMode;
 }
 
@@ -285,7 +282,6 @@ class _IfallMusicAppState extends State<IfallMusicApp> {
         ChangeNotifierProvider<MusicDownloadService>.value(
           value: boot.musicDownloads,
         ),
-        ChangeNotifierProvider<SpatialAudioService>.value(value: boot.spatial),
         ChangeNotifierProvider<ThemeController>(
           create: (_) => ThemeController(boot.settings),
         ),
