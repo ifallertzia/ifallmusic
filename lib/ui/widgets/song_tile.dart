@@ -4,11 +4,12 @@ import 'package:provider/provider.dart';
 
 import '../../core/models/song.dart';
 import '../../core/services/library_service.dart';
-import '../../core/services/playback_service.dart';
 import '../../core/services/music_download_service.dart';
+import '../../core/services/playback_service.dart';
 import '../../core/theme/saxify_accents.dart';
 import '../../core/theme/saxify_theme.dart';
 import '../../core/utils/format.dart';
+import '../../widgets/quality_badge.dart';
 import 'artwork.dart';
 import 'song_download_button.dart';
 import 'song_menu.dart';
@@ -25,6 +26,7 @@ class SongTile extends StatelessWidget {
     this.dense = false,
     this.showArtwork = true,
     this.showMenu = true,
+    this.startRadio = false,
     this.onLongPress,
   });
 
@@ -38,12 +40,14 @@ class SongTile extends StatelessWidget {
   final bool dense;
   final bool showArtwork;
   final bool showMenu;
+  final bool startRadio;
 
   @override
   Widget build(BuildContext context) {
     final PlaybackService playback = context.watch<PlaybackService>();
     final LibraryService library = context.watch<LibraryService>();
-    final MusicDownloadService downloads = context.watch<MusicDownloadService>();
+    final MusicDownloadService downloads = context
+        .watch<MusicDownloadService>();
     final SaxifyAccent accent = context.accent;
 
     final bool isCurrent = playback.current?.id == song.id;
@@ -53,6 +57,7 @@ class SongTile extends StatelessWidget {
 
     final String secondLine = <String>[
       subtitle ?? song.artist,
+      if (song.album != null) song.album!,
       if (song.duration != null) Fmt.duration(song.duration),
     ].join(' · ');
 
@@ -60,8 +65,11 @@ class SongTile extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap ?? () => playback.playSong(song),
-        onLongPress: onLongPress ??
-            (showMenu ? () => showSongSheet(context, song) : null),
+        onLongPress:
+            onLongPress ??
+            (showMenu
+                ? () => showSongSheet(context, song, radio: startRadio)
+                : null),
         borderRadius: BorderRadius.circular(SaxifyTheme.radiusMd),
         child: Padding(
           padding: EdgeInsets.symmetric(
@@ -78,7 +86,9 @@ class SongTile extends StatelessWidget {
                     style: GoogleFonts.spaceGrotesk(
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
-                      color: isCurrent ? accent.primary : SaxifyColors.textFaint,
+                      color: isCurrent
+                          ? accent.primary
+                          : SaxifyColors.textFaint,
                     ),
                   ),
                 ),
@@ -121,15 +131,23 @@ class SongTile extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: dense ? 13.5 : 14.5,
-                        fontWeight: isCurrent ? FontWeight.w700 : FontWeight.w600,
-                        color: isCurrent ? accent.primary : SaxifyColors.textPrimary,
+                        fontWeight: isCurrent
+                            ? FontWeight.w700
+                            : FontWeight.w600,
+                        color: isCurrent
+                            ? accent.primary
+                            : SaxifyColors.textPrimary,
                       ),
                     ),
                     const SizedBox(height: 3),
                     if (isDownloading)
                       Row(
                         children: <Widget>[
-                          Icon(Icons.download_rounded, size: 12, color: accent.primary),
+                          Icon(
+                            Icons.download_rounded,
+                            size: 12,
+                            color: accent.primary,
+                          ),
                           const SizedBox(width: 5),
                           Flexible(
                             child: Text(
@@ -151,34 +169,61 @@ class SongTile extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                            fontSize: 12, color: SaxifyColors.textMuted),
+                          fontSize: 12,
+                          color: SaxifyColors.textMuted,
+                        ),
                       ),
                   ],
                 ),
               ),
-              SongDownloadButton(song: song, size: dense ? 36 : 38),
-              IconButton(
-                tooltip: liked ? 'Remove from Liked Songs' : 'Like',
-                visualDensity: VisualDensity.compact,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints.tightFor(width: 38, height: 38),
-                icon: Icon(
-                  liked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-                  size: 19,
-                  color: liked ? accent.primary : SaxifyColors.textFaint,
-                ),
-                onPressed: () => library.toggleLike(song),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  QualityBadge(quality: song.quality),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SongDownloadButton(song: song, size: dense ? 36 : 38),
+                      IconButton(
+                        tooltip: liked ? 'Remove from Liked Songs' : 'Like',
+                        visualDensity: VisualDensity.compact,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints.tightFor(
+                          width: 38,
+                          height: 38,
+                        ),
+                        icon: Icon(
+                          liked
+                              ? Icons.favorite_rounded
+                              : Icons.favorite_border_rounded,
+                          size: 19,
+                          color: liked
+                              ? accent.primary
+                              : SaxifyColors.textFaint,
+                        ),
+                        onPressed: () => library.toggleLike(song),
+                      ),
+                      if (showMenu)
+                        IconButton(
+                          tooltip: 'More',
+                          visualDensity: VisualDensity.compact,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints.tightFor(
+                            width: 38,
+                            height: 38,
+                          ),
+                          icon: const Icon(
+                            Icons.more_horiz_rounded,
+                            size: 20,
+                            color: SaxifyColors.textFaint,
+                          ),
+                          onPressed: () =>
+                              showSongSheet(context, song, radio: startRadio),
+                        ),
+                    ],
+                  ),
+                ],
               ),
-              if (showMenu)
-                IconButton(
-                  tooltip: 'More',
-                  visualDensity: VisualDensity.compact,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints.tightFor(width: 38, height: 38),
-                  icon: const Icon(Icons.more_horiz_rounded,
-                      size: 20, color: SaxifyColors.textFaint),
-                  onPressed: () => showSongSheet(context, song),
-                ),
             ],
           ),
         ),
@@ -228,11 +273,15 @@ class QueueTile extends StatelessWidget {
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
+          SongDownloadButton(song: song, size: 36),
           if (isPlaying)
             Icon(Icons.graphic_eq_rounded, size: 18, color: accent.primary),
           IconButton(
-            icon: const Icon(Icons.close_rounded,
-                size: 18, color: SaxifyColors.textFaint),
+            icon: const Icon(
+              Icons.close_rounded,
+              size: 18,
+              color: SaxifyColors.textFaint,
+            ),
             onPressed: onRemove,
           ),
         ],

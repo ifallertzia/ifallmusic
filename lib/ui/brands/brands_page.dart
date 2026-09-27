@@ -6,9 +6,9 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/models/song.dart';
 import '../../core/services/playback_service.dart';
 import '../../core/services/youtube_service.dart';
-import '../../core/theme/saxify_accents.dart';
 import '../../core/theme/saxify_theme.dart';
 import '../../data/labels.dart';
+import '../../widgets/brand_logo.dart';
 import '../shell/shell_controller.dart';
 import '../widgets/neon.dart';
 import '../widgets/search_fab.dart';
@@ -65,7 +65,7 @@ class _BrandsPageState extends State<BrandsPage> {
                     ),
                     child: Row(
                       children: <Widget>[
-                        _Mark(letter: brand.name.isEmpty ? 'S' : brand.name[0]),
+                        BrandLogo(brand: brand),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Column(
@@ -88,7 +88,10 @@ class _BrandsPageState extends State<BrandsPage> {
                             ],
                           ),
                         ),
-                        const Icon(Icons.chevron_right_rounded, color: SaxifyColors.textFaint),
+                        const Icon(
+                          Icons.chevron_right_rounded,
+                          color: SaxifyColors.textFaint,
+                        ),
                       ],
                     ),
                   ),
@@ -130,7 +133,10 @@ class _BrandChannelPageState extends State<BrandChannelPage> {
   }
 
   Future<void> _openYoutube() async {
-    await launchUrl(Uri.parse(widget.brand.youtubeUrl), mode: LaunchMode.externalApplication);
+    await launchUrl(
+      Uri.parse(widget.brand.youtubeUrl),
+      mode: LaunchMode.externalApplication,
+    );
   }
 
   @override
@@ -158,7 +164,8 @@ class _BrandChannelPageState extends State<BrandChannelPage> {
             return EmptyState(
               icon: Icons.video_library_outlined,
               title: 'Channel uploads unavailable',
-              message: _error ?? 'Open the official channel on YouTube instead.',
+              message:
+                  _error ?? 'Open the official channel on YouTube instead.',
               actionLabel: 'Open channel',
               onAction: _openYoutube,
             );
@@ -172,44 +179,21 @@ class _BrandChannelPageState extends State<BrandChannelPage> {
                   label: 'Play uploads',
                   icon: Icons.play_arrow_rounded,
                   expand: true,
-                  onPressed: () => context.read<PlaybackService>().playQueue(songs),
+                  onPressed: () =>
+                      context.read<PlaybackService>().playQueue(songs),
                 ),
               ),
               for (int i = 0; i < songs.length; i++)
                 SongTile(
                   song: songs[i],
-                  onTap: () => context.read<PlaybackService>().playQueue(songs, startIndex: i),
+                  onTap: () => context.read<PlaybackService>().playQueue(
+                    songs,
+                    startIndex: i,
+                  ),
                 ),
             ],
           );
         },
-      ),
-    );
-  }
-}
-
-class _Mark extends StatelessWidget {
-  const _Mark({required this.letter});
-
-  final String letter;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 48,
-      height: 48,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        gradient: context.accent.gradient,
-      ),
-      child: Text(
-        letter.toUpperCase(),
-        style: GoogleFonts.spaceGrotesk(
-          fontSize: 20,
-          fontWeight: FontWeight.w700,
-          color: Colors.black,
-        ),
       ),
     );
   }

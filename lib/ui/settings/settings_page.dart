@@ -85,7 +85,8 @@ class SettingsPage extends StatelessWidget {
                   _SettingTile(
                     icon: Icons.upload_file_rounded,
                     title: 'Backup library',
-                    subtitle: 'Copy JSON, or paste a backup to merge or replace',
+                    subtitle:
+                        'Copy JSON, or paste a backup to merge or replace',
                     onTap: () => showBackupSheet(context, library),
                   ),
                   _SettingTile(
@@ -118,7 +119,9 @@ class SettingsPage extends StatelessWidget {
                     title: 'Equalizer & 8D spatial audio',
                     subtitle: 'Bands, presets and the spatial templates',
                     onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(builder: (_) => const EqualizerPage()),
+                      MaterialPageRoute<void>(
+                        builder: (_) => const EqualizerPage(),
+                      ),
                     ),
                   ),
                   const _SpatialQuickTile(),
@@ -126,7 +129,8 @@ class SettingsPage extends StatelessWidget {
                   // ------------------------------------------------ Playback
                   const _PanelHeader(
                     title: 'Playback',
-                    subtitle: 'Streaming quality, gapless handoff and auto-next',
+                    subtitle:
+                        'Streaming quality, gapless handoff and auto-next',
                   ),
                   _ChoiceTile(
                     icon: Icons.wifi_rounded,
@@ -147,7 +151,8 @@ class SettingsPage extends StatelessWidget {
                   _SwitchTile(
                     icon: Icons.bolt_rounded,
                     title: 'Gapless playback',
-                    subtitle: 'Preloads the next track for seamless transitions',
+                    subtitle:
+                        'Preloads the next track for seamless transitions',
                     value: settings.gapless,
                     onChanged: settings.setGapless,
                   ),
@@ -191,14 +196,17 @@ class SettingsPage extends StatelessWidget {
                     title: 'Your Downloads',
                     subtitle: 'Songs saved offline, with delete and progress',
                     onTap: () {
-                      Navigator.of(context).popUntil((Route<dynamic> r) => r.isFirst);
+                      Navigator.of(
+                        context,
+                      ).popUntil((Route<dynamic> r) => r.isFirst);
                       context.read<ShellController>().goDownloads();
                     },
                   ),
                   _SettingTile(
                     icon: Icons.folder_outlined,
                     title: 'Storage permission',
-                    subtitle: 'Save a public copy in Download/${IfallBranding.downloadFolderName}',
+                    subtitle:
+                        'Save a public copy in Download/${IfallBranding.downloadFolderName}',
                     onTap: () => StoragePermission.ensure(context),
                   ),
 
@@ -220,7 +228,9 @@ class SettingsPage extends StatelessWidget {
                     trailing: Text(
                       context.watch<PlaybackService>().sleepRemaining == null
                           ? 'Off'
-                          : Fmt.clock(context.read<PlaybackService>().sleepRemaining!),
+                          : Fmt.clock(
+                              context.read<PlaybackService>().sleepRemaining!,
+                            ),
                       style: const TextStyle(
                         fontSize: 13,
                         color: SaxifyColors.textSecondary,
@@ -240,7 +250,8 @@ class SettingsPage extends StatelessWidget {
                     subtitle: 'Removes your recent search terms',
                     onTap: () async {
                       await library.clearSearchHistory();
-                      if (context.mounted) _toast(context, 'Search history cleared');
+                      if (context.mounted)
+                        _toast(context, 'Search history cleared');
                     },
                   ),
                   _SettingTile(
@@ -250,7 +261,8 @@ class SettingsPage extends StatelessWidget {
                     onTap: () async {
                       await library.clearHistory();
                       await settings.forgetPositions();
-                      if (context.mounted) _toast(context, 'Listening history cleared');
+                      if (context.mounted)
+                        _toast(context, 'Listening history cleared');
                     },
                   ),
 
@@ -282,7 +294,9 @@ class SettingsPage extends StatelessWidget {
     required String initial,
     required Future<void> Function(String) onSave,
   }) async {
-    final TextEditingController controller = TextEditingController(text: initial);
+    final TextEditingController controller = TextEditingController(
+      text: initial,
+    );
     final String? value = await showDialog<String>(
       context: context,
       builder: (BuildContext dialogContext) => AlertDialog(
@@ -403,9 +417,13 @@ Future<void> _showReportDialog(BuildContext context) async {
                   children: <Widget>[
                     for (final String item in categories)
                       ChoiceChip(
-                        label: Text(item, style: const TextStyle(fontSize: 11.5)),
+                        label: Text(
+                          item,
+                          style: const TextStyle(fontSize: 11.5),
+                        ),
                         selected: category == item,
-                        onSelected: (_) => setDialogState(() => category = item),
+                        onSelected: (_) =>
+                            setDialogState(() => category = item),
                       ),
                   ],
                 ),
@@ -416,12 +434,16 @@ Future<void> _showReportDialog(BuildContext context) async {
                   children: <Widget>[
                     for (final (String, String) example in examples)
                       ActionChip(
-                        label: Text(example.$1, style: const TextStyle(fontSize: 11)),
+                        label: Text(
+                          example.$1,
+                          style: const TextStyle(fontSize: 11),
+                        ),
                         onPressed: () {
                           setDialogState(() {
                             details.text = example.$2;
-                            details.selection =
-                                TextSelection.collapsed(offset: details.text.length);
+                            details.selection = TextSelection.collapsed(
+                              offset: details.text.length,
+                            );
                           });
                         },
                       ),
@@ -435,7 +457,8 @@ Future<void> _showReportDialog(BuildContext context) async {
                   textCapitalization: TextCapitalization.sentences,
                   decoration: const InputDecoration(
                     labelText: 'Details or your suggestion',
-                    hintText: 'What happened? Phone model is helpful, but optional.',
+                    hintText:
+                        'What happened? Phone model is helpful, but optional.',
                     alignLabelWithHint: true,
                   ),
                 ),
@@ -491,11 +514,12 @@ Future<void> _launchSupportEmail(
   ].join('\r\n');
 
   Uri mailtoUri(String address) => Uri(
-        scheme: 'mailto',
-        path: address,
-        query: 'subject=${Uri.encodeComponent(subject)}'
-            '&body=${Uri.encodeComponent(body)}',
-      );
+    scheme: 'mailto',
+    path: address,
+    query:
+        'subject=${Uri.encodeComponent(subject)}'
+        '&body=${Uri.encodeComponent(body)}',
+  );
 
   bool opened = false;
   try {
@@ -522,9 +546,11 @@ Future<void> _launchSupportEmail(
   if (!context.mounted) return;
   ScaffoldMessenger.of(context).showSnackBar(
     SnackBar(
-      content: Text(opened
-          ? 'Email draft opened. Review it and press Send.'
-          : 'Could not open an email app. Install Gmail or another mail app and try again.'),
+      content: Text(
+        opened
+            ? 'Email draft opened. Review it and press Send.'
+            : 'Could not open an email app. Install Gmail or another mail app and try again.',
+      ),
     ),
   );
 }
@@ -540,6 +566,7 @@ class _ThemePanel extends StatefulWidget {
 class _ThemePanelState extends State<_ThemePanel> {
   Timer? _ticker;
   bool _mixerOpen = false;
+  bool _coloursOpen = false;
 
   @override
   void initState() {
@@ -576,7 +603,10 @@ class _ThemePanelState extends State<_ThemePanel> {
                       children: <Widget>[
                         Text(
                           'Accent colour',
-                          style: SaxifyTheme.appleFont(size: 15, weight: FontWeight.w700),
+                          style: SaxifyTheme.appleFont(
+                            size: 15,
+                            weight: FontWeight.w700,
+                          ),
                         ),
                         const SizedBox(height: 3),
                         Text(
@@ -594,42 +624,50 @@ class _ThemePanelState extends State<_ThemePanel> {
                   SaxifyLogo(size: 42, accent: accent),
                 ],
               ),
-              const SizedBox(height: 16),
-              LayoutBuilder(
-                builder: (BuildContext context, BoxConstraints constraints) {
-                  const double spacing = 10;
-                  final int columns =
-                      constraints.maxWidth < 330 ? 4 : (constraints.maxWidth < 520 ? 5 : 8);
-                  final double tile =
-                      (constraints.maxWidth - spacing * (columns - 1)) / columns;
-                  return Wrap(
-                    spacing: spacing,
-                    runSpacing: spacing,
-                    children: <Widget>[
-                      for (final SaxifyAccent option in SaxifyAccents.all)
+              const SizedBox(height: 12),
+              GlassButton(
+                label: _coloursOpen
+                    ? 'Hide accent colours'
+                    : 'Choose accent colour',
+                icon: _coloursOpen ? Icons.expand_less : Icons.palette_outlined,
+                filled: false,
+                expand: true,
+                compact: true,
+                onPressed: () => setState(() => _coloursOpen = !_coloursOpen),
+              ),
+              if (_coloursOpen)
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: [
+                      for (final option in SaxifyAccents.all)
                         _AccentSwatch(
                           accent: option,
-                          width: tile,
+                          width: 32,
                           selected: theme.selectedId == option.id,
                           onTap: () => theme.pin(option.id),
                         ),
                     ],
-                  );
-                },
-              ),
+                  ),
+                ),
               const SizedBox(height: 14),
               GlassButton(
                 label: _mixerOpen ? 'Hide colour mixer' : 'Build your own mix',
-                icon: _mixerOpen ? Icons.expand_less_rounded : Icons.palette_outlined,
+                icon: _mixerOpen
+                    ? Icons.expand_less_rounded
+                    : Icons.palette_outlined,
                 filled: false,
                 expand: true,
                 compact: true,
                 onPressed: () => setState(() => _mixerOpen = !_mixerOpen),
               ),
-              if (_mixerOpen) const Padding(
-                padding: EdgeInsets.only(top: 12),
-                child: _AccentMixer(),
-              ),
+              if (_mixerOpen)
+                const Padding(
+                  padding: EdgeInsets.only(top: 12),
+                  child: _AccentMixer(),
+                ),
               const SizedBox(height: 6),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
@@ -643,7 +681,10 @@ class _ThemePanelState extends State<_ThemePanel> {
                   theme.autoRotate
                       ? 'Switching every ${theme.rotateInterval.inMinutes > 0 ? '${theme.rotateInterval.inMinutes} min' : '${theme.rotateInterval.inSeconds}s'} · next in ${theme.secondsUntilNextSwitch()}s'
                       : 'Pick a colour above and it stays',
-                  style: const TextStyle(fontSize: 12, color: SaxifyColors.textMuted),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: SaxifyColors.textMuted,
+                  ),
                 ),
               ),
               if (theme.autoRotate)
@@ -705,36 +746,31 @@ class _AccentSwatch extends StatelessWidget {
                 width: width,
                 height: width,
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(width * 0.42),
+                  borderRadius: BorderRadius.circular(width / 2),
                   gradient: accent.gradient,
                   border: Border.all(
-                    color: selected ? Colors.white : Colors.white.withValues(alpha: 0.18),
+                    color: selected
+                        ? Colors.white
+                        : Colors.white.withValues(alpha: 0.18),
                     width: selected ? 2.2 : 1,
                   ),
                   boxShadow: <BoxShadow>[
                     BoxShadow(
-                      color: accent.primary.withValues(alpha: selected ? 0.55 : 0.22),
+                      color: accent.primary.withValues(
+                        alpha: selected ? 0.55 : 0.22,
+                      ),
                       blurRadius: selected ? 18 : 10,
                       spreadRadius: -3,
                     ),
                   ],
                 ),
                 child: selected
-                    ? Icon(Icons.check_rounded, size: width * 0.5, color: accent.onAccent)
+                    ? Icon(
+                        Icons.check_rounded,
+                        size: width * 0.5,
+                        color: accent.onAccent,
+                      )
                     : null,
-              ),
-              const SizedBox(height: 6),
-              FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Text(
-                  accent.label,
-                  maxLines: 1,
-                  style: TextStyle(
-                    fontSize: 9.5,
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                    color: selected ? accent.primary : SaxifyColors.textMuted,
-                  ),
-                ),
               ),
             ],
           ),
@@ -801,7 +837,9 @@ class _AccentMixerState extends State<_AccentMixer> {
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(14),
                   gradient: preview.gradient,
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.24)),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.24),
+                  ),
                 ),
               ),
               const SizedBox(width: 12),
@@ -812,7 +850,10 @@ class _AccentMixerState extends State<_AccentMixer> {
                   children: <Widget>[
                     Text(
                       'Your colour mix',
-                      style: SaxifyTheme.appleFont(size: 14, weight: FontWeight.w700),
+                      style: SaxifyTheme.appleFont(
+                        size: 14,
+                        weight: FontWeight.w700,
+                      ),
                     ),
                     const SizedBox(height: 3),
                     FittedBox(
@@ -878,7 +919,11 @@ class _AccentMixerState extends State<_AccentMixer> {
           const Text(
             'Slide red, green and blue to mix any colour. The whole app — buttons, '
             'glows, equalizer and the heart in the footer — follows immediately.',
-            style: TextStyle(fontSize: 11, height: 1.45, color: SaxifyColors.textFaint),
+            style: TextStyle(
+              fontSize: 11,
+              height: 1.45,
+              color: SaxifyColors.textFaint,
+            ),
           ),
         ],
       ),
@@ -911,7 +956,10 @@ class _RgbSliders extends StatelessWidget {
         const SizedBox(height: 6),
         Text(
           '$label · R$r G$g B$b',
-          style: const TextStyle(fontSize: 11.5, color: SaxifyColors.textSecondary),
+          style: const TextStyle(
+            fontSize: 11.5,
+            color: SaxifyColors.textSecondary,
+          ),
         ),
         _Channel(
           label: 'R',
@@ -984,7 +1032,10 @@ class _Channel extends StatelessWidget {
           child: Text(
             '$value',
             textAlign: TextAlign.end,
-            style: const TextStyle(fontSize: 11.5, color: SaxifyColors.textMuted),
+            style: const TextStyle(
+              fontSize: 11.5,
+              color: SaxifyColors.textMuted,
+            ),
           ),
         ),
       ],
@@ -1035,7 +1086,10 @@ class _AboutCard extends StatelessWidget {
                   children: <Widget>[
                     GradientText(
                       IfallBranding.appName,
-                      style: SaxifyTheme.appleFont(size: 18, weight: FontWeight.w800),
+                      style: SaxifyTheme.appleFont(
+                        size: 18,
+                        weight: FontWeight.w800,
+                      ),
                     ),
                     Text(
                       IfallBranding.tagline,
@@ -1089,12 +1143,18 @@ class _AboutCard extends StatelessWidget {
                   children: <Widget>[
                     Text(
                       'App version',
-                      style: TextStyle(fontSize: 12.5, color: SaxifyColors.textSecondary),
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        color: SaxifyColors.textSecondary,
+                      ),
                     ),
                     SizedBox(height: 2),
                     Text(
                       'IfallMusic · ${IfallBranding.versionLabel}',
-                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ],
                 ),
@@ -1172,7 +1232,8 @@ class _MadeWithLoveFooterState extends State<_MadeWithLoveFooter>
           // it is always in sync with whatever theme the app is wearing.
           final double t = _controller.value;
           final SaxifyAccent from = index >= 0 ? palette[index] : accent;
-          final SaxifyAccent to = palette[(math.max(index, 0) + 1) % palette.length];
+          final SaxifyAccent to =
+              palette[(math.max(index, 0) + 1) % palette.length];
           final Color heart = Color.lerp(
             from.primary,
             t < 0.5 ? to.primary : from.secondary,
@@ -1191,7 +1252,10 @@ class _MadeWithLoveFooterState extends State<_MadeWithLoveFooter>
                       fontWeight: FontWeight.w600,
                       color: SaxifyColors.textSecondary,
                       shadows: <Shadow>[
-                        Shadow(color: heart.withValues(alpha: 0.35), blurRadius: 12),
+                        Shadow(
+                          color: heart.withValues(alpha: 0.35),
+                          blurRadius: 12,
+                        ),
                       ],
                     ),
                   ),
@@ -1336,8 +1400,13 @@ class _SettingTile extends StatelessWidget {
     return GlassListTile(
       onTap: onTap,
       leading: _TileIcon(icon),
-      trailing: trailing ??
-          const Icon(Icons.chevron_right_rounded, size: 18, color: SaxifyColors.textFaint),
+      trailing:
+          trailing ??
+          const Icon(
+            Icons.chevron_right_rounded,
+            size: 18,
+            color: SaxifyColors.textFaint,
+          ),
       child: _TileText(title: title, subtitle: subtitle),
     );
   }
@@ -1398,7 +1467,9 @@ class _ChoiceTile extends StatelessWidget {
             children: <Widget>[
               _TileIcon(icon),
               const SizedBox(width: 12),
-              Expanded(child: _TileText(title: title, subtitle: subtitle)),
+              Expanded(
+                child: _TileText(title: title, subtitle: subtitle),
+              ),
             ],
           ),
           const SizedBox(height: 12),
@@ -1414,7 +1485,9 @@ class _ChoiceTile extends StatelessWidget {
                   labelStyle: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w700,
-                    color: choice == value ? accent.primary : SaxifyColors.textMuted,
+                    color: choice == value
+                        ? accent.primary
+                        : SaxifyColors.textMuted,
                   ),
                 ),
             ],

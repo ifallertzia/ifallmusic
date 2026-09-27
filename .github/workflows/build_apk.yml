@@ -2,7 +2,7 @@ name: Build Flutter APK
 
 on:
   push:
-    branches: [ main, master, arena/01a0cc83-saxify-v1 ]
+    branches: [ main, master, arena/01a0e168-saxify-v1 ]
   pull_request:
     branches: [ main, master ]
   workflow_dispatch:
@@ -46,7 +46,7 @@ jobs:
       # cannot be hidden behind a successful APK build.
       - name: Test (unit + widget)
         shell: bash
-        run: set -o pipefail && flutter test 2>&1 | tee test.log
+        run: set -o pipefail && flutter test --reporter expanded 2>&1 | tee test.log
 
       - name: Build APK (release)
         shell: bash
@@ -75,14 +75,22 @@ jobs:
         shell: bash
         run: |
           {
-            grep -hE "^e: |^w: |error • " analyze.log build.log appbundle.log 2>/dev/null | head -60
+            grep -hE "^e: |^w: |error • |warning • " analyze.log build.log appbundle.log 2>/dev/null | head -60
             echo "--- gradle ---"
             awk '/\* What went wrong/,/^\* Try/' build.log 2>/dev/null | head -30
           } > errors.log || true
+          if [[ -f test.log ]]; then
+            echo "--- tests ---" >> errors.log
+            tr '\r' '\n' < test.log | tail -100 >> errors.log
+          fi
           cat errors.log
-          head -30 errors.log | while IFS= read -r line; do
-            printf '::error::%s\n' "${line//%/\%}"
-          done
+          # One multiline annotation: GitHub limits annotations per step, and
+          # per-line notices can hide the actual failing test behind pass lines.
+          DETAILS="$(head -c 24000 errors.log)"
+          DETAILS="${DETAILS//%/%25}"
+          DETAILS="${DETAILS//$'\n'/%0A}"
+          DETAILS="${DETAILS//$'\r'/%0D}"
+          printf '::error title=Build diagnostics::%s\n' "$DETAILS"
 
       # Keep every analyzer/test/build log available if a blocking step fails.
       - name: Upload build diagnostics (failure)

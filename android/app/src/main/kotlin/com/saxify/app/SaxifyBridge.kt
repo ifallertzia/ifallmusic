@@ -35,6 +35,7 @@ class SaxifyBridge(private val activity: Activity) {
     fun handle(call: MethodCall, result: MethodChannel.Result) {
         try {
             when (call.method) {
+                "backgroundApp" -> { activity.moveTaskToBack(true); result.success(null) }
                 "bootState" -> result.success(SaxifyBoot.snapshot(activity))
                 "markLaunchSuccess" -> {
                     SaxifyBoot.markSuccess(activity)

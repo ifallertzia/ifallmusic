@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'config/branding.dart';
 import 'core/models/playlist.dart';
 import 'core/models/song.dart';
+import 'core/services/app_feedback.dart';
 import 'core/services/artist_service.dart';
 import 'core/services/boot_log.dart';
 import 'core/services/home_catalog.dart';
@@ -43,22 +44,25 @@ Future<void> main() async {
     return true;
   };
 
-  runZonedGuarded(() async {
-    AppBoot? boot;
-    try {
-      boot = await _initializeApp().timeout(const Duration(seconds: 5));
-    } catch (error, stack) {
-      BootLog.write('init failed: $error\n$stack');
-    }
-    if (boot == null) {
+  runZonedGuarded(
+    () async {
+      AppBoot? boot;
+      try {
+        boot = await _initializeApp().timeout(const Duration(seconds: 20));
+      } catch (error, stack) {
+        BootLog.write('init failed: $error\n$stack');
+      }
+      if (boot == null) {
+        runApp(const IfallRecoveryApp());
+        return;
+      }
+      runApp(IfallMusicApp(boot: boot));
+    },
+    (Object error, StackTrace stack) {
+      BootLog.write('Zone error: $error\n$stack');
       runApp(const IfallRecoveryApp());
-      return;
-    }
-    runApp(IfallMusicApp(boot: boot));
-  }, (Object error, StackTrace stack) {
-    BootLog.write('Zone error: $error\n$stack');
-    runApp(const IfallRecoveryApp());
-  });
+    },
+  );
 }
 
 Future<AppBoot> _initializeApp() async {
@@ -72,17 +76,15 @@ Future<AppBoot> _initializeApp() async {
     BootLog.write('safe mode — skipping notification and recommendation init');
   }
 
-  final SharedPreferences prefs =
-      await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
+  final SharedPreferences prefs = await SharedPreferences.getInstance().timeout(
+    const Duration(seconds: 3),
+  );
   await _migrateLegacyKeys(prefs);
 
   // The notification/media session is what keeps Android audio alive after
   // the app is backgrounded. Its failure is isolated internally, so still try
   // it in safe mode rather than silently dropping background playback.
-  await NotificationBootstrap.init().timeout(
-    const Duration(seconds: 3),
-    onTimeout: () => false,
-  );
+  await NotificationBootstrap.init();
 
   final SettingsService settings = SettingsService(prefs);
   final LibraryService library = LibraryService(prefs);
@@ -92,9 +94,15 @@ Future<AppBoot> _initializeApp() async {
     settings: settings,
     library: library,
   );
-  final RecommendationService recommendations = RecommendationService(youtube: youtube);
+  NotificationBootstrap.handler?.attach(playback, library);
+  library.onUserNotice = showAppNotice;
+  final RecommendationService recommendations = RecommendationService(
+    youtube: youtube,
+  );
   final ArtistService artists = ArtistService(youtube: youtube);
-  final MusicDownloadService musicDownloads = MusicDownloadService(prefs: prefs);
+  final MusicDownloadService musicDownloads = MusicDownloadService(
+    prefs: prefs,
+  );
   final SpatialAudioService spatial = SpatialAudioService(settings);
 
   playback.onTrackStarted = (Song song) {
@@ -132,7 +140,14 @@ Future<AppBoot> _initializeApp() async {
 /// Copies preference blobs written before the rename. The old prefix is built
 /// from codes so a brand string is not reintroduced into the tree.
 Future<void> _migrateLegacyKeys(SharedPreferences prefs) async {
-  final String old = String.fromCharCodes(const <int>[115, 105, 100, 105, 102, 121]);
+  final String old = String.fromCharCodes(const <int>[
+    115,
+    105,
+    100,
+    105,
+    102,
+    121,
+  ]);
   for (final String key in prefs.getKeys().toList()) {
     if (!key.startsWith('$old.')) continue;
     final String next = 'saxify.${key.substring(old.length + 1)}';
@@ -238,8 +253,12 @@ class _IfallMusicAppState extends State<IfallMusicApp> {
         ChangeNotifierProvider<SettingsService>.value(value: boot.settings),
         ChangeNotifierProvider<LibraryService>.value(value: boot.library),
         ChangeNotifierProvider<PlaybackService>.value(value: boot.playback),
-        ChangeNotifierProvider<RecommendationService>.value(value: boot.recommendations),
-        ChangeNotifierProvider<MusicDownloadService>.value(value: boot.musicDownloads),
+        ChangeNotifierProvider<RecommendationService>.value(
+          value: boot.recommendations,
+        ),
+        ChangeNotifierProvider<MusicDownloadService>.value(
+          value: boot.musicDownloads,
+        ),
         ChangeNotifierProvider<SpatialAudioService>.value(value: boot.spatial),
         ChangeNotifierProvider<ThemeController>(
           create: (_) => ThemeController(boot.settings),
@@ -289,6 +308,7 @@ class _IfallRoot extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeController theme = context.watch<ThemeController>();
     return MaterialApp(
+      scaffoldMessengerKey: appMessengerKey,
       title: IfallBranding.appName,
       debugShowCheckedModeBanner: false,
       themeMode: ThemeMode.dark,
@@ -331,13 +351,20 @@ class IfallRecoveryApp extends StatelessWidget {
                 Text(
                   'IfallMusic could not finish starting.',
                   textAlign: TextAlign.center,
-                  style: SaxifyTheme.appleFont(size: 19, weight: FontWeight.w700),
+                  style: SaxifyTheme.appleFont(
+                    size: 19,
+                    weight: FontWeight.w700,
+                  ),
                 ),
                 const SizedBox(height: 8),
                 const Text(
                   'Reset the local cache and try again. Your liked songs and playlists stay on this device.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 13, color: SaxifyColors.textMuted, height: 1.5),
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: SaxifyColors.textMuted,
+                    height: 1.5,
+                  ),
                 ),
                 const SizedBox(height: 22),
                 GlassButton(
@@ -347,8 +374,9 @@ class IfallRecoveryApp extends StatelessWidget {
                   onPressed: () async {
                     await NativeBridge.clearLocalPrefs();
                     try {
-                      final AppBoot boot =
-                          await _initializeApp().timeout(const Duration(seconds: 5));
+                      final AppBoot boot = await _initializeApp().timeout(
+                        const Duration(seconds: 20),
+                      );
                       runApp(IfallMusicApp(boot: boot));
                     } catch (error) {
                       BootLog.write('retry failed: $error');

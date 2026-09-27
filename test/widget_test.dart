@@ -40,8 +40,9 @@ void main() {
     test('duration renders m:ss and h:mm:ss', () {
       expect(Fmt.duration(const Duration(minutes: 4, seconds: 33)), '4:33');
       expect(
-          Fmt.duration(const Duration(hours: 1, minutes: 2, seconds: 7)),
-          '1:02:07');
+        Fmt.duration(const Duration(hours: 1, minutes: 2, seconds: 7)),
+        '1:02:07',
+      );
       expect(Fmt.duration(null), '--:--');
     });
 
@@ -78,15 +79,23 @@ void main() {
   });
 
   group('branding', () {
-    testWidgets('logo renders without a network font', (WidgetTester tester) async {
+    testWidgets('logo renders without a network font', (
+      WidgetTester tester,
+    ) async {
       await tester.pumpWidget(
-        Theme(
-          data: ThemeData.dark(),
-          child: const Center(child: SaxifyLogo(size: 40)),
+        MaterialApp(
+          theme: ThemeData.dark(),
+          home: const Center(child: SaxifyLogo(size: 40)),
         ),
       );
       expect(find.byType(SaxifyLogo), findsOneWidget);
-      expect(find.byType(CustomPaint, skipOffstage: false), findsWidgets);
+      expect(find.byType(Image), findsOneWidget);
+      final image = tester.widget<Image>(find.byType(Image));
+      expect(image.image, isA<AssetImage>());
+      expect(
+        (image.image as AssetImage).assetName,
+        'assets/images/saxify_logo.png',
+      );
     });
   });
 }

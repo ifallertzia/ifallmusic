@@ -1,0 +1,90 @@
+{
+  "continuationContents": {
+    "musicShelfContinuation": {
+      "contents": [
+        {
+          "musicResponsiveListItemRenderer": {
+            "playlistItemData": {
+              "videoId": "zyxwvutsrqp"
+            },
+            "flexColumns": [
+              {
+                "musicResponsiveListItemFlexColumnRenderer": {
+                  "text": {
+                    "runs": [
+                      {
+                        "text": "Kesariya"
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "musicResponsiveListItemFlexColumnRenderer": {
+                  "text": {
+                    "runs": [
+                      {
+                        "text": "Arijit Singh",
+                        "navigationEndpoint": {
+                          "browseEndpoint": {
+                            "browseId": "UCartist"
+                          }
+                        }
+                      },
+                      {
+                        "text": " • "
+                      },
+                      {
+                        "text": "Brahmastra",
+                        "navigationEndpoint": {
+                          "browseEndpoint": {
+                            "browseId": "MPREbalbum"
+                          }
+                        }
+                      },
+                      {
+                        "text": " • "
+                      },
+                      {
+                        "text": "4:28"
+                      }
+                    ]
+                  }
+                }
+              }
+            ],
+            "thumbnail": {
+              "musicThumbnailRenderer": {
+                "thumbnail": {
+                  "thumbnails": [
+                    {
+                      "url": "https://lh3.googleusercontent.com/art=w60-h60-l90-rj"
+                    }
+                  ]
+                }
+              }
+            },
+            "overlay": {
+              "musicItemThumbnailOverlayRenderer": {
+                "content": {
+                  "musicPlayButtonRenderer": {
+                    "playNavigationEndpoint": {
+                      "watchEndpoint": {
+                        "videoId": "zyxwvutsrqp",
+                        "watchEndpointMusicSupportedConfigs": {
+                          "watchEndpointMusicConfig": {
+                            "musicVideoType": "MUSIC_VIDEO_TYPE_UGC"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

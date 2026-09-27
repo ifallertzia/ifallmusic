@@ -18,12 +18,32 @@ class LibraryTabs {
   static const int artists = 3;
   static const int downloads = 4;
   static const int history = 5;
+  static const int lyrics = 6;
 }
 
 /// Coordinates the shell: which tab is showing and what the search box should
 /// run. Mood chips on Home, "Show all" links and deep links all go through here.
 class ShellController extends ChangeNotifier {
   SaxifyTab _tab = SaxifyTab.home;
+  final List<SaxifyTab> _history = [];
+  bool get canGoBack => _tab != SaxifyTab.home;
+  void _visit(SaxifyTab next) {
+    if (_tab == next) return;
+    if (next == SaxifyTab.home) {
+      _history.clear();
+    } else {
+      _history.add(_tab);
+    }
+    _tab = next;
+  }
+
+  bool back() {
+    if (!canGoBack) return false;
+    _tab = _history.isNotEmpty ? _history.removeLast() : SaxifyTab.home;
+    notifyListeners();
+    return true;
+  }
+
   String? _pendingQuery;
   int _queryNonce = 0;
   int _libraryTab = LibraryTabs.liked;
@@ -42,24 +62,24 @@ class ShellController extends ChangeNotifier {
 
   void select(SaxifyTab tab) {
     if (_tab == tab) return;
-    _tab = tab;
+    _visit(tab);
     notifyListeners();
   }
 
   void goSearch([String? query]) {
-    _tab = SaxifyTab.search;
+    _visit(SaxifyTab.search);
     _pendingQuery = query;
     _queryNonce++;
     notifyListeners();
   }
 
   void goHome() {
-    _tab = SaxifyTab.home;
+    _visit(SaxifyTab.home);
     notifyListeners();
   }
 
   void goLibrary([int? tab]) {
-    _tab = SaxifyTab.library;
+    _visit(SaxifyTab.library);
     if (tab != null) {
       _libraryTab = tab;
       _libraryNonce++;
@@ -73,7 +93,7 @@ class ShellController extends ChangeNotifier {
   void goLiked() => goLibrary(LibraryTabs.liked);
 
   void goSettings() {
-    _tab = SaxifyTab.settings;
+    _visit(SaxifyTab.settings);
     notifyListeners();
   }
 

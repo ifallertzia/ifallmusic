@@ -1,0 +1,263 @@
+{
+  "contents": [
+    {
+      "musicCardShelfRenderer": {
+        "title": {
+          "runs": [
+            {
+              "text": "Top track",
+              "navigationEndpoint": {
+                "watchEndpoint": {
+                  "videoId": "toptrack123"
+                }
+              }
+            }
+          ]
+        },
+        "subtitle": {
+          "runs": [
+            {
+              "text": "Video"
+            },
+            {
+              "text": " • "
+            },
+            {
+              "text": "Artist"
+            }
+          ]
+        },
+        "contents": [
+          {
+            "musicResponsiveListItemRenderer": {
+              "playlistItemData": {
+                "videoId": "abcdefghijk"
+              },
+              "flexColumns": [
+                {
+                  "musicResponsiveListItemFlexColumnRenderer": {
+                    "text": {
+                      "runs": [
+                        {
+                          "text": "Kesariya"
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "musicResponsiveListItemFlexColumnRenderer": {
+                    "text": {
+                      "runs": [
+                        {
+                          "text": "Arijit Singh",
+                          "navigationEndpoint": {
+                            "browseEndpoint": {
+                              "browseId": "UCartist"
+                            }
+                          }
+                        },
+                        {
+                          "text": " • "
+                        },
+                        {
+                          "text": "Brahmastra",
+                          "navigationEndpoint": {
+                            "browseEndpoint": {
+                              "browseId": "MPREbalbum"
+                            }
+                          }
+                        },
+                        {
+                          "text": " • "
+                        },
+                        {
+                          "text": "4:28"
+                        }
+                      ]
+                    }
+                  }
+                }
+              ],
+              "thumbnail": {
+                "musicThumbnailRenderer": {
+                  "thumbnail": {
+                    "thumbnails": [
+                      {
+                        "url": "https://lh3.googleusercontent.com/art=w60-h60-l90-rj"
+                      }
+                    ]
+                  }
+                }
+              },
+              "overlay": {
+                "musicItemThumbnailOverlayRenderer": {
+                  "content": {
+                    "musicPlayButtonRenderer": {
+                      "playNavigationEndpoint": {
+                        "watchEndpoint": {
+                          "videoId": "abcdefghijk",
+                          "watchEndpointMusicSupportedConfigs": {
+                            "watchEndpointMusicConfig": {
+                              "musicVideoType": "MUSIC_VIDEO_TYPE_ATV"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "musicResponsiveListItemRenderer": {
+              "playlistItemData": {
+                "videoId": "zyxwvutsrqp"
+              },
+              "flexColumns": [
+                {
+                  "musicResponsiveListItemFlexColumnRenderer": {
+                    "text": {
+                      "runs": [
+                        {
+                          "text": "Kesariya"
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "musicResponsiveListItemFlexColumnRenderer": {
+                    "text": {
+                      "runs": [
+                        {
+                          "text": "Arijit Singh",
+                          "navigationEndpoint": {
+                            "browseEndpoint": {
+                              "browseId": "UCartist"
+                            }
+                          }
+                        },
+                        {
+                          "text": " • "
+                        },
+                        {
+                          "text": "Brahmastra",
+                          "navigationEndpoint": {
+                            "browseEndpoint": {
+                              "browseId": "MPREbalbum"
+                            }
+                          }
+                        },
+                        {
+                          "text": " • "
+                        },
+                        {
+                          "text": "4:28"
+                        }
+                      ]
+                    }
+                  }
+                }
+              ],
+              "thumbnail": {
+                "musicThumbnailRenderer": {
+                  "thumbnail": {
+                    "thumbnails": [
+                      {
+                        "url": "https://lh3.googleusercontent.com/art=w60-h60-l90-rj"
+                      }
+                    ]
+                  }
+                }
+              },
+              "overlay": {
+                "musicItemThumbnailOverlayRenderer": {
+                  "content": {
+                    "musicPlayButtonRenderer": {
+                      "playNavigationEndpoint": {
+                        "watchEndpoint": {
+                          "videoId": "zyxwvutsrqp",
+                          "watchEndpointMusicSupportedConfigs": {
+                            "watchEndpointMusicConfig": {
+                              "musicVideoType": "MUSIC_VIDEO_TYPE_OMV"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "musicTwoRowItemRenderer": {
+        "title": {
+          "runs": [
+            {
+              "text": "Album"
+            }
+          ]
+        },
+        "navigationEndpoint": {
+          "browseEndpoint": {
+            "browseId": "MPREbalbum"
+          }
+        }
+      }
+    },
+    {
+      "musicTwoRowItemRenderer": {
+        "title": {
+          "runs": [
+            {
+              "text": "Artist"
+            }
+          ]
+        },
+        "navigationEndpoint": {
+          "browseEndpoint": {
+            "browseId": "UCartist"
+          }
+        }
+      }
+    },
+    {
+      "musicTwoRowItemRenderer": {
+        "title": {
+          "runs": [
+            {
+              "text": "Playlist"
+            }
+          ]
+        },
+        "navigationEndpoint": {
+          "browseEndpoint": {
+            "browseId": "VLPLplaylist"
+          }
+        }
+      }
+    },
+    {
+      "musicTwoRowItemRenderer": {
+        "title": {
+          "runs": [
+            {
+              "text": "OLAK album"
+            }
+          ]
+        },
+        "navigationEndpoint": {
+          "browseEndpoint": {
+            "browseId": "OLAK5uy_album"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../config/branding.dart';
-import '../../data/labels.dart';
 import '../../core/models/album_card.dart';
 import '../../core/models/artist.dart';
 import '../../core/models/song.dart';
@@ -16,6 +15,9 @@ import '../../core/theme/glass.dart';
 import '../../core/theme/saxify_accents.dart';
 import '../../core/theme/saxify_theme.dart';
 import '../../core/utils/format.dart';
+import '../../data/labels.dart';
+import '../../screens/music_browse_screen.dart';
+import '../../widgets/brand_logo.dart';
 import '../album/album_page.dart';
 import '../artist/artist_router.dart';
 import '../brands/brands_page.dart';
@@ -27,7 +29,7 @@ import '../widgets/saxify_logo.dart';
 import '../widgets/song_tile.dart';
 
 /// Home — the site's layout, rebuilt in liquid glass on absolute black:
-/// greeting hero, Made for you, Mood & genres, Trending now, New releases,
+/// greeting hero, Made for you, personal playlists, Trending now, New releases,
 /// Music brands, Top artists and Recommended for you.
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -48,7 +50,9 @@ class _HomePageState extends State<HomePage> {
 
   void _openAlbum(AlbumCard album) {
     Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (BuildContext c) => AlbumPage(album: album)),
+      MaterialPageRoute<void>(
+        builder: (BuildContext c) => AlbumPage(album: album),
+      ),
     );
   }
 
@@ -73,13 +77,18 @@ class _HomePageState extends State<HomePage> {
               _TopBar(
                 onSettings: () {
                   Navigator.of(context).push(
-                    MaterialPageRoute<void>(builder: (BuildContext c) => const SettingsPage()),
+                    MaterialPageRoute<void>(
+                      builder: (BuildContext c) => const SettingsPage(),
+                    ),
                   );
                 },
               ),
               _Hero(name: settings.displayName),
               if (catalog.loading) ...<Widget>[
-                const SectionHeader(title: 'Made for you', subtitle: 'Picked from what you keep playing'),
+                const SectionHeader(
+                  title: 'Made for you',
+                  subtitle: 'Picked from what you keep playing',
+                ),
                 const LoadingRail(itemCount: 3),
               ] else ...<Widget>[
                 if (catalog.error != null && catalog.madeForYou.isEmpty)
@@ -106,34 +115,55 @@ class _HomePageState extends State<HomePage> {
                       final Song song = catalog.madeForYou[i];
                       return SongCard(
                         song: song,
-                        onTap: () => context
-                            .read<PlaybackService>()
-                            .playQueue(catalog.madeForYou, startIndex: i),
+                        onTap: () => context.read<PlaybackService>().playQueue(
+                          catalog.madeForYou,
+                          startIndex: i,
+                        ),
                       );
                     },
                   ),
                 ],
 
-                // ------------------------------------------------ Mood & genres
                 const SectionHeader(
-                  title: 'Mood & genres',
-                  subtitle: 'Tap a vibe to start a station',
+                  title: 'Playlists you may like',
+                  subtitle: 'YouTube Music · based on your listening',
                 ),
-                MoodGenreGrid(
-                  items: HomeCatalog.moodGenres,
-                  onSelected: (String query) =>
-                      context.read<ShellController>().goSearch(query),
-                ),
+                if (catalog.playlistsForYou.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.all(20),
+                    child: Text(
+                      'Playlists will appear as your music feed refreshes.',
+                      style: TextStyle(color: Colors.grey),
+                    ),
+                  )
+                else
+                  HorizontalRail(
+                    height: 232,
+                    itemCount: catalog.playlistsForYou.length,
+                    builder: (c, i) {
+                      final item = catalog.playlistsForYou[i];
+                      return AlbumTile(
+                        coverUrl: item.artwork,
+                        title: item.title,
+                        artist: 'YouTube Music playlist',
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => MusicBrowseScreen(item: item),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
 
                 // ------------------------------------------------ Trending now
                 if (catalog.trending.isNotEmpty) ...<Widget>[
                   SectionHeader(
                     title: 'Trending now',
-                    subtitle: 'The most-played tracks this week',
+                    subtitle: 'Trending music discovery',
                     actionLabel: 'Show all',
-                    onAction: () => context
-                        .read<ShellController>()
-                        .goSearch('Hindi top hit songs India 2026'),
+                    onAction: () => context.read<ShellController>().goSearch(
+                      'Hindi top hit songs India 2026',
+                    ),
                   ),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -160,23 +190,42 @@ class _HomePageState extends State<HomePage> {
                   title: 'New releases',
                   subtitle: 'Fresh albums & singles',
                   actionLabel: 'Browse',
-                  onAction: () => context
-                      .read<ShellController>()
-                      .goSearch('latest Hindi Bollywood songs 2026'),
+                  onAction: () => context.read<ShellController>().goSearch(
+                    'latest Hindi Bollywood songs 2026',
+                  ),
                 ),
-                HorizontalRail(
-                  height: 232,
-                  itemCount: HomeCatalog.newReleases.length,
-                  builder: (BuildContext c, int i) {
-                    final AlbumCard album = HomeCatalog.newReleases[i];
-                    return AlbumTile(
-                      coverUrl: album.coverUrl,
-                      title: album.title,
-                      artist: album.artist,
-                      onTap: () => _openAlbum(album),
-                    );
-                  },
-                ),
+                if (catalog.freshReleases.isNotEmpty)
+                  HorizontalRail(
+                    height: 232,
+                    itemCount: catalog.freshReleases.length,
+                    builder: (c, i) {
+                      final item = catalog.freshReleases[i];
+                      return AlbumTile(
+                        coverUrl: item.artwork,
+                        title: item.title,
+                        artist: 'YouTube Music album',
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => MusicBrowseScreen(item: item),
+                          ),
+                        ),
+                      );
+                    },
+                  )
+                else
+                  HorizontalRail(
+                    height: 232,
+                    itemCount: HomeCatalog.newReleases.length,
+                    builder: (c, i) {
+                      final album = HomeCatalog.newReleases[i];
+                      return AlbumTile(
+                        coverUrl: album.coverUrl,
+                        title: album.title,
+                        artist: album.artist,
+                        onTap: () => _openAlbum(album),
+                      );
+                    },
+                  ),
 
                 // ------------------------------------------------ Brands
                 SectionHeader(
@@ -203,7 +252,10 @@ class _HomePageState extends State<HomePage> {
                     final ArtistRef artist = HomeCatalog.topArtists[i];
                     return ArtistBubble(
                       name: artist.name,
-                      imageUrl: catalog.photoFor(artist.name, fallback: artist.imageUrl),
+                      imageUrl: catalog.photoFor(
+                        artist.name,
+                        fallback: artist.imageUrl,
+                      ),
                       onTap: () => openArtistByName(
                         context,
                         name: artist.name,
@@ -230,9 +282,11 @@ class _HomePageState extends State<HomePage> {
                             SongTile(
                               song: catalog.recommended[i],
                               subtitle: catalog.recommended[i].artist,
-                              onTap: () => context
-                                  .read<PlaybackService>()
-                                  .playQueue(catalog.recommended, startIndex: i),
+                              onTap: () =>
+                                  context.read<PlaybackService>().playQueue(
+                                    catalog.recommended,
+                                    startIndex: i,
+                                  ),
                             ),
                         ],
                       ),
@@ -261,10 +315,14 @@ class _TopBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final LibraryService library = context.watch<LibraryService>();
-    final MusicDownloadService downloads = context.watch<MusicDownloadService>();
+    final MusicDownloadService downloads = context
+        .watch<MusicDownloadService>();
     final int activeDownloads = downloads.jobs
-        .where((MusicDownloadJob job) =>
-            job.phase == MusicDownloadPhase.running || job.phase == MusicDownloadPhase.idle)
+        .where(
+          (MusicDownloadJob job) =>
+              job.phase == MusicDownloadPhase.running ||
+              job.phase == MusicDownloadPhase.idle,
+        )
         .length;
 
     return Padding(
@@ -272,7 +330,11 @@ class _TopBar extends StatelessWidget {
       child: Row(
         children: <Widget>[
           const Expanded(
-            child: SaxifyWordmark(logoSize: 34, fontSize: 21, showSubtitle: true),
+            child: SaxifyWordmark(
+              logoSize: 34,
+              fontSize: 21,
+              showSubtitle: true,
+            ),
           ),
           GlassIconButton(
             icon: Icons.favorite_border_rounded,
@@ -327,16 +389,25 @@ class _Hero extends StatelessWidget {
             Row(
               children: <Widget>[
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 11,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(SaxifyTheme.radiusXl),
                     color: accent.primary.withValues(alpha: 0.16),
-                    border: Border.all(color: accent.primary.withValues(alpha: 0.35)),
+                    border: Border.all(
+                      color: accent.primary.withValues(alpha: 0.35),
+                    ),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: <Widget>[
-                      Icon(Icons.auto_awesome_rounded, size: 13, color: accent.primary),
+                      Icon(
+                        Icons.auto_awesome_rounded,
+                        size: 13,
+                        color: accent.primary,
+                      ),
                       const SizedBox(width: 6),
                       Text(
                         IfallBranding.tagline.toUpperCase(),
@@ -364,7 +435,10 @@ class _Hero extends StatelessWidget {
                 ),
                 children: <InlineSpan>[
                   TextSpan(text: '${Fmt.greeting()}, '),
-                  TextSpan(text: '$name. ', style: TextStyle(color: accent.primary)),
+                  TextSpan(
+                    text: '$name. ',
+                    style: TextStyle(color: accent.primary),
+                  ),
                   const TextSpan(
                     text: '\nYour universe of sound awaits.',
                     style: TextStyle(
@@ -381,7 +455,11 @@ class _Hero extends StatelessWidget {
             const Text(
               'Instant search, offline downloads, a real-time studio equalizer and '
               'buttery background playback — all in one app.',
-              style: TextStyle(fontSize: 12.5, height: 1.55, color: SaxifyColors.textMuted),
+              style: TextStyle(
+                fontSize: 12.5,
+                height: 1.55,
+                color: SaxifyColors.textMuted,
+              ),
             ),
             const SizedBox(height: 18),
             LayoutBuilder(
@@ -400,7 +478,9 @@ class _Hero extends StatelessWidget {
                       ...catalog.recommended,
                     ];
                     if (mix.isEmpty) {
-                      context.read<ShellController>().goSearch('Hindi trending songs India');
+                      context.read<ShellController>().goSearch(
+                        'Hindi trending songs India',
+                      );
                       return;
                     }
                     await playback.playQueue(mix, startIndex: 0);
@@ -467,7 +547,8 @@ class _SmartRails extends StatelessWidget {
             },
           ),
         ],
-        if (reco.becauseQuery != null && reco.becauseYouSearched.isNotEmpty) ...<Widget>[
+        if (reco.becauseQuery != null &&
+            reco.becauseYouSearched.isNotEmpty) ...<Widget>[
           SectionHeader(
             title: 'Because you searched ${reco.becauseQuery}',
             subtitle: 'Boosted after 2 searches in 3 days',
@@ -475,7 +556,8 @@ class _SmartRails extends StatelessWidget {
           for (int i = 0; i < reco.becauseYouSearched.length; i++)
             SongTile(
               song: reco.becauseYouSearched[i],
-              onTap: () => playback.playQueue(reco.becauseYouSearched, startIndex: i),
+              onTap: () =>
+                  playback.playQueue(reco.becauseYouSearched, startIndex: i),
             ),
         ],
       ],
@@ -489,19 +571,37 @@ class _BrandRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 46,
+      height: 112,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 20),
         itemCount: MusicBrands.all.length,
-        separatorBuilder: (BuildContext context, int index) => const SizedBox(width: 8),
+        separatorBuilder: (BuildContext context, int index) =>
+            const SizedBox(width: 8),
         itemBuilder: (BuildContext context, int i) {
           final MusicBrand brand = MusicBrands.all[i];
-          return MoodChip(
-            label: brand.name,
-            icon: Icons.album_outlined,
+          return InkWell(
+            borderRadius: BorderRadius.circular(16),
             onTap: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(builder: (_) => BrandChannelPage(brand: brand)),
+              MaterialPageRoute<void>(
+                builder: (_) => BrandChannelPage(brand: brand),
+              ),
+            ),
+            child: SizedBox(
+              width: 110,
+              child: Column(
+                children: [
+                  BrandLogo(brand: brand, size: 52),
+                  const SizedBox(height: 8),
+                  Text(
+                    brand.name,
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ],
+              ),
             ),
           );
         },
@@ -517,7 +617,8 @@ class _WhatsNewCard extends StatelessWidget {
 
   static const String _version = 'Update 2.2';
   static const String _date = '23 Sept 2026';
-  static const String _headline = 'A whole new look, and downloads that just work';
+  static const String _headline =
+      'A whole new look, and downloads that just work';
 
   static const List<String> _notes = <String>[
     'Brand new liquid-glass UI on pure black — every screen, every button. Apple-style frosted surfaces with deep, vivid colours.',
@@ -574,19 +675,28 @@ class _WhatsNewCard extends StatelessWidget {
                   const SizedBox(height: 4),
                   Text(
                     "What's new",
-                    style: SaxifyTheme.appleFont(size: 16, weight: FontWeight.w700),
+                    style: SaxifyTheme.appleFont(
+                      size: 16,
+                      weight: FontWeight.w700,
+                    ),
                   ),
                   const SizedBox(height: 3),
                   Text(
                     _headline,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 12, color: SaxifyColors.textMuted),
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: SaxifyColors.textMuted,
+                    ),
                   ),
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right_rounded, color: SaxifyColors.textFaint),
+            const Icon(
+              Icons.chevron_right_rounded,
+              color: SaxifyColors.textFaint,
+            ),
           ],
         ),
       ),
@@ -608,7 +718,11 @@ class _WhatsNewCard extends StatelessWidget {
           children: <Widget>[
             Text(
               _headline,
-              style: SaxifyTheme.appleFont(size: 17, weight: FontWeight.w700, height: 1.3),
+              style: SaxifyTheme.appleFont(
+                size: 17,
+                weight: FontWeight.w700,
+                height: 1.3,
+              ),
             ),
             const SizedBox(height: 14),
             for (final String note in _notes)

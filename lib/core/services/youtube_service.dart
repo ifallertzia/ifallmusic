@@ -1,8 +1,14 @@
+import 'dart:ui';
+
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
+import '../../services/yt_music_parser.dart';
+import '../../services/yt_music_service.dart';
 import '../models/artist.dart';
 import '../models/song.dart';
+import 'radio_queue.dart';
 
 /// Thin, typed wrapper around `YoutubeExplode`.
 ///
@@ -13,6 +19,12 @@ class YoutubeService {
   YoutubeService() : _yt = YoutubeExplode();
 
   final YoutubeExplode _yt;
+  final YtMusicService music = YtMusicService(
+    gl: PlatformDispatcher.instance.locale.countryCode ?? 'IN',
+    hl: PlatformDispatcher.instance.locale.languageCode == 'und'
+        ? 'en'
+        : PlatformDispatcher.instance.locale.languageCode,
+  );
 
   /// Exposed for [PlaybackService], which owns the stream-manifest logic.
   YoutubeExplode get client => _yt;
@@ -23,42 +35,102 @@ class YoutubeService {
     return results.take(limit).toList();
   }
 
-  /// Search for music, not arbitrary YouTube uploads. Indian/Hindi results are
-  /// tried first; broad fallback is still filtered through the same music-only
-  /// classifier so ordinary vlogs, tutorials, interviews and trailers stay out.
+  /// Raw-query YTM-first music search with a separate YouTube fallback.
   Future<List<Song>> searchSongs(
     String query, {
     int limit = 20,
     String? subtitle,
+    CancelToken? cancelToken,
+    void Function(List<Song>)? onPartial,
+    void Function(bool)? onMusicAvailability,
   }) async {
-    final String raw = query.trim();
-    if (raw.isEmpty || limit <= 0) return <Song>[];
+    final raw = YtMusicService.sanitize(query);
+    if (raw.isEmpty || limit <= 0) return [];
+    List<Song> songs = [], all = [], fallback = [];
+    var musicSucceeded = false;
+    List<Song> merged() => mergeMusicResults(songs, all, fallback)
+        .take(limit)
+        .map((s) => subtitle == null ? s : s.copyWith(subtitle: subtitle))
+        .toList();
+    void publish() {
+      if (cancelToken?.isCancelled != true) onPartial?.call(merged());
+    }
 
-    final String primary = indianFirstQuery(raw);
-    final List<Song> songs = <Song>[];
-    final Set<String> seen = <String>{};
-
-    Future<void> collect(String term) async {
-      final List<Video> videos =
-          await search(term, limit: (limit * 3).clamp(12, 60).toInt());
-      for (final Video video in videos) {
-        if (video.isLive ||
-            !looksLikeSong(title: video.title, author: video.author, duration: video.duration) ||
-            !seen.add(video.id.value)) {
-          continue;
+    await Future.wait([
+      () async {
+        try {
+          songs = (await music.search(
+            raw,
+            filter: YtMusicService.songsFilter,
+            cancelToken: cancelToken,
+          )).tracks;
+          musicSucceeded = true;
+          publish();
+        } catch (e) {
+          debugPrint('YTM songs: $e');
         }
-        songs.add(Song.fromVideo(video, subtitle: subtitle));
-        if (songs.length >= limit) break;
-      }
-    }
+      }(),
+      () async {
+        try {
+          all = (await music.search(raw, cancelToken: cancelToken)).tracks;
+          musicSucceeded = true;
+          publish();
+        } catch (e) {
+          debugPrint('YTM search: $e');
+        }
+      }(),
+      () async {
+        try {
+          fallback = (await search(raw, limit: limit).timeout(
+            const Duration(seconds: 8),
+          )).where((v) => !v.isLive).map((v) => Song.fromVideo(v)).toList();
+          publish();
+        } catch (e) {
+          debugPrint('YouTube fallback: $e');
+        }
+      }(),
+    ]);
+    if (cancelToken?.isCancelled != true)
+      onMusicAvailability?.call(musicSucceeded);
+    return merged();
+  }
 
-    await collect(primary);
-    // A second pass helps precise song-title / artist searches without letting
-    // video-only results leak into the list. Keep the Hindi-first matches first.
-    if (songs.length < limit && primary.toLowerCase() != raw.toLowerCase()) {
-      await collect('$raw official song audio');
+  Future<List<Song>> musicSongs(String query, {int limit = 20}) async {
+    try {
+      return (await music.search(
+        query,
+        filter: YtMusicService.songsFilter,
+      )).tracks.take(limit).toList();
+    } catch (e) {
+      debugPrint('YTM catalog: $e');
+      return [];
     }
-    return songs.take(limit).toList();
+  }
+
+  Future<List<Song>> browseTracks(MusicBrowseItem item) async {
+    if (item.kind == 'artist') return musicSongs(item.title, limit: 50);
+    final id = await music.playlistId(item.id);
+    if (id == null) return [];
+    return _yt.playlists
+        .getVideos(id)
+        .take(100)
+        .map(
+          (v) => Song(
+            id: v.id.value,
+            title: v.title,
+            artist: v.author,
+            channelId: v.channelId.value,
+            duration: v.duration,
+            source: TrackSource.ytMusic,
+            album: item.kind == 'album' ? item.title : null,
+            albumId: item.kind == 'album' ? item.id : null,
+            thumbnailUrl: item.kind == 'album' && item.artwork.isNotEmpty
+                ? item.artwork
+                : v.thumbnails.highResUrl,
+          ),
+        )
+        .toList()
+        .timeout(const Duration(seconds: 20));
   }
 
   /// A compact search modifier used throughout the app, including mood cards.
@@ -90,6 +162,8 @@ class YoutubeService {
     if (duration == null || duration.inSeconds < 25) {
       return false;
     }
+    if (RegExp(r'\s-\s?Topic$', caseSensitive: false).hasMatch(author))
+      return true;
     final String titleText = title.toLowerCase();
     final String authorText = author.toLowerCase();
     final RegExp notMusic = RegExp(
@@ -108,9 +182,14 @@ class YoutubeService {
     );
     final bool plausibleSongLength = duration.inMinutes <= 15;
     final bool oshoMeditation =
-        RegExp(r'\bosho\b', caseSensitive: false).hasMatch('$titleText $authorText') &&
-            RegExp(r'\b(meditation|dynamic|kundalini|discourse|mantra|music)\b', caseSensitive: false)
-                .hasMatch(titleText);
+        RegExp(
+          r'\bosho\b',
+          caseSensitive: false,
+        ).hasMatch('$titleText $authorText') &&
+        RegExp(
+          r'\b(meditation|dynamic|kundalini|discourse|mantra|music)\b',
+          caseSensitive: false,
+        ).hasMatch(titleText);
 
     // Long-form uploads used to be dropped outright, which hid exactly the
     // things Indian listeners search for: Osho meditations and discourses, hour
@@ -121,7 +200,8 @@ class YoutubeService {
       r'\b(osho|meditation|mantra|bhajan|kirtan|aarti|satsang|discourse|pravachan|kundalini|dynamic|lofi|lo-?fi|chill|relax|sleep|study|instrumental|classical|raga|sufi|ghazal|piano|jazz|ambient|healing|devotional|jukebox|non-?stop|compilation|full album|all songs|mix|hours?|hours long)\b',
       caseSensitive: false,
     ).hasMatch('$titleText $authorText');
-    if (longForm && !longFormMusic && !musicTitle.hasMatch(titleText)) return false;
+    if (longForm && !longFormMusic && !musicTitle.hasMatch(titleText))
+      return false;
 
     return musicTitle.hasMatch(titleText) ||
         (plausibleSongLength && musicChannel.hasMatch(authorText)) ||
@@ -157,7 +237,11 @@ class YoutubeService {
     final Set<String> seen = <String>{videoId, ...exclude};
     for (final Video v in related) {
       if (v.isLive ||
-          !looksLikeSong(title: v.title, author: v.author, duration: v.duration)) {
+          !looksLikeSong(
+            title: v.title,
+            author: v.author,
+            duration: v.duration,
+          )) {
         continue;
       }
       if (seen.contains(v.id.value)) continue;
@@ -168,18 +252,68 @@ class YoutubeService {
     return out;
   }
 
+  /// YTM's watch-next mix is keyed to the recording, not the search query.
+  /// Fall back to related music and then artist discovery, never title search.
+  Future<List<Song>> radioSongs(
+    Song seed, {
+    Iterable<Song> history = const [],
+    Set<String> exclude = const {},
+  }) async {
+    final candidates = <Song>[];
+    List<Song> distinct() => radioCandidates(
+      seed,
+      candidates,
+      history: history,
+      excludedIds: exclude,
+    );
+    try {
+      final json = await music.request('next', {
+        'videoId': seed.id,
+        'isAudioOnly': true,
+        'enablePersistentPlaylistPanel': true,
+      });
+      candidates.addAll(parseMusicRadio(json).tracks);
+    } catch (e) {
+      debugPrint('YTM radio unavailable: ${e.runtimeType}');
+    }
+    if (distinct().length < 4) {
+      try {
+        candidates.addAll(
+          await similarSongs(
+            seed.id,
+            limit: 24,
+            exclude: exclude,
+          ).timeout(const Duration(seconds: 8)),
+        );
+      } catch (e) {
+        debugPrint('Related radio unavailable: ${e.runtimeType}');
+      }
+    }
+    if (distinct().length < 4) {
+      candidates.addAll(await musicSongs('${seed.artist} songs', limit: 24));
+    }
+    return distinct();
+  }
+
   // ---------------------------------------------------------------- channels
-  Future<Channel> channel(String channelId) => _yt.channels.get(ChannelId(channelId));
+  Future<Channel> channel(String channelId) =>
+      _yt.channels.get(ChannelId(channelId));
 
   /// Newest uploads of a channel. `getUploads` is a lazy stream — we only pull
   /// the first page worth of items.
   Future<List<Song>> channelUploads(String channelId, {int limit = 30}) async {
-    final List<Video> uploads =
-        await _yt.channels.getUploads(ChannelId(channelId)).take(limit).toList();
+    final List<Video> uploads = await _yt.channels
+        .getUploads(ChannelId(channelId))
+        .take(limit)
+        .toList();
     final List<Song> songs = <Song>[];
     for (final Video v in uploads) {
       if (v.isLive ||
-          !looksLikeSong(title: v.title, author: v.author, duration: v.duration)) {
+          !looksLikeSong(
+            title: v.title,
+            author: v.author,
+            duration: v.duration,
+          )) {
         continue;
       }
       songs.add(Song.fromVideo(v));
@@ -204,5 +338,8 @@ class YoutubeService {
     }
   }
 
-  void close() => _yt.close();
+  void close() {
+    music.close();
+    _yt.close();
+  }
 }

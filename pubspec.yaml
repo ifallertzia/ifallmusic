@@ -1,7 +1,7 @@
 name: ifallmusic
 description: IfallMusic — stream beyond limits. A premium liquid-glass music app.
 publish_to: 'none'
-version: 2.2.0+5
+version: 2.3.0+6
 
 environment:
   sdk: '>=3.5.0 <4.0.0'
@@ -12,8 +12,8 @@ dependencies:
 
   # --- Playback engine (UNCHANGED behaviour, only re-homed into services) ---
   just_audio: ^0.9.40
-  just_audio_background: ^0.0.1-beta.17
   audio_service: ^0.18.18
+  audio_session: ^0.1.25
   youtube_explode_dart: ^3.1.0
 
   # --- Frontend only ---
@@ -25,6 +25,7 @@ dependencies:
 
   # --- Phase 2: in-app updates, downloads, on-device recommendations ---
   package_info_plus: ^8.0.0
+  unorm_dart: ^0.3.0
   http: ^1.2.0
   path_provider: ^2.1.0
   open_filex: ^4.7.0
