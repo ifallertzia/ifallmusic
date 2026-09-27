@@ -28,7 +28,7 @@ class NotificationBootstrap {
           androidNotificationChannelName: 'IfallMusic playback',
           androidNotificationChannelDescription:
               'Playback, queue and favourite controls',
-          androidNotificationOngoing: true,
+          androidNotificationOngoing: false,
           androidStopForegroundOnPause: false,
           androidNotificationIcon: 'drawable/ic_notification_music',
         ),

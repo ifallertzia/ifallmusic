@@ -75,12 +75,16 @@ jobs:
         shell: bash
         run: |
           {
-            grep -hE "^e: |^w: |error • " analyze.log build.log appbundle.log 2>/dev/null | head -60
+            grep -hE "^e: |^w: |error • |warning • " analyze.log build.log appbundle.log 2>/dev/null | head -60
             echo "--- gradle ---"
             awk '/\* What went wrong/,/^\* Try/' build.log 2>/dev/null | head -30
           } > errors.log || true
+          if [[ -f test.log ]]; then
+            echo "--- tests ---" >> errors.log
+            tr '\r' '\n' < test.log | tail -100 >> errors.log
+          fi
           cat errors.log
-          head -30 errors.log | while IFS= read -r line; do
+          head -100 errors.log | while IFS= read -r line; do
             printf '::error::%s\n' "${line//%/\%}"
           done
 

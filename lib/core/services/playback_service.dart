@@ -78,6 +78,7 @@ class PlaybackService extends ChangeNotifier {
   PlaybackErrorReport? _lastError;
   PlaybackErrorReport? get lastError => _lastError;
   bool _stopped = false;
+  bool _playRequested = true;
   Song? _current;
   bool _isPlaying = false;
   bool _isLoading = false;
@@ -168,6 +169,7 @@ class PlaybackService extends ChangeNotifier {
     _epoch.begin();
     _stopped = false;
     _radioMode = radio;
+    _playRequested = true;
     _advanceOperation = null;
     _fillOperation = null;
     _prewarmed.clear();
@@ -229,26 +231,24 @@ class PlaybackService extends ChangeNotifier {
   }
 
   Future<void> togglePlayPause() async {
-    _stopped = false;
-    final Song? song = _current;
-    if (song == null) return;
-    if (_player.playing) {
-      await _player.pause();
+    if (_isLoading) {
+      _playRequested = !_playRequested;
+      if (!_playRequested) await _player.pause();
+      notifyListeners();
+    } else if (_player.playing) {
+      await pause();
     } else {
-      if (_failedIds.contains(song.id)) {
-        _failedIds.remove(song.id);
-        _consecutiveFailures = 0;
-        await _startSong(_index);
-      } else {
-        _epoch.ready(_epoch.value);
-        _startPlayerPlayback(song);
-      }
+      await resume();
     }
   }
 
-  Future<void> pause() => _player.pause();
+  Future<void> pause() {
+    _playRequested = false;
+    return _player.pause();
+  }
 
   Future<void> stop() async {
+    _playRequested = false;
     _stopped = true;
     _session++;
     _epoch.begin();
@@ -264,6 +264,12 @@ class PlaybackService extends ChangeNotifier {
 
   Future<void> resume() async {
     _stopped = false;
+    _playRequested = true;
+    if (_isLoading) return;
+    if (_player.processingState == ProcessingState.completed) {
+      await _advance(manual: true);
+      return;
+    }
     final Song? song = _current;
     if (song != null) {
       if (_failedIds.remove(song.id)) {
@@ -339,6 +345,8 @@ class PlaybackService extends ChangeNotifier {
   }
 
   Future<void> next() {
+    _stopped = false;
+    _playRequested = true;
     final Song? song = _current;
     if (song != null && _position < const Duration(seconds: 20)) {
       try {
@@ -352,6 +360,7 @@ class PlaybackService extends ChangeNotifier {
 
   Future<void> previous() async {
     _stopped = false;
+    _playRequested = true;
     // Like every other player: rewind first, jump back only when we're near
     // the start.
     if (_position > const Duration(seconds: 4)) {
@@ -375,6 +384,7 @@ class PlaybackService extends ChangeNotifier {
 
   Future<void> skipToIndex(int index) async {
     _stopped = false;
+    _playRequested = true;
     if (index < 0 || index >= _queue.length) return;
     await _startSong(index);
   }
@@ -385,7 +395,7 @@ class PlaybackService extends ChangeNotifier {
     _sleepTicker?.cancel();
     _sleepRemaining = duration;
     _sleepTimer = Timer(duration, () async {
-      await _player.pause();
+      await pause();
       _sleepRemaining = null;
       _sleepTicker?.cancel();
       notifyListeners();
@@ -609,7 +619,7 @@ class PlaybackService extends ChangeNotifier {
   }
 
   void _startPlayerPlayback(Song song) {
-    if (_stopped) return;
+    if (_stopped || !_playRequested) return;
     final generation = _epoch.value;
     try {
       unawaited(
@@ -734,7 +744,7 @@ class PlaybackService extends ChangeNotifier {
   }
 
   Future<void> _onTrackCompleted() async {
-    if (_stopped) return;
+    if (_stopped || !_playRequested) return;
     if (_loopMode == LoopMode.one) {
       await _startSong(_index, retryPosition: Duration.zero);
       return;
