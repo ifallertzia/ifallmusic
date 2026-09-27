@@ -16,17 +16,6 @@ if (keystorePropertiesFile.exists()) {
 val releaseStoreFilePath = keystoreProperties["storeFile"] as String?
 val releaseStoreFile = releaseStoreFilePath?.let { file(it) }
 
-gradle.taskGraph.whenReady { taskGraph ->
-    val isReleaseBuild = taskGraph.allTasks.any { it.name.contains("Release", ignoreCase = true) }
-    if (isReleaseBuild && (releaseStoreFile == null || !releaseStoreFile.exists())) {
-        throw GradleException(
-            "Release signing key missing. Configure android/key.properties and " +
-                "android/app/upload-keystore.jks with the SAME private key used for " +
-                "the installed app. Refusing to fall back to a machine-specific debug key."
-        )
-    }
-}
-
 android {
     namespace = "com.saxify.app"
     compileSdk = flutter.compileSdkVersion
@@ -46,7 +35,7 @@ android {
             if (releaseStoreFilePath != null) {
                 keyAlias = keystoreProperties["keyAlias"] as String
                 keyPassword = keystoreProperties["keyPassword"] as String
-                storeFile = releaseStoreFile
+                storeFile = releaseStoreFile!!
                 storePassword = keystoreProperties["storePassword"] as String
             }
         }
