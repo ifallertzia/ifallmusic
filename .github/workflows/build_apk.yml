@@ -2,7 +2,7 @@ name: Build Flutter APK
 
 on:
   push:
-    branches: [ main, master, arena/01a0e1e5-saxify-v1 ]
+    branches: [ main, master, 'arena/**' ]
   pull_request:
     branches: [ main, master ]
   workflow_dispatch:
@@ -48,9 +48,9 @@ jobs:
         shell: bash
         run: set -o pipefail && flutter test --reporter expanded 2>&1 | tee test.log
 
-      # This must be the exact long-lived key used by the published app. Never
-      # use a runner-generated debug key for release artifacts.
-      - name: Configure stable Android release signing
+      # Stable signing is optional for now. With no secrets configured, Gradle
+      # uses the runner debug key; see docs/UPDATE_FIX.md for update limitations.
+      - name: Configure optional Android release signing
         if: github.ref == 'refs/heads/main'
         env:
           ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
@@ -60,8 +60,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [[ -z "$ANDROID_RELEASE_KEYSTORE_BASE64" && -z "$ANDROID_RELEASE_STORE_PASSWORD" && -z "$ANDROID_RELEASE_KEY_ALIAS" && -z "$ANDROID_RELEASE_KEY_PASSWORD" ]]; then
+            echo "::warning::No release signing secrets configured. Using the runner debug key; updates may require backup, uninstall and reinstall."
+            echo "### Signing: temporary debug-key fallback" >> "$GITHUB_STEP_SUMMARY"
+            echo "This APK is not signed with a stable release key. See docs/UPDATE_FIX.md before distributing it." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           if [[ -z "$ANDROID_RELEASE_KEYSTORE_BASE64" || -z "$ANDROID_RELEASE_STORE_PASSWORD" || -z "$ANDROID_RELEASE_KEY_ALIAS" || -z "$ANDROID_RELEASE_KEY_PASSWORD" ]]; then
-            echo "Configure the four ANDROID_RELEASE_* GitHub Actions secrets with the original app signing key before building a release." >&2
+            echo "::error::Incomplete signing configuration. Set all four ANDROID_RELEASE_* secrets or remove all four to use the temporary fallback."
             exit 1
           fi
           printf '%s' "$ANDROID_RELEASE_KEYSTORE_BASE64" | base64 --decode > android/app/upload-keystore.jks
@@ -72,41 +78,29 @@ jobs:
           storePassword=$ANDROID_RELEASE_STORE_PASSWORD
           EOF
 
-      - name: Build APK (signed release on main)
-        if: github.ref == 'refs/heads/main'
+      # Validate the same release-mode APK/AAB on PRs as on main, so a green
+      # debug-only PR cannot hide release build failures.
+      - name: Build APK (release)
         shell: bash
         run: set -o pipefail && flutter build apk --release 2>&1 | tee build.log
 
-      - name: Build APK (debug validation on branches and PRs)
-        if: github.ref != 'refs/heads/main'
-        shell: bash
-        run: set -o pipefail && flutter build apk --debug 2>&1 | tee build.log
-
-      - name: Upload signed release APK artifact
-        if: github.ref == 'refs/heads/main'
+      - name: Upload release APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: app-release
           path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
 
-      - name: Upload debug validation APK artifact
-        if: github.ref != 'refs/heads/main'
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-debug
-          path: build/app/outputs/flutter-apk/app-debug.apk
-
-      - name: Build App Bundle (Play Store)
-        if: github.ref == 'refs/heads/main'
+      - name: Build App Bundle (release validation)
         shell: bash
         run: set -o pipefail && flutter build appbundle --release 2>&1 | tee appbundle.log
 
       - name: Upload App Bundle Artifact
-        if: github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
           name: app-release-aab
           path: build/app/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
 
       # GitHub truncates what we can read from a failed run, so lift every
       # compiler error into job annotations + errors.log (readable via the API).

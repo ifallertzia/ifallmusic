@@ -60,9 +60,18 @@ android {
 
     buildTypes {
         release {
-            // Never silently sign a release with the local debug key: it changes
-            // between machines and makes Android reject updates as a signature conflict.
-            signingConfig = signingConfigs.getByName("release")
+            // Temporary, explicitly accepted fallback for APK distribution without
+            // signing secrets. Runner debug keys are NOT stable across releases:
+            // users may need backup/uninstall/reinstall when certificates differ.
+            signingConfig = if (releaseStoreFile?.exists() == true) {
+                signingConfigs.getByName("release")
+            } else if (keystorePropertiesFile.exists()) {
+                // Do not silently ignore a broken, explicitly configured key.
+                throw GradleException("Release keystore in key.properties is missing")
+            } else {
+                logger.warn("No release keystore: using debug signing; in-place updates are not guaranteed.")
+                signingConfigs.getByName("debug")
+            }
 
             // Disable code shrinking for now to avoid ProGuard issues with
             // audio/download native plugins.
