@@ -238,6 +238,7 @@ class _LyricsFinderScreenState extends State<LyricsFinderScreen>
                   ),
                   Wrap(
                     spacing: 8,
+                    runSpacing: 6,
                     children: [
                       FilledButton(
                         onPressed: _loading
@@ -282,7 +283,8 @@ class _LyricsFinderScreenState extends State<LyricsFinderScreen>
           Padding(
             padding: const EdgeInsets.only(top: 8),
             child: Wrap(
-              spacing: 8,
+              spacing: 6,
+              runSpacing: 4,
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 ChoiceChip(
@@ -364,10 +366,14 @@ class _LyricsFinderScreenState extends State<LyricsFinderScreen>
                 ),
         ),
         if (found && _mode == LyricsMode.synced && _canSync)
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
+          Wrap(
+            alignment: WrapAlignment.center,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
+            runSpacing: 0,
             children: [
               IconButton(
+                visualDensity: VisualDensity.compact,
                 tooltip: 'Previous line',
                 onPressed: () {
                   final i = activeLineIndex(r.lines, _clock);
@@ -377,6 +383,7 @@ class _LyricsFinderScreenState extends State<LyricsFinderScreen>
               ),
               const Text('Tap a line to seek'),
               IconButton(
+                visualDensity: VisualDensity.compact,
                 tooltip: 'Next line',
                 onPressed: () {
                   final i = activeLineIndex(r.lines, _clock);
@@ -393,7 +400,7 @@ class _LyricsFinderScreenState extends State<LyricsFinderScreen>
               children: [
                 Expanded(
                   child: Text(
-                    '${_mode == LyricsMode.synced ? 'Synced' : 'Static'} · via ${r.source}',
+                    '${_mode == LyricsMode.synced ? 'Synced' : 'Static'} · via Ifallertzia server',
                     style: const TextStyle(fontSize: 12, color: Colors.grey),
                   ),
                 ),

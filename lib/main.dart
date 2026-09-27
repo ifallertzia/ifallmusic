@@ -22,7 +22,6 @@ import 'core/services/playlist_sync_service.dart';
 import 'core/services/recommendation_service.dart';
 import 'core/services/recommendation_worker.dart';
 import 'core/services/settings_service.dart';
-import 'core/services/spatial_audio_service.dart';
 import 'core/services/youtube_service.dart';
 import 'core/theme/glass.dart';
 import 'core/theme/saxify_accents.dart';
@@ -31,6 +30,31 @@ import 'core/theme/theme_controller.dart';
 import 'ui/onboarding/welcome_page.dart';
 import 'ui/shell/saxify_shell.dart';
 import 'ui/shell/shell_controller.dart';
+
+Future<void> _restoreEqualizerForPlayback(
+  SettingsService settings,
+  PlaybackService playback,
+) async {
+  final List<int> levels = settings.equalizerLevels;
+  final bool requested = settings.equalizerEnabled && levels.isNotEmpty;
+  bool applied = false;
+  if (requested) {
+    final int? session = playback.player.androidAudioSessionId;
+    if (session != null && session != 0) {
+      final EqualizerInfo? info = await NativeBridge.eqInit(session);
+      if (info != null && info.supported) {
+        for (int i = 0; i < levels.length && i < info.bands; i++) {
+          await NativeBridge.eqSetBand(i, levels[i]);
+        }
+        await NativeBridge.eqSetEnabled(true);
+        applied = true;
+      }
+    }
+  }
+  showAppNotice(applied
+      ? 'Playing in this equalizer: ${settings.equalizerProfileName}'
+      : 'Playing in Original audio');
+}
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -103,11 +127,13 @@ Future<AppBoot> _initializeApp() async {
   final MusicDownloadService musicDownloads = MusicDownloadService(
     prefs: prefs,
   );
-  final SpatialAudioService spatial = SpatialAudioService(settings);
+  // Ensure an older saved 8D effect is disabled while the feature is Coming soon.
+  await NativeBridge.spatialDisable();
 
   playback.onTrackStarted = (Song song) {
     recommendations.notePlay(song);
     recommendations.refresh(current: song, force: true);
+    unawaited(_restoreEqualizerForPlayback(settings, playback));
   };
   playback.onTrackSkipped = recommendations.noteSkip;
   library.onLikeChanged = (Song song, bool liked) {
@@ -132,7 +158,6 @@ Future<AppBoot> _initializeApp() async {
     recommendations: recommendations,
     artists: artists,
     musicDownloads: musicDownloads,
-    spatial: spatial,
     safeMode: native.safeMode,
   );
 }
@@ -176,7 +201,6 @@ class AppBoot {
     required this.recommendations,
     required this.artists,
     required this.musicDownloads,
-    required this.spatial,
     required this.safeMode,
   });
 
@@ -187,7 +211,6 @@ class AppBoot {
   final RecommendationService recommendations;
   final ArtistService artists;
   final MusicDownloadService musicDownloads;
-  final SpatialAudioService spatial;
   final bool safeMode;
 }
 
@@ -259,7 +282,6 @@ class _IfallMusicAppState extends State<IfallMusicApp> {
         ChangeNotifierProvider<MusicDownloadService>.value(
           value: boot.musicDownloads,
         ),
-        ChangeNotifierProvider<SpatialAudioService>.value(value: boot.spatial),
         ChangeNotifierProvider<ThemeController>(
           create: (_) => ThemeController(boot.settings),
         ),

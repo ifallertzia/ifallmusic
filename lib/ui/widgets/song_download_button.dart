@@ -35,8 +35,8 @@ class SongDownloadButton extends StatelessWidget {
     Widget icon;
     if (isRunning) {
       icon = SizedBox(
-        width: size * 0.58,
-        height: size * 0.58,
+        width: size * 0.72,
+        height: size * 0.72,
         child: Stack(
           alignment: Alignment.center,
           children: <Widget>[
@@ -47,9 +47,9 @@ class SongDownloadButton extends StatelessWidget {
               backgroundColor: accent.primary.withValues(alpha: 0.18),
             ),
             Text(
-              job.fraction <= 0 ? '…' : '${(job.fraction * 100).round()}',
+              job.fraction <= 0 ? '…' : '${(job.fraction * 100).round()}%',
               style: TextStyle(
-                fontSize: size * 0.18,
+                fontSize: size * 0.17,
                 fontWeight: FontWeight.w800,
                 color: floating ? Colors.white : accent.primary,
               ),

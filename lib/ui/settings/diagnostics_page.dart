@@ -1,8 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-
 import '../../config/branding.dart';
-import '../../core/services/spatial_audio_service.dart';
 import '../../core/theme/glass.dart';
 import '../../core/theme/saxify_theme.dart';
 import '../widgets/neon.dart';
@@ -19,7 +16,6 @@ class DiagnosticsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final SpatialAudioService spatial = context.watch<SpatialAudioService>();
     return AuroraBackdrop(
       intensity: 0.4,
       child: Scaffold(
@@ -66,10 +62,8 @@ class DiagnosticsPage extends StatelessWidget {
                   const Text('Audio', style: TextStyle(fontWeight: FontWeight.w700)),
                   const SizedBox(height: 10),
                   _Row(
-                    label: '8D spatial audio',
-                    value: spatial.enabled
-                        ? '${spatial.preset.label} · ${spatial.rotationHz.toStringAsFixed(2)} Hz'
-                        : 'Off',
+                    label: '8D audio',
+                    value: 'Coming soon',
                   ),
                   const SizedBox(height: 6),
                   _Row(

@@ -2,7 +2,7 @@ name: Build Flutter APK
 
 on:
   push:
-    branches: [ main, master, arena/01a0e168-saxify-v1 ]
+    branches: [ main, master, arena/01a0e1e5-saxify-v1 ]
   pull_request:
     branches: [ main, master ]
   workflow_dispatch:
@@ -48,21 +48,61 @@ jobs:
         shell: bash
         run: set -o pipefail && flutter test --reporter expanded 2>&1 | tee test.log
 
-      - name: Build APK (release)
+      # This must be the exact long-lived key used by the published app. Never
+      # use a runner-generated debug key for release artifacts.
+      - name: Configure stable Android release signing
+        if: github.ref == 'refs/heads/main'
+        env:
+          ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+          ANDROID_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
+          ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "$ANDROID_RELEASE_KEYSTORE_BASE64" || -z "$ANDROID_RELEASE_STORE_PASSWORD" || -z "$ANDROID_RELEASE_KEY_ALIAS" || -z "$ANDROID_RELEASE_KEY_PASSWORD" ]]; then
+            echo "Configure the four ANDROID_RELEASE_* GitHub Actions secrets with the original app signing key before building a release." >&2
+            exit 1
+          fi
+          printf '%s' "$ANDROID_RELEASE_KEYSTORE_BASE64" | base64 --decode > android/app/upload-keystore.jks
+          cat > android/key.properties <<EOF
+          storeFile=upload-keystore.jks
+          keyAlias=$ANDROID_RELEASE_KEY_ALIAS
+          keyPassword=$ANDROID_RELEASE_KEY_PASSWORD
+          storePassword=$ANDROID_RELEASE_STORE_PASSWORD
+          EOF
+
+      - name: Build APK (signed release on main)
+        if: github.ref == 'refs/heads/main'
         shell: bash
         run: set -o pipefail && flutter build apk --release 2>&1 | tee build.log
 
-      - name: Upload APK Artifact
+      - name: Build APK (debug validation on branches and PRs)
+        if: github.ref != 'refs/heads/main'
+        shell: bash
+        run: set -o pipefail && flutter build apk --debug 2>&1 | tee build.log
+
+      - name: Upload signed release APK artifact
+        if: github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
           name: app-release
           path: build/app/outputs/flutter-apk/app-release.apk
 
+      - name: Upload debug validation APK artifact
+        if: github.ref != 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug
+          path: build/app/outputs/flutter-apk/app-debug.apk
+
       - name: Build App Bundle (Play Store)
+        if: github.ref == 'refs/heads/main'
         shell: bash
         run: set -o pipefail && flutter build appbundle --release 2>&1 | tee appbundle.log
 
-      - name: Upload AAB Artifact
+      - name: Upload App Bundle Artifact
+        if: github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
           name: app-release-aab

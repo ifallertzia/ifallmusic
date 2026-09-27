@@ -152,7 +152,7 @@ class _WelcomePageState extends State<WelcomePage> {
                             children: <Widget>[
                               GlassTag('Ad-free listening', icon: Icons.block_rounded),
                               GlassTag('Offline downloads', icon: Icons.download_rounded),
-                              GlassTag('8D spatial audio', icon: Icons.surround_sound_rounded),
+                              GlassTag('8D audio · coming soon', icon: Icons.surround_sound_rounded),
                             ],
                           ),
                         ],

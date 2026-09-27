@@ -17,9 +17,9 @@ import '../../core/utils/format.dart';
 import '../../screens/lyrics_finder_screen.dart';
 import '../widgets/artwork.dart';
 import '../widgets/song_menu.dart';
+import '../widgets/song_download_button.dart';
 import '../widgets/song_tile.dart';
 import 'equalizer_page.dart';
-import 'sound_panel.dart';
 
 /// The full-screen player.
 class FullPlayerPage extends StatefulWidget {
@@ -32,7 +32,6 @@ class FullPlayerPage extends StatefulWidget {
 class _FullPlayerPageState extends State<FullPlayerPage> {
   bool _dragging = false;
   double _dragValue = 0;
-  bool _showVolume = false;
   double _dismissDrag = 0;
 
   Future<void> _showQueueSheet() {
@@ -85,19 +84,6 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
     );
   }
 
-  Future<void> _showSoundSheet() {
-    return showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (BuildContext sheetContext) => const GlassSheet(
-        title: 'Sound',
-        subtitle: 'Volume, equalizer and 8D spatial audio',
-        maxHeightFactor: 0.9,
-        child: SingleChildScrollView(child: SoundPanel()),
-      ),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -334,6 +320,7 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
                               ],
                             ),
                           ),
+                          SongDownloadButton(song: song, size: 42),
                           IconButton(
                             iconSize: 24,
                             icon: Icon(
@@ -477,20 +464,19 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
                     ),
 
                     // ---- extras --------------------------------------------------
-                    // Sound button on the LEFT of the speed chip, exactly as the
-                    // brief asked: it opens the glass sound panel (volume + EQ +
-                    // 8D spatial). The rest of the row is unchanged behaviour.
+                    // Equalizer shortcut stays to the left of the playback controls.
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
                       child: Row(
                         children: <Widget>[
                           _RoundAction(
                             icon: Icons.graphic_eq_rounded,
-                            active: _showVolume,
-                            onTap: () {
-                              setState(() => _showVolume = !_showVolume);
-                              _showSoundSheet();
-                            },
+                            active: false,
+                            onTap: () => Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => const EqualizerPage(),
+                              ),
+                            ),
                           ),
                           const SizedBox(width: 10),
                           Expanded(
@@ -517,16 +503,6 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
                                     label: 'Queue',
                                     icon: Icons.queue_music_rounded,
                                     onTap: _showQueueSheet,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  _ChipButton(
-                                    label: 'Equalizer',
-                                    icon: Icons.tune_rounded,
-                                    onTap: () => Navigator.of(context).push(
-                                      MaterialPageRoute<void>(
-                                        builder: (_) => const EqualizerPage(),
-                                      ),
-                                    ),
                                   ),
                                 ],
                               ),
