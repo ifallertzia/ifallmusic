@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 
+import '../core/models/song.dart';
 import 'yt_music_parser.dart';
 
 class YtMusicService {
@@ -112,6 +113,27 @@ class YtMusicService {
     } finally {
       if (cancelToken == null) _inflight.remove(key);
     }
+  }
+
+  /// Tracks of a playlist or album, fetched with the same browse call the web
+  /// player makes when one is opened. Works directly with the browse ids the
+  /// search returns (`VL...` playlists, `MPREb...`/`OLAK5uy...` albums) and
+  /// follows shelf continuations for long playlists.
+  Future<List<Song>> browseTracks(String browseId, {int limit = 100}) async {
+    final List<Song> tracks = <Song>[];
+    final Set<String> seen = <String>{};
+    Map<String, dynamic> json =
+        await request('browse', <String, dynamic>{'browseId': browseId});
+    while (true) {
+      final MusicSearchResult result = parseMusicSearch(json);
+      for (final Song song in result.tracks) {
+        if (seen.add(song.id)) tracks.add(song);
+      }
+      final String? next = result.continuation;
+      if (next == null || tracks.length >= limit) break;
+      json = await request('browse', const <String, dynamic>{}, continuation: next);
+    }
+    return tracks.take(limit).toList();
   }
 
   Future<String?> playlistId(String browseId) async {

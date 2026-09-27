@@ -333,7 +333,7 @@ class _SearchPageState extends State<SearchPage> {
                             const Padding(
                               padding: EdgeInsets.all(16),
                               child: Text(
-                                'YouTube Music unavailable — showing YouTube results',
+                                'ifallertzia server unavailable — showing backup results',
                                 style: TextStyle(
                                   color: Colors.grey,
                                   fontSize: 12,
@@ -344,7 +344,7 @@ class _SearchPageState extends State<SearchPage> {
                             ListTile(
                               leading: Artwork(url: item.artwork, size: 52),
                               title: Text(item.title),
-                              subtitle: Text('YouTube Music · ${item.kind}'),
+                              subtitle: Text('ifallertzia server · ${item.kind}'),
                               trailing: const Icon(Icons.chevron_right),
                               onTap: () => Navigator.of(context).push(
                                 MaterialPageRoute<void>(
@@ -385,14 +385,14 @@ class _SearchPageState extends State<SearchPage> {
                               ),
                             ),
                             for (final section in [
-                              'YouTube Music',
+                              'ifallertzia server',
                               'Videos',
-                              'More from YouTube',
+                              'More results',
                             ])
                               if (_section(section).isNotEmpty) ...[
                                 SectionHeader(
                                   title: section,
-                                  subtitle: section == 'YouTube Music'
+                                  subtitle: section == 'ifallertzia server'
                                       ? 'Album-quality source audio'
                                       : null,
                                 ),
@@ -416,10 +416,10 @@ class _SearchPageState extends State<SearchPage> {
 
   List<Song> _section(String section) => _results
       .where(
-        (s) => section == 'More from YouTube'
+        (s) => section == 'More results'
             ? s.source == TrackSource.youtube
             : s.source == TrackSource.ytMusic &&
-                  (section == 'YouTube Music'
+                  (section == 'ifallertzia server'
                       ? s.quality == QualityTier.high
                       : s.quality != QualityTier.high),
       )

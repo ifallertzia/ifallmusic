@@ -126,7 +126,7 @@ class _HomePageState extends State<HomePage> {
 
                 const SectionHeader(
                   title: 'Playlists you may like',
-                  subtitle: 'YouTube Music · based on your listening',
+                  subtitle: 'ifallertzia server · based on your listening',
                 ),
                 if (catalog.playlistsForYou.isEmpty)
                   const Padding(
@@ -145,7 +145,7 @@ class _HomePageState extends State<HomePage> {
                       return AlbumTile(
                         coverUrl: item.artwork,
                         title: item.title,
-                        artist: 'YouTube Music playlist',
+                        artist: 'ifallertzia server playlist',
                         onTap: () => Navigator.of(context).push(
                           MaterialPageRoute<void>(
                             builder: (_) => MusicBrowseScreen(item: item),
@@ -203,7 +203,7 @@ class _HomePageState extends State<HomePage> {
                       return AlbumTile(
                         coverUrl: item.artwork,
                         title: item.title,
-                        artist: 'YouTube Music album',
+                        artist: 'ifallertzia server album',
                         onTap: () => Navigator.of(context).push(
                           MaterialPageRoute<void>(
                             builder: (_) => MusicBrowseScreen(item: item),
@@ -615,14 +615,14 @@ class _BrandRow extends StatelessWidget {
 class _WhatsNewCard extends StatelessWidget {
   const _WhatsNewCard();
 
-  static const String _version = 'Update 2.3.1';
+  static const String _version = 'Update 2.3.4';
   static const String _date = '27 Sept 2026';
   static const String _headline =
-      'Lyrics have arrived, plus important bug fixes';
+      'Playlists fixed, all-new ifallertzia server branding';
 
   static const List<String> _notes = <String>[
-    'Lyrics support added — view synced lyrics for songs right from the player.',
-    'Important bug fixes for playback, queue reliability and downloads.',
+    'Home playlists now open and play reliably — no more "tracks unavailable".',
+    'Fresh ifallertzia server branding across search, playlists and albums.',
   ];
 
   @override

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/models/song.dart';
 import '../../core/services/playback_service.dart';
@@ -115,8 +114,7 @@ class BrandChannelPage extends StatefulWidget {
 }
 
 class _BrandChannelPageState extends State<BrandChannelPage> {
-  late final Future<List<Song>> _future = _load();
-  String? _error;
+  late Future<List<Song>> _future = _load();
 
   Future<List<Song>> _load() async {
     final YoutubeService youtube = context.read<YoutubeService>();
@@ -125,18 +123,13 @@ class _BrandChannelPageState extends State<BrandChannelPage> {
       try {
         final List<Song> uploads = await youtube.channelUploads(id, limit: 24);
         if (uploads.isNotEmpty) return uploads;
-      } catch (e) {
-        _error = '$e';
-      }
+      } catch (_) {}
     }
     return youtube.searchSongs(widget.brand.searchQuery, limit: 20);
   }
 
-  Future<void> _openYoutube() async {
-    await launchUrl(
-      Uri.parse(widget.brand.youtubeUrl),
-      mode: LaunchMode.externalApplication,
-    );
+  void _retry() {
+    setState(() => _future = _load());
   }
 
   @override
@@ -144,14 +137,7 @@ class _BrandChannelPageState extends State<BrandChannelPage> {
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.brand.name),
-        actions: <Widget>[
-          IconButton(
-            tooltip: 'Open channel',
-            onPressed: _openYoutube,
-            icon: const Icon(Icons.open_in_new_rounded),
-          ),
-          const SaxifySearchButton(),
-        ],
+        actions: const <Widget>[SaxifySearchButton()],
       ),
       body: FutureBuilder<List<Song>>(
         future: _future,
@@ -163,11 +149,10 @@ class _BrandChannelPageState extends State<BrandChannelPage> {
           if (songs.isEmpty) {
             return EmptyState(
               icon: Icons.video_library_outlined,
-              title: 'Channel uploads unavailable',
-              message:
-                  _error ?? 'Open the official channel on YouTube instead.',
-              actionLabel: 'Open channel',
-              onAction: _openYoutube,
+              title: 'Songs unavailable',
+              message: 'Check your connection and try again in a moment.',
+              actionLabel: 'Retry',
+              onAction: _retry,
             );
           }
           return ListView(

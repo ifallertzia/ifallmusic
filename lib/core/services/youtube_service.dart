@@ -109,28 +109,56 @@ class YoutubeService {
 
   Future<List<Song>> browseTracks(MusicBrowseItem item) async {
     if (item.kind == 'artist') return musicSongs(item.title, limit: 50);
-    final id = await music.playlistId(item.id);
-    if (id == null) return [];
-    return _yt.playlists
-        .getVideos(id)
-        .take(100)
-        .map(
-          (v) => Song(
-            id: v.id.value,
-            title: v.title,
-            artist: v.author,
-            channelId: v.channelId.value,
-            duration: v.duration,
-            source: TrackSource.ytMusic,
-            album: item.kind == 'album' ? item.title : null,
-            albumId: item.kind == 'album' ? item.id : null,
-            thumbnailUrl: item.kind == 'album' && item.artwork.isNotEmpty
+    // Primary path: the same browse call the web player makes when a playlist
+    // or album is opened — no separate playlist-id round trip, so long
+    // playlists and albums resolve reliably.
+    List<Song> tracks = <Song>[];
+    try {
+      tracks = await music.browseTracks(item.id);
+    } catch (e) {
+      debugPrint('ifallertzia browse failed: $e');
+    }
+    if (item.kind == 'album' && tracks.isNotEmpty) {
+      tracks = <Song>[
+        for (final Song s in tracks)
+          s.copyWith(
+            album: s.album ?? item.title,
+            albumId: s.albumId ?? item.id,
+            thumbnailUrl: item.artwork.isNotEmpty
                 ? item.artwork
-                : v.thumbnails.highResUrl,
+                : (s.thumbnailUrl.isEmpty ? item.artwork : s.thumbnailUrl),
           ),
-        )
-        .toList()
-        .timeout(const Duration(seconds: 20));
+      ];
+    }
+    if (tracks.isNotEmpty) return tracks;
+    // Fallback: resolve the playlist id, then fetch via the video client.
+    try {
+      final id = await music.playlistId(item.id);
+      if (id == null) return [];
+      return await _yt.playlists
+          .getVideos(id)
+          .take(100)
+          .map(
+            (v) => Song(
+              id: v.id.value,
+              title: v.title,
+              artist: v.author,
+              channelId: v.channelId.value,
+              duration: v.duration,
+              source: TrackSource.ytMusic,
+              album: item.kind == 'album' ? item.title : null,
+              albumId: item.kind == 'album' ? item.id : null,
+              thumbnailUrl: item.kind == 'album' && item.artwork.isNotEmpty
+                  ? item.artwork
+                  : v.thumbnails.highResUrl,
+            ),
+          )
+          .toList()
+          .timeout(const Duration(seconds: 20));
+    } catch (e) {
+      debugPrint('playlist fallback failed: $e');
+      return [];
+    }
   }
 
   /// A compact search modifier used throughout the app, including mood cards.

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/models/song.dart';
 import '../../core/services/artist_service.dart';
@@ -37,13 +36,6 @@ class _ArtistProfilePageState extends State<ArtistProfilePage> {
   Future<List<Song>> _load() {
     final String name = widget.profile.name;
     return context.read<YoutubeService>().searchSongs('$name songs', limit: 20);
-  }
-
-  Future<void> _youtube() async {
-    final Uri uri = Uri.parse(
-      'https://www.youtube.com/results?search_query=${Uri.encodeQueryComponent('${widget.profile.name} songs')}',
-    );
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
   @override
@@ -114,16 +106,6 @@ class _ArtistProfilePageState extends State<ArtistProfilePage> {
                           ? null
                           : () => context.read<PlaybackService>().playQueue(songs),
                     ),
-                    const SizedBox(width: 10),
-                    IconButton(
-                      tooltip: 'Play on YouTube',
-                      onPressed: _youtube,
-                      icon: const Icon(Icons.smart_display_outlined),
-                      style: IconButton.styleFrom(
-                        backgroundColor: SaxifyColors.surfaceAlt,
-                        minimumSize: const Size(48, 48),
-                      ),
-                    ),
                   ],
                 ),
               ),
@@ -136,7 +118,7 @@ class _ArtistProfilePageState extends State<ArtistProfilePage> {
                 const EmptyState(
                   icon: Icons.music_off_rounded,
                   title: 'No songs found',
-                  message: 'Try Play on YouTube, or search the name again.',
+                  message: 'Try again in a moment, or search the name again.',
                 )
               else
                 for (int i = 0; i < songs.length; i++)

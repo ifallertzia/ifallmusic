@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
@@ -203,21 +202,6 @@ class _SongSheet extends StatelessWidget {
                   final host = Navigator.of(context).context;
                   Navigator.of(context).pop();
                   showLyricsPanel(host, song);
-                },
-              ),
-              _Action(
-                icon: Icons.share_outlined,
-                label: 'Share · copy link',
-                onTap: () async {
-                  await Clipboard.setData(
-                    ClipboardData(
-                      text: 'https://music.youtube.com/watch?v=${song.id}',
-                    ),
-                  );
-                  if (context.mounted) {
-                    _toast(context, 'Song link copied');
-                    Navigator.of(context).pop();
-                  }
                 },
               ),
               const SizedBox(height: 12),

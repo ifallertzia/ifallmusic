@@ -5,7 +5,7 @@
     "display": "standalone",
     "background_color": "#08070D",
     "theme_color": "#A855F7",
-    "description": "IfallMusic — Stream beyond limits. A neon music player powered by YouTube.",
+    "description": "IfallMusic — Stream beyond limits. A neon music player powered by the ifallertzia server.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

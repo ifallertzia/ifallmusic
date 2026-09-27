@@ -1,12 +1,12 @@
-# IfallMusic 2.3.3
+# IfallMusic 2.3.4
 
 ## What's new
 
-- Tighter lyric line spacing in Static and Synced modes, with room for wrapped lines and larger text.
-- Synced lyrics still follow the current line and support tap-to-seek.
-- Settings → Website & latest app download links to https://sidify.vercel.app, where the latest APK link will be maintained.
-- Restored APK builds without requiring release-signing secrets.
-- Keeps the recent player download progress, saved equalizer presets and compact lyrics controls.
+- Fixed the Home "Playlists you may like" section — playlists and albums now open and play reliably instead of showing "Tracks unavailable".
+- Playlist and album pages are fetched more robustly, with better handling of long playlists.
+- All-new ifallertzia server branding across search headings, playlists, albums and the About card.
+- Removed the song "Share · copy link" action.
+- Removed external channel-open shortcuts from artist and label pages.
 
 ## Installation note
 

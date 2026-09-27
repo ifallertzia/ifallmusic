@@ -65,18 +65,25 @@ class Song {
     );
   }
 
-  Song copyWith({String? subtitle, Duration? duration, String? channelId}) {
+  Song copyWith({
+    String? subtitle,
+    Duration? duration,
+    String? channelId,
+    String? album,
+    String? albumId,
+    String? thumbnailUrl,
+  }) {
     return Song(
       artistId: artistId,
-      album: album,
-      albumId: albumId,
+      album: album ?? this.album,
+      albumId: albumId ?? this.albumId,
       musicVideoType: musicVideoType,
       source: source,
       quality: quality,
       id: id,
       title: title,
       artist: artist,
-      thumbnailUrl: thumbnailUrl,
+      thumbnailUrl: thumbnailUrl ?? this.thumbnailUrl,
       duration: duration ?? this.duration,
       channelId: channelId ?? this.channelId,
       subtitle: subtitle ?? this.subtitle,

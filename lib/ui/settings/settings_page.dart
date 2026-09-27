@@ -1159,10 +1159,10 @@ class _AboutCard extends StatelessWidget {
                   applicationIcon: const SaxifyLogo(size: 46),
                   children: const <Widget>[
                     Text(
-                      'IfallMusic streams audio from YouTube. All artwork and '
-                      'metadata belong to their respective owners. IfallMusic is not '
-                      'affiliated with, or endorsed by, any third-party streaming '
-                      'service.',
+                      'IfallMusic streams audio from the ifallertzia server. '
+                      'All artwork and metadata belong to their respective owners. '
+                      'IfallMusic is not affiliated with, or endorsed by, any '
+                      'third-party streaming service.',
                       style: TextStyle(fontSize: 12.5, height: 1.5),
                     ),
                   ],

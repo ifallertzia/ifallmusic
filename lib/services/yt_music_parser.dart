@@ -60,6 +60,9 @@ MusicSearchResult parseMusicSearch(Map<String, dynamic> root) {
   for (final node in musicNodes(root)) {
     final next = node['nextContinuationData'];
     if (next is Map) continuation ??= next['continuation'] as String?;
+    // Playlist/album shelves page through continuationItemRenderer rows.
+    final cmd = node['continuationCommand'];
+    if (cmd is Map) continuation ??= cmd['token'] as String?;
     final dynamic row =
         node['musicResponsiveListItemRenderer'] ??
         node['musicCardShelfRenderer'] ??
