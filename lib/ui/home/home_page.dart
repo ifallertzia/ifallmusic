@@ -615,24 +615,14 @@ class _BrandRow extends StatelessWidget {
 class _WhatsNewCard extends StatelessWidget {
   const _WhatsNewCard();
 
-  static const String _version = 'Update 2.2';
-  static const String _date = '23 Sept 2026';
+  static const String _version = 'Update 2.3.1';
+  static const String _date = '27 Sept 2026';
   static const String _headline =
-      'A whole new look, and downloads that just work';
+      'Lyrics have arrived, plus important bug fixes';
 
   static const List<String> _notes = <String>[
-    'Brand new liquid-glass UI on pure black — every screen, every button. Apple-style frosted surfaces with deep, vivid colours.',
-    'The old "Save" section is gone. It never worked properly and it was bloating the app — downloads now live inside Library ▸ Downloads.',
-    'Downloads got faster and lighter: songs save straight to Download/IfallMusic on your phone and play offline.',
-    'Live download percentage everywhere — the download button, the song row, the mini player and the downloads list.',
-    'Library now opens with big colourful tabs: Liked, Playlists, Songs, Artists, Downloads and History.',
-    'A custom colour mixer in Appearance & Theme — build your own accent with RGB sliders, or pick from the new palette (including Silver).',
-    'Top artists now show real artist photos instead of the app logo.',
-    'New 8D spatial audio templates in the Equalizer — orbit, cinematic, dreamy, focus and club, with live depth and reverb.',
-    'Sound panel in the player: volume, equalizer and spatial audio in one glass sheet.',
-    'Every button was rebuilt to fit every phone — no more cut-off text on small screens.',
-    'Contact / report fixed: no more "+" signs instead of spaces in the Gmail draft.',
-    'The app is now called IfallMusic.',
+    'Lyrics support added — view synced lyrics for songs right from the player.',
+    'Important bug fixes for playback, queue reliability and downloads.',
   ];
 
   @override

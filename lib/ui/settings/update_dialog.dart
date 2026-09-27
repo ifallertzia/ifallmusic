@@ -24,6 +24,7 @@ Future<void> checkAndPromptUpdate(BuildContext context, {bool silent = true}) as
     }
     await showDialog<void>(
       context: context,
+      barrierDismissible: true,
       builder: (BuildContext c) => _UpdateDialog(info: info),
     );
   } finally {
@@ -38,6 +39,13 @@ void _toast(BuildContext context, String message) {
 }
 
 enum _Phase { idle, downloading, done, error }
+
+/// Clean, short changelog shown in the in-app update dialog — only the items
+/// that matter to the listener. The full release body on GitHub is intentionally
+/// not shown here so the dialog stays focused.
+const String _kShortChangelog =
+    '• Lyrics support added\n'
+    '• Important bug fixes';
 
 class _UpdateDialog extends StatefulWidget {
   const _UpdateDialog({required this.info});
@@ -123,26 +131,24 @@ class _UpdateDialogState extends State<_UpdateDialog> {
                 ),
               ],
             ),
-            if (info.notes.isNotEmpty) ...<Widget>[
-              const SizedBox(height: 14),
-              Container(
-                constraints: const BoxConstraints(maxHeight: 140),
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: SaxifyColors.surfaceAlt,
-                  borderRadius: BorderRadius.circular(SaxifyTheme.radiusSm),
-                  border: Border.all(color: SaxifyColors.border),
-                ),
-                child: SingleChildScrollView(
-                  child: Text(
-                    info.notes,
-                    style: const TextStyle(
-                        fontSize: 12.5, height: 1.5,
-                        color: SaxifyColors.textSecondary),
-                  ),
+            const SizedBox(height: 14),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: SaxifyColors.surfaceAlt,
+                borderRadius: BorderRadius.circular(SaxifyTheme.radiusSm),
+                border: Border.all(color: SaxifyColors.border),
+              ),
+              child: Text(
+                _kShortChangelog,
+                style: const TextStyle(
+                  fontSize: 13,
+                  height: 1.55,
+                  color: SaxifyColors.textSecondary,
                 ),
               ),
-            ],
+            ),
             const SizedBox(height: 18),
             if (_phase == _Phase.downloading) ...<Widget>[
               LinearProgressIndicator(value: _progress),
@@ -184,7 +190,7 @@ class _UpdateDialogState extends State<_UpdateDialog> {
                 children: <Widget>[
                   Expanded(
                     child: NeonButton(
-                      label: info.downloadable ? 'Update' : 'Not available',
+                      label: info.downloadable ? 'Update now' : 'Not available',
                       icon: Icons.system_update_rounded,
                       compact: true,
                       onPressed: info.downloadable ? _start : null,
@@ -205,7 +211,7 @@ class _UpdateDialogState extends State<_UpdateDialog> {
                 const SizedBox(height: 10),
                 const Text(
                   'This release has no APK attached yet. Attach '
-                  '“app-release.apk” to the GitHub release to enable in-app '
+                  '"app-release.apk" to the GitHub release to enable in-app '
                   'install.',
                   style: TextStyle(
                       fontSize: 11.5, color: SaxifyColors.textMuted),
@@ -215,9 +221,12 @@ class _UpdateDialogState extends State<_UpdateDialog> {
             if (_phase == _Phase.done) ...<Widget>[
               const SizedBox(height: 10),
               Text(
-                'APK downloaded — the installer should now open. If it did not, '
-                'allow “Install unknown apps” for IfallMusic and try again.',
-                style: TextStyle(fontSize: 12, color: accent.primary),
+                'APK downloaded — the installer should now open.\n\n'
+                'If you see "App not installed / package conflicts", that '
+                'means the old app was signed with a different key. '
+                'Uninstall the old IfallMusic (your library can be backed '
+                'up from Settings > Backup library) and install again.',
+                style: TextStyle(fontSize: 11.5, height: 1.45, color: accent.primary),
               ),
             ],
           ],
