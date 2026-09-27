@@ -11,6 +11,8 @@ import '../../core/theme/glass.dart';
 import '../../core/theme/saxify_accents.dart';
 import '../../core/theme/saxify_theme.dart';
 import '../../core/utils/format.dart';
+import '../../screens/lyrics_finder_screen.dart';
+import '../../widgets/quality_badge.dart';
 import '../artist/artist_router.dart';
 import '../settings/backup_sheet.dart';
 import '../settings/playlist_sync_sheet.dart';
@@ -32,7 +34,8 @@ class LibraryPage extends StatefulWidget {
   State<LibraryPage> createState() => _LibraryPageState();
 }
 
-class _LibraryPageState extends State<LibraryPage> with SingleTickerProviderStateMixin {
+class _LibraryPageState extends State<LibraryPage>
+    with SingleTickerProviderStateMixin {
   late final TabController _tabs = TabController(
     length: _LibraryTabSpec.all.length,
     vsync: this,
@@ -51,7 +54,10 @@ class _LibraryPageState extends State<LibraryPage> with SingleTickerProviderStat
     if (!mounted) return;
     if (_shell.libraryNonce == _lastNonce) return;
     _lastNonce = _shell.libraryNonce;
-    final int target = _shell.libraryTab.clamp(0, _LibraryTabSpec.all.length - 1);
+    final int target = _shell.libraryTab.clamp(
+      0,
+      _LibraryTabSpec.all.length - 1,
+    );
     if (_tabs.index != target) _tabs.animateTo(target);
     setState(() {});
   }
@@ -66,7 +72,8 @@ class _LibraryPageState extends State<LibraryPage> with SingleTickerProviderStat
   @override
   Widget build(BuildContext context) {
     final LibraryService library = context.watch<LibraryService>();
-    final MusicDownloadService downloads = context.watch<MusicDownloadService>();
+    final MusicDownloadService downloads = context
+        .watch<MusicDownloadService>();
 
     return AuroraBackdrop(
       intensity: 0.55,
@@ -76,17 +83,32 @@ class _LibraryPageState extends State<LibraryPage> with SingleTickerProviderStat
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             _LibraryHeader(library: library),
-            _LibraryTabBar(controller: _tabs, library: library, downloads: downloads),
+            _LibraryTabBar(
+              controller: _tabs,
+              library: library,
+              downloads: downloads,
+            ),
             Expanded(
               child: TabBarView(
                 controller: _tabs,
-                children: const <Widget>[
-                  _LikedTab(),
-                  _PlaylistsTab(),
-                  _SongsTab(),
-                  _ArtistsTab(),
-                  _DownloadsTab(),
-                  _HistoryTab(),
+                children: <Widget>[
+                  const _LikedTab(),
+                  const _PlaylistsTab(),
+                  const _SongsTab(),
+                  const _ArtistsTab(),
+                  const _DownloadsTab(),
+                  const _HistoryTab(),
+                  Center(
+                    child: FilledButton.icon(
+                      icon: const Icon(Icons.lyrics_outlined),
+                      label: const Text('Open Lyrics Finder'),
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => const LyricsFinderScreen(),
+                        ),
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -141,6 +163,11 @@ class _LibraryTabSpec {
       icon: Icons.history_rounded,
       color: Color(0xFFEC4899),
     ),
+    _LibraryTabSpec(
+      label: 'Lyrics Finder',
+      icon: Icons.lyrics_outlined,
+      color: Color(0xFF06B6D4),
+    ),
   ];
 }
 
@@ -176,7 +203,10 @@ class _LibraryHeader extends StatelessWidget {
                   '${library.songs.length} songs',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 12, color: SaxifyColors.textMuted),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: SaxifyColors.textMuted,
+                  ),
                 ),
               ],
             ),
@@ -214,29 +244,41 @@ class _LibraryTabBar extends StatelessWidget {
       library.artists.length,
       downloads.downloaded.length,
       library.history.length,
+      0,
     ];
 
-    return SizedBox(
-      height: 62,
-      child: AnimatedBuilder(
-        animation: controller,
-        builder: (BuildContext context, _) {
-          return ListView.separated(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            itemCount: _LibraryTabSpec.all.length,
-            separatorBuilder: (BuildContext c, int i) => const SizedBox(width: 9),
-            itemBuilder: (BuildContext context, int i) {
-              final _LibraryTabSpec spec = _LibraryTabSpec.all[i];
-              return _TabPill(
-                spec: spec,
-                count: counts[i],
-                selected: controller.index == i,
-                onTap: () => controller.animateTo(i),
-              );
-            },
-          );
-        },
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: LayoutBuilder(
+          builder: (context, constraints) => Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (int i = 0; i < _LibraryTabSpec.all.length; i++)
+                SizedBox(
+                  width: (constraints.maxWidth - 8) / 2,
+                  child: _TabPill(
+                    spec: _LibraryTabSpec.all[i],
+                    count: counts[i],
+                    selected: controller.index == i,
+                    onTap: () {
+                      if (i == LibraryTabs.lyrics) {
+                        Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => const LyricsFinderScreen(),
+                          ),
+                        );
+                      } else {
+                        controller.animateTo(i);
+                      }
+                    },
+                  ),
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -304,19 +346,26 @@ class _TabPill extends StatelessWidget {
                 color: selected ? Colors.white : spec.color,
               ),
               const SizedBox(width: 8),
-              Text(
-                spec.label,
-                style: TextStyle(
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.2,
-                  color: selected ? Colors.white : SaxifyColors.textSecondary,
+              Flexible(
+                child: Text(
+                  spec.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.2,
+                    color: selected ? Colors.white : SaxifyColors.textSecondary,
+                  ),
                 ),
               ),
               if (count > 0) ...<Widget>[
                 const SizedBox(width: 7),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 1,
+                  ),
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(9),
                     color: selected
@@ -356,7 +405,8 @@ class _LikedTab extends StatelessWidget {
         child: EmptyState(
           icon: Icons.favorite_border_rounded,
           title: 'No liked songs yet',
-          message: 'Tap the heart on any track and it will live here, saved on this device.',
+          message:
+              'Tap the heart on any track and it will live here, saved on this device.',
         ),
       );
     }
@@ -422,7 +472,8 @@ class _PlaylistsTab extends StatelessWidget {
   void _openPlaylist(BuildContext context, Playlist playlist) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (BuildContext c) => PlaylistDetailPage(playlistId: playlist.id),
+        builder: (BuildContext c) =>
+            PlaylistDetailPage(playlistId: playlist.id),
       ),
     );
   }
@@ -455,14 +506,22 @@ class _PlaylistsTab extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: <Widget>[
-                    Text('Create playlist',
-                        style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                    Text(
+                      'Create playlist',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                     SizedBox(height: 3),
                     Text(
                       'Build your own universe of sound',
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 12, color: SaxifyColors.textMuted),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: SaxifyColors.textMuted,
+                      ),
                     ),
                   ],
                 ),
@@ -498,7 +557,8 @@ class _PlaylistsTab extends StatelessWidget {
           const EmptyState(
             icon: Icons.queue_music_rounded,
             title: 'No playlists yet',
-            message: 'Create one above, then use "Add to playlist" from any song menu.',
+            message:
+                'Create one above, then use "Add to playlist" from any song menu.',
           )
         else
           for (final Playlist playlist in library.playlists)
@@ -524,7 +584,10 @@ class _PlaylistsTab extends StatelessWidget {
                           playlist.name,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700),
+                          style: const TextStyle(
+                            fontSize: 14.5,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                         const SizedBox(height: 3),
                         Text(
@@ -540,8 +603,11 @@ class _PlaylistsTab extends StatelessWidget {
                     ),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.more_vert_rounded,
-                        size: 20, color: SaxifyColors.textFaint),
+                    icon: const Icon(
+                      Icons.more_vert_rounded,
+                      size: 20,
+                      color: SaxifyColors.textFaint,
+                    ),
                     onPressed: () => _playlistMenu(context, library, playlist),
                   ),
                 ],
@@ -551,7 +617,11 @@ class _PlaylistsTab extends StatelessWidget {
     );
   }
 
-  void _playlistMenu(BuildContext context, LibraryService library, Playlist playlist) {
+  void _playlistMenu(
+    BuildContext context,
+    LibraryService library,
+    Playlist playlist,
+  ) {
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,
@@ -566,8 +636,9 @@ class _PlaylistsTab extends StatelessWidget {
               title: const Text('Rename'),
               onTap: () async {
                 Navigator.of(sheetContext).pop();
-                final TextEditingController controller =
-                    TextEditingController(text: playlist.name);
+                final TextEditingController controller = TextEditingController(
+                  text: playlist.name,
+                );
                 final String? name = await showDialog<String>(
                   context: context,
                   builder: (BuildContext dialogContext) => AlertDialog(
@@ -576,7 +647,8 @@ class _PlaylistsTab extends StatelessWidget {
                       controller: controller,
                       autofocus: true,
                       decoration: const InputDecoration(hintText: 'New name'),
-                      onSubmitted: (String v) => Navigator.of(dialogContext).pop(v),
+                      onSubmitted: (String v) =>
+                          Navigator.of(dialogContext).pop(v),
                     ),
                     actions: <Widget>[
                       TextButton(
@@ -584,7 +656,8 @@ class _PlaylistsTab extends StatelessWidget {
                         child: const Text('Cancel'),
                       ),
                       TextButton(
-                        onPressed: () => Navigator.of(dialogContext).pop(controller.text),
+                        onPressed: () =>
+                            Navigator.of(dialogContext).pop(controller.text),
                         child: const Text('Save'),
                       ),
                     ],
@@ -596,8 +669,14 @@ class _PlaylistsTab extends StatelessWidget {
               },
             ),
             ListTile(
-              leading: const Icon(Icons.delete_outline_rounded, color: SaxifyColors.danger),
-              title: const Text('Delete playlist', style: TextStyle(color: SaxifyColors.danger)),
+              leading: const Icon(
+                Icons.delete_outline_rounded,
+                color: SaxifyColors.danger,
+              ),
+              title: const Text(
+                'Delete playlist',
+                style: TextStyle(color: SaxifyColors.danger),
+              ),
               onTap: () async {
                 Navigator.of(sheetContext).pop();
                 final bool? confirmed = await showDialog<bool>(
@@ -605,7 +684,8 @@ class _PlaylistsTab extends StatelessWidget {
                   builder: (BuildContext dialogContext) => AlertDialog(
                     title: const Text('Delete playlist?'),
                     content: Text(
-                        '"${playlist.name}" and its ${playlist.count} songs will be removed.'),
+                      '"${playlist.name}" and its ${playlist.count} songs will be removed.',
+                    ),
                     actions: <Widget>[
                       TextButton(
                         onPressed: () => Navigator.of(dialogContext).pop(false),
@@ -618,7 +698,8 @@ class _PlaylistsTab extends StatelessWidget {
                     ],
                   ),
                 );
-                if (confirmed == true) await library.deletePlaylist(playlist.id);
+                if (confirmed == true)
+                  await library.deletePlaylist(playlist.id);
               },
             ),
             const SizedBox(height: 14),
@@ -644,7 +725,8 @@ class _SongsTab extends StatelessWidget {
         child: EmptyState(
           icon: Icons.library_music_outlined,
           title: 'No saved songs yet',
-          message: 'Songs you add to the library from the song menu will collect here.',
+          message:
+              'Songs you add to the library from the song menu will collect here.',
         ),
       );
     }
@@ -657,7 +739,10 @@ class _SongsTab extends StatelessWidget {
             Expanded(
               child: Text(
                 '${songs.length} saved songs',
-                style: const TextStyle(fontSize: 12.5, color: SaxifyColors.textMuted),
+                style: const TextStyle(
+                  fontSize: 12.5,
+                  color: SaxifyColors.textMuted,
+                ),
               ),
             ),
             GlassButton(
@@ -750,13 +835,19 @@ class _ArtistsTab extends StatelessWidget {
             margin: const EdgeInsets.only(bottom: 6),
             onTap: () => openArtistByName(context, name: name),
             leading: ArtistAvatar(name: name, size: 42, ring: false),
-            trailing: const Icon(Icons.chevron_right_rounded,
-                size: 18, color: SaxifyColors.textFaint),
+            trailing: const Icon(
+              Icons.chevron_right_rounded,
+              size: 18,
+              color: SaxifyColors.textFaint,
+            ),
             child: Text(
               name,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
+              style: const TextStyle(
+                fontSize: 13.5,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
         if (followed.isNotEmpty) ...<Widget>[
@@ -779,8 +870,11 @@ class _ArtistsTab extends StatelessWidget {
                 size: 44,
                 ring: false,
               ),
-              trailing: const Icon(Icons.chevron_right_rounded,
-                  size: 18, color: SaxifyColors.textFaint),
+              trailing: const Icon(
+                Icons.chevron_right_rounded,
+                size: 18,
+                color: SaxifyColors.textFaint,
+              ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
@@ -789,14 +883,20 @@ class _ArtistsTab extends StatelessWidget {
                     artist.name,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
+                    style: const TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                   const SizedBox(height: 2),
                   Text(
                     artist.subscribers ?? 'Artist',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 11.5, color: SaxifyColors.textMuted),
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      color: SaxifyColors.textMuted,
+                    ),
                   ),
                 ],
               ),
@@ -813,17 +913,23 @@ class _DownloadsTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final MusicDownloadService downloads = context.watch<MusicDownloadService>();
+    final MusicDownloadService downloads = context
+        .watch<MusicDownloadService>();
     final PlaybackService playback = context.read<PlaybackService>();
     final List<MusicDownloadJob> saved = downloads.downloaded;
-    final List<Song> songs = saved.map((MusicDownloadJob job) => job.song).toList();
+    final List<Song> songs = saved
+        .map((MusicDownloadJob job) => job.song)
+        .toList();
     final Map<String, String> sources = <String, String>{
       for (final MusicDownloadJob job in saved)
         if (job.offlinePath != null) job.song.id: job.offlinePath!,
     };
     final List<MusicDownloadJob> active = downloads.jobs
-        .where((MusicDownloadJob job) =>
-            job.phase == MusicDownloadPhase.running || job.phase == MusicDownloadPhase.idle)
+        .where(
+          (MusicDownloadJob job) =>
+              job.phase == MusicDownloadPhase.running ||
+              job.phase == MusicDownloadPhase.idle,
+        )
         .toList();
     final SaxifyAccent accent = context.accent;
 
@@ -852,7 +958,10 @@ class _DownloadsTab extends StatelessWidget {
                         job.song.title,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
+                        style: const TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                     IconButton(
@@ -865,12 +974,30 @@ class _DownloadsTab extends StatelessWidget {
                 const SizedBox(height: 10),
                 GlassProgress(
                   fraction: job.fraction,
-                  indeterminate: job.phase == MusicDownloadPhase.idle || job.fraction <= 0,
+                  indeterminate:
+                      job.phase == MusicDownloadPhase.idle || job.fraction <= 0,
                   label: job.phase == MusicDownloadPhase.running
                       ? 'Downloading ${(job.fraction * 100).round()}%'
                       : 'Waiting in queue',
                 ),
               ],
+            ),
+          ),
+        for (final job in downloads.jobs.where(
+          (j) => j.phase == MusicDownloadPhase.failed,
+        ))
+          ListTile(
+            leading: const Icon(Icons.error_outline),
+            title: Text(
+              job.song.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            subtitle: Text(job.error ?? 'Download failed'),
+            trailing: IconButton(
+              tooltip: 'Retry download',
+              icon: const Icon(Icons.refresh),
+              onPressed: () => downloads.enqueue(job.song, playback),
             ),
           ),
         if (saved.isNotEmpty)
@@ -881,7 +1008,10 @@ class _DownloadsTab extends StatelessWidget {
                 Expanded(
                   child: Text(
                     '${saved.length} songs saved',
-                    style: const TextStyle(fontSize: 12.5, color: SaxifyColors.textMuted),
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      color: SaxifyColors.textMuted,
+                    ),
                   ),
                 ),
                 GlassButton(
@@ -910,7 +1040,10 @@ class _DownloadsTab extends StatelessWidget {
             trailing: IconButton(
               tooltip: 'Delete download',
               onPressed: () => downloads.delete(job, playback: playback),
-              icon: const Icon(Icons.delete_outline_rounded, color: SaxifyColors.danger),
+              icon: const Icon(
+                Icons.delete_outline_rounded,
+                color: SaxifyColors.danger,
+              ),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -920,19 +1053,31 @@ class _DownloadsTab extends StatelessWidget {
                   job.song.title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
+                  style: const TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
+                const SizedBox(height: 3),
+                QualityBadge(quality: job.song.quality),
                 const SizedBox(height: 3),
                 Row(
                   children: <Widget>[
-                    Icon(Icons.offline_pin_rounded, size: 13, color: accent.primary),
+                    Icon(
+                      Icons.offline_pin_rounded,
+                      size: 13,
+                      color: accent.primary,
+                    ),
                     const SizedBox(width: 5),
                     Flexible(
                       child: Text(
-                        '${job.song.artist} · ${(job.size / (1024 * 1024)).toStringAsFixed(1)} MB · 100%',
+                        '${job.song.artist}${job.song.album == null ? '' : ' · ${job.song.album}'} · ${(job.size / (1024 * 1024)).toStringAsFixed(1)} MB',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 11.5, color: SaxifyColors.textMuted),
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          color: SaxifyColors.textMuted,
+                        ),
                       ),
                     ),
                   ],
@@ -964,7 +1109,9 @@ class _HistoryTab extends StatelessWidget {
       );
     }
 
-    final List<Song> ordered = library.history.map((HistoryEntry e) => e.song).toList();
+    final List<Song> ordered = library.history
+        .map((HistoryEntry e) => e.song)
+        .toList();
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 200),
@@ -974,7 +1121,10 @@ class _HistoryTab extends StatelessWidget {
             Expanded(
               child: Text(
                 '${library.history.length} recently played',
-                style: const TextStyle(fontSize: 12.5, color: SaxifyColors.textMuted),
+                style: const TextStyle(
+                  fontSize: 12.5,
+                  color: SaxifyColors.textMuted,
+                ),
               ),
             ),
             GlassButton(
@@ -986,8 +1136,11 @@ class _HistoryTab extends StatelessWidget {
             const SizedBox(width: 8),
             IconButton(
               tooltip: 'Clear history',
-              icon: const Icon(Icons.delete_sweep_rounded,
-                  size: 20, color: SaxifyColors.textFaint),
+              icon: const Icon(
+                Icons.delete_sweep_rounded,
+                size: 20,
+                color: SaxifyColors.textFaint,
+              ),
               onPressed: library.clearHistory,
             ),
           ],
@@ -1054,7 +1207,9 @@ class _CollectionHeader extends StatelessWidget {
                 child: coverUrl.isEmpty
                     ? Icon(icon, size: 40, color: accent.onAccent)
                     : ClipRRect(
-                        borderRadius: BorderRadius.circular(SaxifyTheme.radiusMd),
+                        borderRadius: BorderRadius.circular(
+                          SaxifyTheme.radiusMd,
+                        ),
                         child: Stack(
                           fit: StackFit.expand,
                           children: <Widget>[
@@ -1063,7 +1218,11 @@ class _CollectionHeader extends StatelessWidget {
                               alignment: Alignment.bottomRight,
                               child: Padding(
                                 padding: const EdgeInsets.all(8),
-                                child: Icon(icon, size: 20, color: Colors.white),
+                                child: Icon(
+                                  icon,
+                                  size: 20,
+                                  color: Colors.white,
+                                ),
                               ),
                             ),
                           ],
@@ -1101,7 +1260,10 @@ class _CollectionHeader extends StatelessWidget {
                       subtitle,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 12, color: SaxifyColors.textMuted),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: SaxifyColors.textMuted,
+                      ),
                     ),
                   ],
                 ),

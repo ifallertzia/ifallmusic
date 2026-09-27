@@ -8,7 +8,7 @@ class IfallBranding {
 
   static const double logoWidth = 512;
   static const double logoHeight = 512;
-  static const String logoFormat = 'PNG (transparent background)';
+  static const String logoFormat = 'PNG (from supplied JPG artwork)';
   static const String logoAsset = 'assets/images/saxify_logo.png';
   static const String splashAsset = 'assets/images/saxify_splash.png';
   static const double splashLogoSize = 300;
@@ -24,8 +24,8 @@ class IfallBranding {
   static const String fileSuffix = '_ifallmusic';
   static const String author = 'Siddharth ifallertzia';
   static const String contactEmail = 'dastaanenajdik@gmail.com';
-  static const String versionLabel = '2.2.0';
+  static const String versionLabel = '2.3.0';
   static const String tagline = 'Stream beyond limits';
-  static const String userAgent = 'IfallMusic/2.2 (Flutter)';
+  static const String userAgent = 'IfallMusic/2.3 (Flutter)';
   static const String packageName = 'com.saxify.app';
 }

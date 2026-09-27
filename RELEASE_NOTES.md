@@ -49,3 +49,13 @@
   component anywhere in the app.
 - The in-app updater reads the latest release from `ifallertzia/Saxify-v1` and expects
   the `app-release.apk` asset.
+
+## 2.3.0 — Music discovery, lyrics and reliable queues
+
+- Your supplied IfallMusic logo across icons and launch screens.
+- YouTube Music-first search, source-quality badges, personal playlists and lyrics.
+- Search selections now start song radio: different recordings with a similar vibe,
+  not the next cover/remix/duplicate in the search list.
+- Guarded queue transitions, fresh-URL retry and bounded recovery for failed tracks.
+- Optional redacted playback-error email drafts; no automatic diagnostic uploads.
+- Background media controls, tab back history, swipe-down player and library polish.

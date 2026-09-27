@@ -11,6 +11,16 @@ class NativeBridge {
 
   static const MethodChannel _channel = MethodChannel('com.saxify.app/bridge');
 
+  static Future<void> backgroundApp() async {
+    if (!kIsWeb && Platform.isAndroid) {
+      try {
+        await _channel.invokeMethod<void>('backgroundApp');
+        return;
+      } catch (_) {}
+    }
+    await SystemNavigator.pop();
+  }
+
   static Future<BootSnapshot> bootState() async {
     if (kIsWeb || !Platform.isAndroid) {
       return const BootSnapshot(safeMode: false, fails: 0, sdk: 0);
@@ -65,11 +75,14 @@ class NativeBridge {
     required String mime,
   }) async {
     if (kIsWeb || !Platform.isAndroid) return null;
-    final Object? raw = await _channel.invokeMethod<Object>('saveToDownloads', <String, Object>{
-      'sourcePath': sourcePath,
-      'displayName': displayName,
-      'mime': mime,
-    });
+    final Object? raw = await _channel.invokeMethod<Object>(
+      'saveToDownloads',
+      <String, Object>{
+        'sourcePath': sourcePath,
+        'displayName': displayName,
+        'mime': mime,
+      },
+    );
     if (raw is! Map) return null;
     return SavedFile.fromMap(raw.cast<Object?, Object?>());
   }
@@ -84,10 +97,10 @@ class NativeBridge {
       }
       return false;
     }
-    final Object? raw = await _channel.invokeMethod<Object>('deleteDownload', <String, Object?>{
-      'uri': uri,
-      'path': path,
-    });
+    final Object? raw = await _channel.invokeMethod<Object>(
+      'deleteDownload',
+      <String, Object?>{'uri': uri, 'path': path},
+    );
     return raw == true;
   }
 
@@ -132,9 +145,10 @@ class NativeBridge {
   static Future<EqualizerInfo?> eqInit(int sessionId) async {
     if (kIsWeb || !Platform.isAndroid) return null;
     try {
-      final Object? raw = await _channel.invokeMethod<Object>('eqInit', <String, Object>{
-        'sessionId': sessionId,
-      });
+      final Object? raw = await _channel.invokeMethod<Object>(
+        'eqInit',
+        <String, Object>{'sessionId': sessionId},
+      );
       if (raw is! Map) return null;
       return EqualizerInfo.fromMap(raw.cast<Object?, Object?>());
     } catch (e) {
@@ -145,7 +159,9 @@ class NativeBridge {
 
   static Future<void> eqSetEnabled(bool enabled) async {
     if (kIsWeb || !Platform.isAndroid) return;
-    await _channel.invokeMethod<void>('eqSetEnabled', <String, Object>{'enabled': enabled});
+    await _channel.invokeMethod<void>('eqSetEnabled', <String, Object>{
+      'enabled': enabled,
+    });
   }
 
   static Future<void> eqSetBand(int band, int level) async {
@@ -158,9 +174,10 @@ class NativeBridge {
 
   static Future<bool> eqUsePreset(String name) async {
     if (kIsWeb || !Platform.isAndroid) return false;
-    final Object? raw = await _channel.invokeMethod<Object>('eqUsePreset', <String, Object>{
-      'name': name,
-    });
+    final Object? raw = await _channel.invokeMethod<Object>(
+      'eqUsePreset',
+      <String, Object>{'name': name},
+    );
     return raw == true;
   }
 
@@ -185,13 +202,15 @@ class NativeBridge {
   }) async {
     if (kIsWeb || !Platform.isAndroid) return false;
     try {
-      final Object? raw =
-          await _channel.invokeMethod<Object>('spatialApply', <String, Object>{
-        'rotationHz': rotationHz,
-        'depth': depth,
-        'reverb': reverb,
-        'width': width,
-      });
+      final Object? raw = await _channel.invokeMethod<Object>(
+        'spatialApply',
+        <String, Object>{
+          'rotationHz': rotationHz,
+          'depth': depth,
+          'reverb': reverb,
+          'width': width,
+        },
+      );
       return raw == true;
     } catch (e) {
       debugPrint('[IfallMusic][Spatial] apply failed: $e');
@@ -210,7 +229,11 @@ class NativeBridge {
 }
 
 class BootSnapshot {
-  const BootSnapshot({required this.safeMode, required this.fails, required this.sdk});
+  const BootSnapshot({
+    required this.safeMode,
+    required this.fails,
+    required this.sdk,
+  });
 
   final bool safeMode;
   final int fails;
@@ -277,6 +300,8 @@ class EqualizerInfo {
 
   static List<int> _ints(Object? raw) {
     if (raw is! List) return <int>[];
-    return raw.map((Object? e) => e is int ? e : int.tryParse('$e') ?? 0).toList();
+    return raw
+        .map((Object? e) => e is int ? e : int.tryParse('$e') ?? 0)
+        .toList();
   }
 }

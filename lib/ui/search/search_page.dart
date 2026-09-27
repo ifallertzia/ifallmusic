@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -5,6 +8,7 @@ import 'package:provider/provider.dart';
 import '../../core/models/album_card.dart';
 import '../../core/models/song.dart';
 import '../../core/services/home_catalog.dart';
+import '../../core/services/app_feedback.dart';
 import '../../core/services/library_service.dart';
 import '../../core/services/playback_service.dart';
 import '../../core/services/recommendation_service.dart';
@@ -13,17 +17,20 @@ import '../../core/theme/glass.dart';
 import '../../core/theme/saxify_accents.dart';
 import '../../core/theme/saxify_theme.dart';
 import '../../data/labels.dart';
+import '../../screens/music_browse_screen.dart';
+import '../../services/yt_music_parser.dart';
+import '../../services/yt_music_service.dart';
 import '../album/album_page.dart';
-import '../artist/artist_router.dart';
 import '../brands/brands_page.dart';
 import '../shell/shell_controller.dart';
+import '../widgets/artwork.dart';
 import '../widgets/media_cards.dart';
 import '../widgets/neon.dart';
 import '../widgets/song_tile.dart';
 
 enum _SearchKind { songs, artists, albums, playlists }
 
-/// Search still calls the existing YouTube search. The layout around it is new.
+/// YTM-first source-grouped tracks and real album/artist/playlist discovery.
 class SearchPage extends StatefulWidget {
   const SearchPage({super.key, this.initialQuery});
 
@@ -38,7 +45,11 @@ class _SearchPageState extends State<SearchPage> {
   final FocusNode _focusNode = FocusNode();
 
   List<Song> _results = <Song>[];
+  List<MusicBrowseItem> _browseResults = [];
   bool _loading = false;
+  bool _musicAvailable = true;
+  Timer? _debounce;
+  CancelToken? _cancel;
   String? _error;
   String _activeQuery = '';
   int _lastNonce = -1;
@@ -69,6 +80,9 @@ class _SearchPageState extends State<SearchPage> {
       if (!mounted) return;
       if (query == null || query.trim().isEmpty) {
         _searchGeneration++;
+        _debounce?.cancel();
+        _cancel?.cancel();
+        _browseResults = [];
         _controller.clear();
         setState(() {
           _results = <Song>[];
@@ -83,38 +97,65 @@ class _SearchPageState extends State<SearchPage> {
     });
   }
 
-  String _queryFor(String raw) {
-    switch (_kind) {
-      case _SearchKind.songs:
-        return raw;
-      case _SearchKind.artists:
-        return '$raw Hindi singer songs';
-      case _SearchKind.albums:
-        return '$raw Hindi album songs';
-      case _SearchKind.playlists:
-        return '$raw Hindi songs playlist';
-    }
-  }
-
   /// Same search entry point the app already used: `youtube.searchSongs`.
   Future<void> _runSearch(String query) async {
     final String q = query.trim();
     if (q.isEmpty) return;
 
+    _debounce?.cancel();
+    _cancel?.cancel('superseded');
+    _cancel = CancelToken();
     final int generation = ++_searchGeneration;
     setState(() {
       _loading = true;
       _error = null;
       _activeQuery = q;
+      _results = [];
+      _browseResults = [];
+      _musicAvailable = true;
     });
-    _focusNode.unfocus();
 
     try {
       final YoutubeService youtube = context.read<YoutubeService>();
       final LibraryService library = context.read<LibraryService>();
       final RecommendationService reco = context.read<RecommendationService>();
       reco.noteSearch(q);
-      final List<Song> results = await youtube.searchSongs(_queryFor(q), limit: 24);
+      if (_kind != _SearchKind.songs) {
+        final result = await youtube.music.search(
+          q,
+          cancelToken: _cancel,
+          filter: _kind == _SearchKind.albums
+              ? YtMusicService.albumsFilter
+              : _kind == _SearchKind.artists
+              ? YtMusicService.artistsFilter
+              : null,
+        );
+        if (!mounted || generation != _searchGeneration) return;
+        final kind = _kind == _SearchKind.artists
+            ? 'artist'
+            : _kind == _SearchKind.albums
+            ? 'album'
+            : 'playlist';
+        setState(() {
+          _browseResults = result.items.where((i) => i.kind == kind).toList();
+          _loading = false;
+        });
+        await library.rememberSearch(q);
+        return;
+      }
+      final List<Song> results = await youtube.searchSongs(
+        q,
+        limit: 60,
+        cancelToken: _cancel,
+        onPartial: (results) {
+          if (mounted && generation == _searchGeneration) {
+            setState(() => _results = results);
+          }
+        },
+        onMusicAvailability: (available) {
+          _musicAvailable = available;
+        },
+      );
       if (!mounted || generation != _searchGeneration) return;
       await library.rememberSearch(q);
       if (!mounted || generation != _searchGeneration) return;
@@ -122,6 +163,8 @@ class _SearchPageState extends State<SearchPage> {
         _results = results;
         _loading = false;
       });
+      if (results.isEmpty)
+        showAppNotice('No results. Check your connection or try another song.');
     } catch (e) {
       if (!mounted || generation != _searchGeneration) return;
       setState(() {
@@ -134,6 +177,8 @@ class _SearchPageState extends State<SearchPage> {
 
   @override
   void dispose() {
+    _debounce?.cancel();
+    _cancel?.cancel();
     _controller.dispose();
     _focusNode.dispose();
     super.dispose();
@@ -144,146 +189,241 @@ class _SearchPageState extends State<SearchPage> {
     final LibraryService library = context.watch<LibraryService>();
     final SaxifyAccent accent = context.accent;
     final PlaybackService playback = context.read<PlaybackService>();
-    final bool idle = _results.isEmpty && !_loading && _error == null;
+    final bool idle = _activeQuery.isEmpty && !_loading && _error == null;
 
     return AuroraBackdrop(
       intensity: 0.5,
       child: Scaffold(
-      backgroundColor: Colors.transparent,
-      body: SafeArea(
-        bottom: false,
-        child: Column(
-          children: <Widget>[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
-              child: Row(
-                children: <Widget>[
-                  Expanded(
-                    child: TextField(
-                      controller: _controller,
-                      focusNode: _focusNode,
-                      textInputAction: TextInputAction.search,
-                      onSubmitted: _runSearch,
-                      onChanged: (_) => setState(() {}),
-                      style: const TextStyle(fontSize: 14),
-                      decoration: InputDecoration(
-                        hintText: 'Songs, artists, albums, moods…',
-                        prefixIcon: Icon(Icons.search_rounded, color: accent.primary),
-                        suffixIcon: _controller.text.isEmpty
-                            ? null
-                            : IconButton(
-                                icon: const Icon(Icons.close_rounded, size: 18, color: SaxifyColors.textFaint),
-                                onPressed: () {
-                                  _controller.clear();
-                                  setState(() {
-                                    _results = <Song>[];
-                                    _activeQuery = '';
-                                    _error = null;
-                                  });
-                                },
-                              ),
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: 'Search',
-                    icon: Icon(Icons.arrow_forward_rounded, color: accent.primary),
-                    onPressed: () => _runSearch(_controller.text),
-                  ),
-                ],
-              ),
-            ),
-            SizedBox(
-              height: 40,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                children: <Widget>[
-                  for (final _SearchKind kind in _SearchKind.values)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: ChoiceChip(
-                        label: Text(_kindLabel(kind)),
-                        selected: _kind == kind,
-                        onSelected: (_) {
-                          setState(() => _kind = kind);
-                          if (_controller.text.trim().isNotEmpty) {
-                            _runSearch(_controller.text);
+        backgroundColor: Colors.transparent,
+        body: SafeArea(
+          bottom: false,
+          child: Column(
+            children: <Widget>[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
+                child: Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: TextField(
+                        controller: _controller,
+                        focusNode: _focusNode,
+                        textInputAction: TextInputAction.search,
+                        onSubmitted: _runSearch,
+                        onChanged: (value) {
+                          _debounce?.cancel();
+                          _cancel?.cancel();
+                          _searchGeneration++;
+                          setState(() {
+                            _results = [];
+                            _browseResults = [];
+                            _loading = false;
+                            _activeQuery = '';
+                            _error = null;
+                          });
+                          if (value.trim().isNotEmpty) {
+                            _debounce = Timer(
+                              const Duration(milliseconds: 300),
+                              () => _runSearch(value),
+                            );
                           }
                         },
+                        style: const TextStyle(fontSize: 14),
+                        decoration: InputDecoration(
+                          hintText: 'Songs, artists, albums, moods…',
+                          prefixIcon: Icon(
+                            Icons.search_rounded,
+                            color: accent.primary,
+                          ),
+                          suffixIcon: _controller.text.isEmpty
+                              ? null
+                              : IconButton(
+                                  icon: const Icon(
+                                    Icons.close_rounded,
+                                    size: 18,
+                                    color: SaxifyColors.textFaint,
+                                  ),
+                                  onPressed: () {
+                                    _debounce?.cancel();
+                                    _cancel?.cancel();
+                                    _searchGeneration++;
+                                    _controller.clear();
+                                    setState(() {
+                                      _loading = false;
+                                      _browseResults = [];
+                                      _results = <Song>[];
+                                      _activeQuery = '';
+                                      _error = null;
+                                    });
+                                  },
+                                ),
+                        ),
                       ),
                     ),
-                ],
+                    IconButton(
+                      tooltip: 'Search',
+                      icon: Icon(
+                        Icons.arrow_forward_rounded,
+                        color: accent.primary,
+                      ),
+                      onPressed: () => _runSearch(_controller.text),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            Expanded(
-              child: _loading
-                  ? const Center(child: CircularProgressIndicator())
-                  : _error != null
-                      ? EmptyState(
-                          icon: Icons.cloud_off_rounded,
-                          title: 'Something went wrong',
-                          message: _error,
-                          actionLabel: 'Try again',
-                          onAction: () => _runSearch(_activeQuery),
-                        )
-                      : ListView(
-                          padding: const EdgeInsets.only(bottom: 140),
-                          children: <Widget>[
-                            if (library.recentSearches.isNotEmpty && idle)
-                              _RecentSearches(
-                                queries: library.recentSearches.take(10).toList(),
-                                onTap: (String q) {
-                                  _controller.text = q;
-                                  _runSearch(q);
-                                },
-                                onRemove: library.removeSearch,
-                                onClear: library.clearSearchHistory,
-                              ),
-                            if (idle) const _ExploreMusic(),
-                            if (_results.isNotEmpty) ...<Widget>[
-                              Padding(
-                                padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-                                child: Row(
-                                  children: <Widget>[
-                                    Expanded(
-                                      child: Text(
-                                        '${_results.length} results for "$_activeQuery"',
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: GoogleFonts.spaceGrotesk(
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w700,
-                                          color: SaxifyColors.textSecondary,
-                                        ),
-                                      ),
-                                    ),
-                                    TextButton.icon(
-                                      onPressed: () => playback.playQueue(_results),
-                                      icon: const Icon(Icons.play_arrow_rounded, size: 18),
-                                      label: const Text('Play all', style: TextStyle(fontSize: 12)),
-                                    ),
-                                  ],
+              SizedBox(
+                height: 40,
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  children: <Widget>[
+                    for (final _SearchKind kind in _SearchKind.values)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: ChoiceChip(
+                          label: Text(_kindLabel(kind)),
+                          selected: _kind == kind,
+                          onSelected: (_) {
+                            setState(() => _kind = kind);
+                            if (_controller.text.trim().isNotEmpty) {
+                              _runSearch(_controller.text);
+                            }
+                          },
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: _loading && _results.isEmpty
+                    ? const Center(child: CircularProgressIndicator())
+                    : _error != null
+                    ? EmptyState(
+                        icon: Icons.cloud_off_rounded,
+                        title: 'Something went wrong',
+                        message: _error,
+                        actionLabel: 'Try again',
+                        onAction: () => _runSearch(_activeQuery),
+                      )
+                    : ListView(
+                        padding: const EdgeInsets.only(bottom: 140),
+                        children: <Widget>[
+                          if (library.recentSearches.isNotEmpty && idle)
+                            _RecentSearches(
+                              queries: library.recentSearches.take(8).toList(),
+                              onTap: (String q) {
+                                _controller.text = q;
+                                _runSearch(q);
+                              },
+                              onRemove: library.removeSearch,
+                              onClear: library.clearSearchHistory,
+                            ),
+                          if (idle) const _ExploreMusic(),
+                          if (_loading) const LinearProgressIndicator(),
+                          if (!idle &&
+                              !_loading &&
+                              _results.isEmpty &&
+                              _browseResults.isEmpty)
+                            const EmptyState(
+                              icon: Icons.search_off,
+                              title: 'No results',
+                              message:
+                                  'Check your connection or try another song.',
+                            ),
+                          if (!_musicAvailable)
+                            const Padding(
+                              padding: EdgeInsets.all(16),
+                              child: Text(
+                                'YouTube Music unavailable — showing YouTube results',
+                                style: TextStyle(
+                                  color: Colors.grey,
+                                  fontSize: 12,
                                 ),
                               ),
-                              if (_kind == _SearchKind.artists)
-                                _ArtistResults(songs: _results)
-                              else
-                                for (int i = 0; i < _results.length; i++)
-                                  SongTile(
-                                    song: _results[i],
-                                    onTap: () => playback.playQueue(_results, startIndex: i),
+                            ),
+                          for (final item in _browseResults)
+                            ListTile(
+                              leading: Artwork(url: item.artwork, size: 52),
+                              title: Text(item.title),
+                              subtitle: Text('YouTube Music · ${item.kind}'),
+                              trailing: const Icon(Icons.chevron_right),
+                              onTap: () => Navigator.of(context).push(
+                                MaterialPageRoute<void>(
+                                  builder: (_) => MusicBrowseScreen(item: item),
+                                ),
+                              ),
+                            ),
+                          if (_results.isNotEmpty) ...<Widget>[
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                              child: Row(
+                                children: <Widget>[
+                                  Expanded(
+                                    child: Text(
+                                      '${_results.length} results for "$_activeQuery"',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: GoogleFonts.spaceGrotesk(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w700,
+                                        color: SaxifyColors.textSecondary,
+                                      ),
+                                    ),
                                   ),
-                            ],
+                                  TextButton.icon(
+                                    onPressed: () =>
+                                        playback.playRadio(_results.first),
+                                    icon: const Icon(
+                                      Icons.play_arrow_rounded,
+                                      size: 18,
+                                    ),
+                                    label: const Text(
+                                      'Start radio',
+                                      style: TextStyle(fontSize: 12),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            for (final section in [
+                              'YouTube Music',
+                              'Videos',
+                              'More from YouTube',
+                            ])
+                              if (_section(section).isNotEmpty) ...[
+                                SectionHeader(
+                                  title: section,
+                                  subtitle: section == 'YouTube Music'
+                                      ? 'Album-quality source audio'
+                                      : null,
+                                ),
+                                for (final song in _section(section))
+                                  SongTile(
+                                    song: song,
+                                    startRadio: true,
+                                    onTap: () => playback.playRadio(song),
+                                  ),
+                              ],
                           ],
-                        ),
-            ),
-          ],
+                        ],
+                      ),
+              ),
+            ],
+          ),
         ),
-      ),
       ),
     );
   }
+
+  List<Song> _section(String section) => _results
+      .where(
+        (s) => section == 'More from YouTube'
+            ? s.source == TrackSource.youtube
+            : s.source == TrackSource.ytMusic &&
+                  (section == 'YouTube Music'
+                      ? s.quality == QualityTier.high
+                      : s.quality != QualityTier.high),
+      )
+      .toList();
 
   String _kindLabel(_SearchKind kind) {
     switch (kind) {
@@ -333,7 +473,10 @@ class _RecentSearches extends StatelessWidget {
               const Spacer(),
               TextButton(
                 onPressed: onClear,
-                child: const Text('Clear all', style: TextStyle(fontSize: 12, color: SaxifyColors.textMuted)),
+                child: const Text(
+                  'Clear all',
+                  style: TextStyle(fontSize: 12, color: SaxifyColors.textMuted),
+                ),
               ),
             ],
           ),
@@ -377,7 +520,10 @@ class _ExploreMusic extends StatelessWidget {
           title: 'Explore Music',
           subtitle: 'India-first stations, ready before you search',
         ),
-        const SectionHeader(title: 'Charts & Discoveries', padding: EdgeInsets.fromLTRB(20, 12, 20, 10)),
+        const SectionHeader(
+          title: 'Charts & Discoveries',
+          padding: EdgeInsets.fromLTRB(20, 12, 20, 10),
+        ),
         MoodGenreGrid(
           items: _featured,
           onSelected: (String query) => shell.goSearch(query),
@@ -398,7 +544,9 @@ class _ExploreMusic extends StatelessWidget {
               title: album.title,
               artist: album.artist,
               onTap: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(builder: (_) => AlbumPage(album: album)),
+                MaterialPageRoute<void>(
+                  builder: (_) => AlbumPage(album: album),
+                ),
               ),
             );
           },
@@ -417,64 +565,14 @@ class _ExploreMusic extends StatelessWidget {
                 label: brand.name,
                 icon: Icons.album_outlined,
                 onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(builder: (_) => BrandChannelPage(brand: brand)),
+                  MaterialPageRoute<void>(
+                    builder: (_) => BrandChannelPage(brand: brand),
+                  ),
                 ),
               );
             },
           ),
         ),
-      ],
-    );
-  }
-}
-
-class _ArtistResults extends StatelessWidget {
-  const _ArtistResults({required this.songs});
-
-  final List<Song> songs;
-
-  @override
-  Widget build(BuildContext context) {
-    final Map<String, Song> byArtist = <String, Song>{};
-    for (final Song song in songs) {
-      byArtist.putIfAbsent(song.artist, () => song);
-    }
-    final List<Song> unique = byArtist.values.toList();
-    return Column(
-      children: <Widget>[
-        for (final Song song in unique)
-          GlassListTile(
-            onTap: () => openArtistByName(
-              context,
-              name: song.artist,
-              channelId: song.channelId,
-            ),
-            leading: ArtistAvatar(name: song.artist, size: 44, ring: false),
-            trailing: const Icon(
-              Icons.chevron_right_rounded,
-              size: 18,
-              color: SaxifyColors.textFaint,
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                Text(
-                  song.artist,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  song.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 11.5, color: SaxifyColors.textMuted),
-                ),
-              ],
-            ),
-          ),
       ],
     );
   }

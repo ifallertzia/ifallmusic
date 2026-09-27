@@ -2,7 +2,7 @@ name: Build Flutter APK
 
 on:
   push:
-    branches: [ main, master, arena/01a0cc83-saxify-v1 ]
+    branches: [ main, master, arena/01a0e168-saxify-v1 ]
   pull_request:
     branches: [ main, master ]
   workflow_dispatch:

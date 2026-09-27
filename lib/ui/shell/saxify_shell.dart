@@ -1,10 +1,12 @@
-
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/models/song.dart';
 import '../../core/services/artwork_cache.dart';
+import '../../core/services/native_bridge.dart';
 import '../../core/services/playback_service.dart';
+import '../../core/services/playback_error_reporter.dart';
 import '../../core/services/recommendation_service.dart';
 import '../../core/theme/saxify_accents.dart';
 import '../../core/theme/saxify_theme.dart';
@@ -28,6 +30,10 @@ class SaxifyShell extends StatefulWidget {
 class _SaxifyShellState extends State<SaxifyShell> {
   late final ShellController _shell = context.read<ShellController>();
   String? _shownNotice;
+  String? _shownReport;
+  late final PlaybackService _playback = context.read<PlaybackService>();
+  late final RecommendationService _recommendations = context
+      .read<RecommendationService>();
   bool _dbToastShown = false;
 
   @override
@@ -58,20 +64,46 @@ class _SaxifyShellState extends State<SaxifyShell> {
     if (!mounted) return;
     final PlaybackService playback = context.read<PlaybackService>();
     final String? notice = playback.notice;
-    if (notice == null || notice == _shownNotice) return;
+    if (notice == null) {
+      _shownNotice = null;
+      return;
+    }
+    final report = notice.startsWith('Failed') ? playback.lastError : null;
+    if (notice == _shownNotice && report?.id == _shownReport) return;
     _shownNotice = notice;
+    _shownReport = report?.id;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(
         SnackBar(
           content: Text(notice),
-          duration: const Duration(seconds: 4),
+          duration: const Duration(seconds: 10),
+          behavior: SnackBarBehavior.floating,
           action: SnackBarAction(
-            label: 'DISMISS',
-            onPressed: playback.dismissNotice,
+            label: report == null ? 'DISMISS' : 'MAIL ERROR',
+            onPressed: report == null
+                ? playback.dismissNotice
+                : () => _mailReport(report),
           ),
         ),
       );
+  }
+
+  Future<void> _mailReport(PlaybackErrorReport report) async {
+    final opened = await PlaybackErrorReporter.compose(report);
+    if (!opened && mounted) {
+      try {
+        await Clipboard.setData(ClipboardData(text: report.body));
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'No email app available. Diagnostic report copied — paste it in an email to ifallertzia.',
+            ),
+          ),
+        );
+      } catch (_) {}
+    }
   }
 
   void _onRecommendations() {
@@ -88,41 +120,50 @@ class _SaxifyShellState extends State<SaxifyShell> {
   @override
   void dispose() {
     _shell.removeListener(_onShellChanged);
+    _playback.removeListener(_onPlaybackChanged);
+    _recommendations.removeListener(_onRecommendations);
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: SaxifyColors.background,
-      extendBody: true,
-      body: Stack(
-        children: <Widget>[
-          IndexedStack(
-            index: _shell.tab.index,
-            children: const <Widget>[
-              HomePage(),
-              SearchPage(),
-              LibraryPage(),
-              SettingsPage(),
-            ],
-          ),
-          // Now playing + navigation float above the content as one glass unit.
-          Align(
-            alignment: Alignment.bottomCenter,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                const _NextArtworkPrecache(),
-                const MiniPlayer(),
-                _GlassNavBar(
-                  index: _shell.tab.index,
-                  onSelect: (int i) => _shell.select(SaxifyTab.values[i]),
-                ),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        if (!_shell.back()) NativeBridge.backgroundApp();
+      },
+      child: Scaffold(
+        backgroundColor: SaxifyColors.background,
+        extendBody: true,
+        body: Stack(
+          children: <Widget>[
+            IndexedStack(
+              index: _shell.tab.index,
+              children: const <Widget>[
+                HomePage(),
+                SearchPage(),
+                LibraryPage(),
+                SettingsPage(),
               ],
             ),
-          ),
-        ],
+            // Now playing + navigation float above the content as one glass unit.
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  const _NextArtworkPrecache(),
+                  const MiniPlayer(),
+                  _GlassNavBar(
+                    index: _shell.tab.index,
+                    onSelect: (int i) => _shell.select(SaxifyTab.values[i]),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -135,19 +176,25 @@ class _GlassNavBar extends StatelessWidget {
   final int index;
   final ValueChanged<int> onSelect;
 
-  static const List<(IconData, IconData, String)> _items = <(IconData, IconData, String)>[
-    (Icons.home_outlined, Icons.home_rounded, 'Home'),
-    (Icons.search_outlined, Icons.search_rounded, 'Search'),
-    (Icons.library_music_outlined, Icons.library_music_rounded, 'Library'),
-    (Icons.settings_outlined, Icons.settings_rounded, 'Settings'),
-  ];
+  static const List<(IconData, IconData, String)> _items =
+      <(IconData, IconData, String)>[
+        (Icons.home_outlined, Icons.home_rounded, 'Home'),
+        (Icons.search_outlined, Icons.search_rounded, 'Search'),
+        (Icons.library_music_outlined, Icons.library_music_rounded, 'Library'),
+        (Icons.settings_outlined, Icons.settings_rounded, 'Settings'),
+      ];
 
   @override
   Widget build(BuildContext context) {
     final SaxifyAccent accent = context.accent;
     final double bottomInset = MediaQuery.paddingOf(context).bottom;
     return Padding(
-      padding: EdgeInsets.fromLTRB(12, 0, 12, bottomInset > 0 ? bottomInset * 0.5 + 6 : 10),
+      padding: EdgeInsets.fromLTRB(
+        12,
+        0,
+        12,
+        bottomInset > 0 ? bottomInset * 0.5 + 6 : 10,
+      ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(SaxifyTheme.radiusLg),
         child: BackdropFilter(
@@ -221,7 +268,9 @@ class _NavItem extends StatelessWidget {
           padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 4),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(SaxifyTheme.radiusMd),
-            color: selected ? accent.primary.withValues(alpha: 0.16) : Colors.transparent,
+            color: selected
+                ? accent.primary.withValues(alpha: 0.16)
+                : Colors.transparent,
             border: Border.all(
               color: selected
                   ? accent.primary.withValues(alpha: 0.35)

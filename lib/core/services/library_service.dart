@@ -3,10 +3,10 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../utils/backup_codec.dart';
 import '../models/artist.dart';
 import '../models/playlist.dart';
 import '../models/song.dart';
+import '../utils/backup_codec.dart';
 
 /// Likes, playlists, history, saved songs and followed artists.
 ///
@@ -32,7 +32,7 @@ class LibraryService extends ChangeNotifier {
   static const String kSearchHistory = 'saxify.search_history';
 
   static const int _maxHistory = 120;
-  static const int _maxSearchHistory = 24;
+  static const int _maxSearchHistory = 8;
 
   late List<Song> _liked;
   late List<Song> _songs;
@@ -85,6 +85,7 @@ class LibraryService extends ChangeNotifier {
 
   // ------------------------------------------------------------------ likes
   void Function(Song song, bool liked)? onLikeChanged;
+  void Function(String message)? onUserNotice;
   void Function()? onPlaylistsChanged;
 
   Future<void> toggleLike(Song song) async {
@@ -97,6 +98,9 @@ class LibraryService extends ChangeNotifier {
     await _persistSongs(kLiked, _liked);
     notifyListeners();
     onLikeChanged?.call(song, liked);
+    onUserNotice?.call(
+      liked ? 'Added to Liked Songs' : 'Removed from Liked Songs',
+    );
   }
 
   // ------------------------------------------------------------ your songs
@@ -120,6 +124,7 @@ class LibraryService extends ChangeNotifier {
     await _persistPlaylists();
     notifyListeners();
     onPlaylistsChanged?.call();
+    onUserNotice?.call('Playlist created');
     return playlist;
   }
 
@@ -129,6 +134,7 @@ class LibraryService extends ChangeNotifier {
     p.name = name.trim().isEmpty ? p.name : name.trim();
     await _persistPlaylists();
     notifyListeners();
+    onUserNotice?.call('Playlist renamed');
     onPlaylistsChanged?.call();
   }
 
@@ -136,6 +142,7 @@ class LibraryService extends ChangeNotifier {
     _playlists.removeWhere((Playlist p) => p.id == id);
     await _persistPlaylists();
     notifyListeners();
+    onUserNotice?.call('Playlist deleted');
     onPlaylistsChanged?.call();
   }
 
@@ -157,6 +164,7 @@ class LibraryService extends ChangeNotifier {
     p.songs.removeWhere((Song s) => s.id == songId);
     await _persistPlaylists();
     notifyListeners();
+    onUserNotice?.call('Removed from playlist');
     onPlaylistsChanged?.call();
   }
 
@@ -191,7 +199,10 @@ class LibraryService extends ChangeNotifier {
     } else {
       _artists.insert(0, artist);
     }
-    await _persistRaw(kArtists, _artists.map((ArtistRef a) => a.toJson()).toList());
+    await _persistRaw(
+      kArtists,
+      _artists.map((ArtistRef a) => a.toJson()).toList(),
+    );
     notifyListeners();
   }
 
@@ -199,7 +210,7 @@ class LibraryService extends ChangeNotifier {
   Future<void> rememberSearch(String query) async {
     final String q = query.trim();
     if (q.isEmpty) return;
-    _searchHistory.remove(q);
+    _searchHistory.removeWhere((s) => s.toLowerCase() == q.toLowerCase());
     _searchHistory.insert(0, q);
     if (_searchHistory.length > _maxSearchHistory) {
       _searchHistory = _searchHistory.sublist(0, _maxSearchHistory);
@@ -222,15 +233,15 @@ class LibraryService extends ChangeNotifier {
 
   // ----------------------------------------------------------------- backup
   String exportBackup() => jsonEncode(<String, dynamic>{
-        'app': 'saxify',
-        'version': 1,
-        'exportedAt': DateTime.now().toIso8601String(),
-        'liked': _liked.map((Song s) => s.toJson()).toList(),
-        'songs': _songs.map((Song s) => s.toJson()).toList(),
-        'playlists': _playlists.map((Playlist p) => p.toJson()).toList(),
-        'history': _history.map((HistoryEntry e) => e.toJson()).toList(),
-        'artists': _artists.map((ArtistRef a) => a.toJson()).toList(),
-      });
+    'app': 'saxify',
+    'version': 1,
+    'exportedAt': DateTime.now().toIso8601String(),
+    'liked': _liked.map((Song s) => s.toJson()).toList(),
+    'songs': _songs.map((Song s) => s.toJson()).toList(),
+    'playlists': _playlists.map((Playlist p) => p.toJson()).toList(),
+    'history': _history.map((HistoryEntry e) => e.toJson()).toList(),
+    'artists': _artists.map((ArtistRef a) => a.toJson()).toList(),
+  });
 
   String? validateBackup(String raw) => validateBackupJson(raw);
 
@@ -251,19 +262,32 @@ class LibraryService extends ChangeNotifier {
       if (!merge) {
         _liked = _songsFrom(decoded['liked']);
         _songs = _songsFrom(decoded['songs']);
-        _playlists = _rawListFrom(decoded['playlists']).map(Playlist.fromJson).toList();
-        _history = _rawListFrom(decoded['history']).map(HistoryEntry.fromJson).toList();
-        _artists = _rawListFrom(decoded['artists']).map(ArtistRef.fromJson).toList();
+        _playlists = _rawListFrom(
+          decoded['playlists'],
+        ).map(Playlist.fromJson).toList();
+        _history = _rawListFrom(
+          decoded['history'],
+        ).map(HistoryEntry.fromJson).toList();
+        _artists = _rawListFrom(
+          decoded['artists'],
+        ).map(ArtistRef.fromJson).toList();
       } else {
         _liked = _mergeSongs(_liked, _songsFrom(decoded['liked']));
         _songs = _mergeSongs(_songs, _songsFrom(decoded['songs']));
-        _mergePlaylistList(_rawListFrom(decoded['playlists']).map(Playlist.fromJson).toList());
-        for (final HistoryEntry entry in _rawListFrom(decoded['history']).map(HistoryEntry.fromJson)) {
+        _mergePlaylistList(
+          _rawListFrom(decoded['playlists']).map(Playlist.fromJson).toList(),
+        );
+        for (final HistoryEntry entry in _rawListFrom(
+          decoded['history'],
+        ).map(HistoryEntry.fromJson)) {
           if (entry.song.id.isEmpty) continue;
-          if (_history.any((HistoryEntry e) => e.song.id == entry.song.id)) continue;
+          if (_history.any((HistoryEntry e) => e.song.id == entry.song.id))
+            continue;
           _history.add(entry);
         }
-        for (final ArtistRef artist in _rawListFrom(decoded['artists']).map(ArtistRef.fromJson)) {
+        for (final ArtistRef artist in _rawListFrom(
+          decoded['artists'],
+        ).map(ArtistRef.fromJson)) {
           if (!isFollowing(artist.channelId)) _artists.add(artist);
         }
       }
@@ -271,7 +295,10 @@ class LibraryService extends ChangeNotifier {
       await _persistSongs(kSongs, _songs);
       await _persistPlaylists();
       await _persistHistory();
-      await _persistRaw(kArtists, _artists.map((ArtistRef a) => a.toJson()).toList());
+      await _persistRaw(
+        kArtists,
+        _artists.map((ArtistRef a) => a.toJson()).toList(),
+      );
       notifyListeners();
       onPlaylistsChanged?.call();
       return true;
@@ -285,7 +312,8 @@ class LibraryService extends ChangeNotifier {
     for (final Playlist remote in incoming) {
       Playlist? existing;
       for (final Playlist local in _playlists) {
-        if (local.id == remote.id || local.name.toLowerCase() == remote.name.toLowerCase()) {
+        if (local.id == remote.id ||
+            local.name.toLowerCase() == remote.name.toLowerCase()) {
           existing = local;
           break;
         }
@@ -296,7 +324,8 @@ class LibraryService extends ChangeNotifier {
       }
       for (final Song song in remote.songs) {
         if (song.id.isEmpty) continue;
-        if (!existing.songs.any((Song s) => s.id == song.id)) existing.songs.add(song);
+        if (!existing.songs.any((Song s) => s.id == song.id))
+          existing.songs.add(song);
       }
     }
   }
@@ -339,14 +368,20 @@ class LibraryService extends ChangeNotifier {
   static List<Song> _songsFrom(Object? value) =>
       _rawListFrom(value).map(Song.fromJson).toList();
 
-  Future<void> _persistSongs(String key, List<Song> songs) =>
-      _prefs.setString(key, jsonEncode(songs.map((Song s) => s.toJson()).toList()));
+  Future<void> _persistSongs(String key, List<Song> songs) => _prefs.setString(
+    key,
+    jsonEncode(songs.map((Song s) => s.toJson()).toList()),
+  );
 
   Future<void> _persistPlaylists() => _prefs.setString(
-      kPlaylists, jsonEncode(_playlists.map((Playlist p) => p.toJson()).toList()));
+    kPlaylists,
+    jsonEncode(_playlists.map((Playlist p) => p.toJson()).toList()),
+  );
 
   Future<void> _persistHistory() => _prefs.setString(
-      kHistory, jsonEncode(_history.map((HistoryEntry e) => e.toJson()).toList()));
+    kHistory,
+    jsonEncode(_history.map((HistoryEntry e) => e.toJson()).toList()),
+  );
 
   Future<void> _persistRaw(String key, List<Map<String, dynamic>> items) =>
       _prefs.setString(key, jsonEncode(items));
