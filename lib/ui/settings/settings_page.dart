@@ -9,7 +9,6 @@ import '../../config/branding.dart';
 import '../../core/services/library_service.dart';
 import '../../core/services/playback_service.dart';
 import '../../core/services/settings_service.dart';
-import '../../core/services/spatial_audio_service.dart';
 import '../../core/theme/saxify_accents.dart';
 import '../../core/theme/saxify_theme.dart';
 import '../../core/theme/theme_controller.dart';
@@ -112,19 +111,23 @@ class SettingsPage extends StatelessWidget {
                   // ------------------------------------------------ Effects
                   const _PanelHeader(
                     title: 'Audio & Effects',
-                    subtitle: 'Equalizer, 8D spatial audio and sound panel',
+                    subtitle: 'Shape and save your sound preferences',
                   ),
                   _SettingTile(
                     icon: Icons.graphic_eq_rounded,
-                    title: 'Equalizer & 8D spatial audio',
-                    subtitle: 'Bands, presets and the spatial templates',
+                    title: 'Studio equalizer',
+                    subtitle: 'Bands, built-in presets and your saved custom presets',
                     onTap: () => Navigator.of(context).push(
                       MaterialPageRoute<void>(
                         builder: (_) => const EqualizerPage(),
                       ),
                     ),
                   ),
-                  const _SpatialQuickTile(),
+                  const _SettingTile(
+                    icon: Icons.surround_sound_rounded,
+                    title: '8D Audio',
+                    subtitle: 'Coming soon — we are crafting a more immersive listening experience',
+                  ),
 
                   // ------------------------------------------------ Playback
                   const _PanelHeader(
@@ -270,6 +273,16 @@ class SettingsPage extends StatelessWidget {
                   const _PanelHeader(
                     title: 'About & Support',
                     subtitle: 'Version info, help and credits',
+                  ),
+                  _SettingTile(
+                    icon: Icons.language_rounded,
+                    title: 'Visit our website',
+                    subtitle: 'Discover the Ifallertzia platform, updates and more at sidify.vercel.app',
+                    trailing: const Icon(Icons.open_in_new_rounded, size: 18),
+                    onTap: () => launchUrl(
+                      Uri.parse('https://sidify.vercel.app'),
+                      mode: LaunchMode.externalApplication,
+                    ),
                   ),
                   _SettingTile(
                     icon: Icons.system_update_rounded,
@@ -1043,26 +1056,6 @@ class _Channel extends StatelessWidget {
   }
 }
 
-/// Quick 8D switch, right in Settings.
-class _SpatialQuickTile extends StatelessWidget {
-  const _SpatialQuickTile();
-
-  @override
-  Widget build(BuildContext context) {
-    final SpatialAudioService spatial = context.watch<SpatialAudioService>();
-    return _SwitchTile(
-      icon: Icons.surround_sound_rounded,
-      title: '8D spatial audio',
-      subtitle: spatial.enabled
-          ? '${spatial.preset.label} · ${spatial.rotationHz.toStringAsFixed(2)} Hz orbit'
-          : 'Off · pick a template in the equalizer',
-      value: spatial.enabled,
-      onChanged: spatial.setEnabled,
-    );
-  }
-}
-
-// --------------------------------------------------------------------- about
 class _AboutCard extends StatelessWidget {
   const _AboutCard();
 
@@ -1109,7 +1102,7 @@ class _AboutCard extends StatelessWidget {
           const Text(
             'IfallMusic is a clean, premium music experience: search and play any '
             'song, save it for offline listening, shape the sound with the studio '
-            'equalizer and 8D spatial templates, and let the whole app change colour '
+            'equalizer presets, and let the whole app change colour '
             'with you — on a deep black canvas made for colour.',
             style: TextStyle(
               fontSize: 12.5,
@@ -1127,7 +1120,6 @@ class _AboutCard extends StatelessWidget {
               _FeatureChip('Background playback'),
               _FeatureChip('Offline downloads'),
               _FeatureChip('Playlists'),
-              _FeatureChip('8D spatial audio'),
               _FeatureChip('Liquid glass UI'),
             ],
           ),

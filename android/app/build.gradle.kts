@@ -13,6 +13,19 @@ val keystoreProperties = Properties()
 if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
+val releaseStoreFilePath = keystoreProperties["storeFile"] as String?
+val releaseStoreFile = releaseStoreFilePath?.let { file(it) }
+
+gradle.taskGraph.whenReady { taskGraph ->
+    val isReleaseBuild = taskGraph.allTasks.any { it.name.contains("Release", ignoreCase = true) }
+    if (isReleaseBuild && (releaseStoreFile == null || !releaseStoreFile.exists())) {
+        throw GradleException(
+            "Release signing key missing. Configure android/key.properties and " +
+                "android/app/upload-keystore.jks with the SAME private key used for " +
+                "the installed app. Refusing to fall back to a machine-specific debug key."
+        )
+    }
+}
 
 android {
     namespace = "com.saxify.app"
@@ -30,11 +43,10 @@ android {
     // "App not installed as package conflicts with an existing package").
     signingConfigs {
         create("release") {
-            val storeFilePath = keystoreProperties["storeFile"] as String?
-            if (storeFilePath != null) {
+            if (releaseStoreFilePath != null) {
                 keyAlias = keystoreProperties["keyAlias"] as String
                 keyPassword = keystoreProperties["keyPassword"] as String
-                storeFile = file(storeFilePath)
+                storeFile = releaseStoreFile
                 storePassword = keystoreProperties["storePassword"] as String
             }
         }
@@ -59,22 +71,9 @@ android {
 
     buildTypes {
         release {
-            // Sign with the stable release keystore so updates install over
-            // existing builds. If the keystore file hasn't been generated yet,
-            // fall back to the debug keystore and print a warning.
-            val releaseStoreFilePath = keystoreProperties["storeFile"] as String?
-            val releaseStoreFile = releaseStoreFilePath?.let { file(it) }
-            signingConfig =
-                if (releaseStoreFile != null && releaseStoreFile.exists())
-                    signingConfigs.getByName("release")
-                else {
-                    logger.warn(
-                        "WARNING: release keystore not found at android/app/upload-keystore.jks. " +
-                        "Run `bash android/generate_keystore.sh` once, then rebuild. " +
-                        "Falling back to debug signing for this build."
-                    )
-                    signingConfigs.getByName("debug")
-                }
+            // Never silently sign a release with the local debug key: it changes
+            // between machines and makes Android reject updates as a signature conflict.
+            signingConfig = signingConfigs.getByName("release")
 
             // Disable code shrinking for now to avoid ProGuard issues with
             // audio/download native plugins.

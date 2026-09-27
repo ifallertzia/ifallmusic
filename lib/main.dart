@@ -32,6 +32,31 @@ import 'ui/onboarding/welcome_page.dart';
 import 'ui/shell/saxify_shell.dart';
 import 'ui/shell/shell_controller.dart';
 
+Future<void> _restoreEqualizerForPlayback(
+  SettingsService settings,
+  PlaybackService playback,
+) async {
+  final List<int> levels = settings.equalizerLevels;
+  final bool requested = settings.equalizerEnabled && levels.isNotEmpty;
+  bool applied = false;
+  if (requested) {
+    final int? session = playback.player.androidAudioSessionId;
+    if (session != null && session != 0) {
+      final EqualizerInfo? info = await NativeBridge.eqInit(session);
+      if (info != null && info.supported) {
+        for (int i = 0; i < levels.length && i < info.bands; i++) {
+          await NativeBridge.eqSetBand(i, levels[i]);
+        }
+        await NativeBridge.eqSetEnabled(true);
+        applied = true;
+      }
+    }
+  }
+  showAppNotice(applied
+      ? 'Playing in this equalizer: ${settings.equalizerProfileName}'
+      : 'Playing in Original audio');
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -108,6 +133,7 @@ Future<AppBoot> _initializeApp() async {
   playback.onTrackStarted = (Song song) {
     recommendations.notePlay(song);
     recommendations.refresh(current: song, force: true);
+    unawaited(_restoreEqualizerForPlayback(settings, playback));
   };
   playback.onTrackSkipped = recommendations.noteSkip;
   library.onLikeChanged = (Song song, bool liked) {

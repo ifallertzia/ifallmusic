@@ -1,80 +1,51 @@
-# Fixing the "App not installed / package conflicts" error
+# Android package identity and update signing
 
-## Problem
-When installing a new APK over the old IfallMusic, Android says:
+The Android application ID is intentionally kept as `com.saxify.app`, and the
+version in `pubspec.yaml` is incremented for each release. That preserves the
+package identity and gives Android a higher `versionCode`.
 
-> **App not installed as package conflicts with an existing package.**
+## Critical: updates require the original private signing key
 
-Two things cause this:
+Android accepts an APK update only when its signing certificate matches the
+installed app's certificate. A package ID or version bump cannot fix a
+certificate mismatch. This checkout does **not** contain a signing keystore
+(`android/app/upload-keystore.jks` is gitignored), and a signing certificate
+cannot be reverse-engineered into its private key from an APK.
 
-1. **Different signing keys.** The previous `build.gradle.kts` signed release
-   APKs with the Android `debug` keystore, which is auto-generated per machine.
-   A release built on a different computer (or after the debug keystore was
-   wiped) carries a different signature, so Android rejects it as a "conflict".
-2. **Version code not bumped.** Android will not replace an existing install
-   unless the new APK has a higher `versionCode`.
+Before publishing, recover the exact keystore used to sign the app that users
+already have installed. Do **not** run `android/generate_keystore.sh` as a fix
+for a signature conflict: that generates a new identity and will make the
+conflict permanent for existing installs. If the app was previously released
+with an ephemeral GitHub Actions/debug key, the original key or its source
+machine's debug keystore is required; if it has been lost, Android cannot
+install a differently signed APK over that app. Users would need a one-time
+uninstall/reinstall and library restore.
 
-## What's fixed in this repo
+## Local signed APK
 
-- `android/app/build.gradle.kts` now has a dedicated **release signing config**
-  that reads from `android/key.properties` and signs release APKs with a
-  consistent keystore at `android/app/upload-keystore.jks`.
-- `android/key.properties` contains the keystore path and passwords.
-- `android/generate_keystore.sh` generates the release keystore the first time.
-- `versionCode` / `versionName` bumped to `2.3.1+7` in `pubspec.yaml`.
-- The in-app update dialog no longer dumps the full GitHub release body; it
-  shows a clean two-line changelog:
-  - Lyrics support added
-  - Important bug fixes
-- The "What's new" card on the Home screen was simplified to the same two
-  lines (no more long list of old changes).
-- A migration message is shown after download if installation still fails,
-  telling users to back up → uninstall → reinstall (one-time only).
-- `key.properties` and `*.jks` are added to `.gitignore` so credentials aren't
-  accidentally pushed.
+Put the recovered key at `android/app/upload-keystore.jks` and create the
+ignored `android/key.properties` file:
 
-## How to build the signed release APK
-
-From the repo root, on a machine with Flutter + Android SDK + JDK installed:
-
-```bash
-# 1. One-time: generate the stable release keystore.
-#    (Creates android/app/upload-keystore.jks — BACK THIS FILE UP.)
-bash android/generate_keystore.sh
-
-# 2. Build the signed APK.
-flutter build apk --release
+```properties
+storeFile=upload-keystore.jks
+keyAlias=YOUR_ORIGINAL_ALIAS
+keyPassword=YOUR_KEY_PASSWORD
+storePassword=YOUR_STORE_PASSWORD
 ```
 
-The signed APK lands at:
+Then build with `flutter build apk --release`. Release builds now refuse to
+fall back to the machine-specific debug key.
 
-```
-build/app/outputs/flutter-apk/app-release.apk
-```
+## GitHub Actions release signing
 
-Upload **that exact file** to the GitHub release with asset name
-`app-release.apk` — the in-app updater looks for that name.
+Configure these repository Actions secrets with values for that **same** key:
 
-## One-time migration for existing users
+- `ANDROID_RELEASE_KEYSTORE_BASE64` — base64 of the original `.jks` file
+- `ANDROID_RELEASE_STORE_PASSWORD`
+- `ANDROID_RELEASE_KEY_ALIAS`
+- `ANDROID_RELEASE_KEY_PASSWORD`
 
-Users who already have an older IfallMusic installed (signed with the old
-debug key) will still see "package conflicts" the first time they try to
-install this new APK. They need to:
-
-1. Open the **old** app → Settings → **Backup library** (saves liked songs,
-   playlists, etc. as a code).
-2. **Uninstall** the old IfallMusic.
-3. Install the new `app-release.apk`.
-4. In Settings → **Import playlist code**, paste their backup.
-
-After this migration, **all future in-app updates will install over the
-existing app** because they will all be signed with the same release
-keystore.
-
-## Important: keep the keystore safe!
-
-- Back up `android/app/upload-keystore.jks` to a password manager or private
-  cloud.
-- **Never** delete it after releasing. If you lose the keystore, you can never
-  publish another update for `com.saxify.app` — you'd have to change the
-  package name and release a "new app", forcing everyone to migrate again.
+The workflow materializes the ignored key files only during the build. Never
+commit or paste a signing keystore or its passwords into source/chat. The
+published APK should be versioned above the installed one and signed with this
+same keystore on every release.

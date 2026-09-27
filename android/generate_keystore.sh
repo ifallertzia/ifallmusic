@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Generate a stable release keystore for IfallMusic.
 #
-# Run once, then keep android/app/upload-keystore.jks backed up safely.
+# Only generate a brand-new app signing identity if no previous release must
+# be updated in place. This key cannot be reconstructed from an APK.
 # Future release builds MUST use the SAME keystore, otherwise Android will
 # refuse to install the update with:
 #   "App not installed as package conflicts with an existing package."
@@ -9,14 +10,11 @@
 # Usage:
 #   bash android/generate_keystore.sh
 #
-# The key.properties file at android/key.properties is already configured
-# to use:
-#   storeFile  = app/upload-keystore.jks
+# Configure android/key.properties to use:
+#   storeFile  = upload-keystore.jks
 #   keyAlias   = ifallmusic
-#   store/key pass = ifallmusic123
-#
-# Change passwords here AND in android/key.properties if you want stronger
-# credentials.
+# The script prompts for a strong password and writes the ignored
+# android/key.properties file. Securely back up both files.
 
 set -e
 
@@ -37,16 +35,38 @@ if ! command -v keytool >/dev/null 2>&1; then
   exit 1
 fi
 
+read -r -s -p "Choose a keystore password (at least 6 characters): " KEYSTORE_PASSWORD
+printf "\n"
+if [ "${#KEYSTORE_PASSWORD}" -lt 6 ]; then
+  echo "Password must be at least 6 characters." >&2
+  exit 1
+fi
+read -r -s -p "Confirm keystore password: " CONFIRM_PASSWORD
+printf "\n"
+if [ "$KEYSTORE_PASSWORD" != "$CONFIRM_PASSWORD" ]; then
+  echo "Passwords do not match." >&2
+  exit 1
+fi
+
 echo "Generating release keystore at: $KEYSTORE"
 keytool -genkey -v \
   -keystore "$KEYSTORE" \
   -keyalg RSA -keysize 2048 -validity 10000 \
   -alias ifallmusic \
-  -storepass ifallmusic123 \
-  -keypass ifallmusic123 \
+  -storepass "$KEYSTORE_PASSWORD" \
+  -keypass "$KEYSTORE_PASSWORD" \
   -dname "CN=Ifallertzia, OU=IfallMusic, O=IfallMusic, L=India, ST=India, C=IN"
+cat > "$SCRIPT_DIR/key.properties" <<EOF
+storeFile=upload-keystore.jks
+keyAlias=ifallmusic
+keyPassword=$KEYSTORE_PASSWORD
+storePassword=$KEYSTORE_PASSWORD
+EOF
+chmod 600 "$SCRIPT_DIR/key.properties"
+unset KEYSTORE_PASSWORD CONFIRM_PASSWORD
 
 echo ""
+echo "A new private signing identity was generated. It will NOT update an app already signed with another key."
 echo "Done. Building the APK now with:"
 echo "  flutter build apk --release"
 echo ""

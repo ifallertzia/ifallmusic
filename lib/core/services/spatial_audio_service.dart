@@ -164,11 +164,13 @@ class SpatialPresets {
 /// Live 8D state for the whole app.
 class SpatialAudioService extends ChangeNotifier {
   SpatialAudioService(this._settings) {
-    _preset = SpatialPresets.byId(_settings.spatialPresetId);
-    _depth = _settings.spatialDepth.clamp(0.0, 1.0);
-    _rotationHz = _settings.spatialRotationHz.clamp(0.0, 0.6);
-    _reverb = _settings.spatialReverb.clamp(0.0, 1.0);
-    if (_preset.isOff) _enabled = false;
+    // 8D is temporarily unavailable. Force the native effect off, including
+    // for users upgrading from a build that had an 8D preset enabled.
+    _preset = SpatialPresets.off;
+    _depth = 0;
+    _rotationHz = 0.18;
+    _reverb = 0.35;
+    _enabled = false;
     _push();
   }
 

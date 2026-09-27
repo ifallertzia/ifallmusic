@@ -5,19 +5,17 @@ import 'package:provider/provider.dart';
 
 import '../../core/services/native_bridge.dart';
 import '../../core/services/playback_service.dart';
+import '../../core/services/settings_service.dart';
 import '../../core/theme/glass.dart';
 import '../../core/theme/saxify_accents.dart';
 import '../../core/theme/saxify_theme.dart';
 import '../widgets/neon.dart';
 import '../widgets/search_fab.dart';
-import 'sound_panel.dart';
 
-/// Equalizer + the 8D spatial audio templates.
+/// Studio equalizer with saved user presets.
 ///
-/// The band section is bound to the running player session (Android
-/// `Equalizer.getCenterFreq`, in millihertz — the device API, not the invalid
-/// `getCenterFrecuencias` helper). The spatial section is the real-time
-/// orbit processor from `spatial_audio_service.dart` / `SpatialAudioProcessor.kt`.
+/// Bands bind to the running Android player session, and selected settings
+/// persist across tracks and app restarts.
 class EqualizerPage extends StatefulWidget {
   const EqualizerPage({super.key});
 
@@ -27,11 +25,12 @@ class EqualizerPage extends StatefulWidget {
 
 class _EqualizerPageState extends State<EqualizerPage> {
   EqualizerInfo? _info;
-  bool _enabled = true;
+  bool _enabled = false;
   bool _loading = true;
   bool _unsupported = false;
   List<int> _levels = <int>[];
   String? _preset;
+  List<Map<String, dynamic>> _savedPresets = <Map<String, dynamic>>[];
 
   static const List<String> _custom = <String>[
     'Flat',
@@ -74,34 +73,96 @@ class _EqualizerPageState extends State<EqualizerPage> {
       });
       return;
     }
+    final SettingsService settings = context.read<SettingsService>();
     final EqualizerInfo? info = await NativeBridge.eqInit(session);
     if (!mounted) return;
     setState(() {
       _loading = false;
       _info = info;
       _unsupported = info == null || !info.supported;
+      _savedPresets = settings.equalizerCustomPresets;
+      final List<int> savedLevels = settings.equalizerLevels;
+      _enabled = settings.equalizerEnabled;
+      _preset = settings.equalizerProfileName == 'Original audio'
+          ? null
+          : settings.equalizerProfileName;
       _levels = info == null ? <int>[] : List<int>.from(info.levels);
+      if (savedLevels.length == info?.bands) _levels = savedLevels;
     });
+    if (info != null && info.supported && settings.equalizerEnabled) {
+      final List<int> savedLevels = settings.equalizerLevels;
+      for (int i = 0; i < savedLevels.length && i < info.bands; i++) {
+        await NativeBridge.eqSetBand(i, savedLevels[i]);
+      }
+      await NativeBridge.eqSetEnabled(true);
+    } else if (info != null && info.supported) {
+      await NativeBridge.eqSetEnabled(false);
+    }
   }
 
   Future<void> _applyPreset(String name) async {
     final EqualizerInfo? info = _info;
     if (info == null) return;
-    final bool device = await NativeBridge.eqUsePreset(name);
-    if (device) {
-      setState(() => _preset = name);
-      return;
+    Map<String, dynamic>? saved;
+    for (final Map<String, dynamic> item in _savedPresets) {
+      if (item['name'] == name) {
+        saved = item;
+        break;
+      }
     }
-    final List<int> next = _curve(name, info);
-    for (int i = 0; i < next.length; i++) {
+    final List<int> next = saved?['levels'] is List
+        ? (saved!['levels'] as List).map((Object? v) => v is num ? v.round() : 0).toList()
+        : _curve(name, info);
+    for (int i = 0; i < next.length && i < info.bands; i++) {
       await NativeBridge.eqSetBand(i, next[i]);
     }
+    await NativeBridge.eqSetEnabled(true);
     if (!mounted) return;
     setState(() {
       _preset = name;
       _levels = next;
       _enabled = true;
     });
+    await context.read<SettingsService>().setEqualizerProfile(
+      name: name,
+      levels: next,
+      enabled: true,
+    );
+  }
+
+  Future<void> _saveCustomPreset() async {
+    final TextEditingController controller = TextEditingController();
+    final String? name = await showDialog<String>(
+      context: context,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        title: const Text('Save equalizer preset'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLength: 24,
+          decoration: const InputDecoration(labelText: 'Preset name'),
+          onSubmitted: (String value) => Navigator.of(dialogContext).pop(value),
+        ),
+        actions: <Widget>[
+          TextButton(onPressed: () => Navigator.of(dialogContext).pop(), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.of(dialogContext).pop(controller.text), child: const Text('Save')),
+        ],
+      ),
+    );
+    controller.dispose();
+    final String clean = name?.trim() ?? '';
+    if (clean.isEmpty || !mounted || _levels.isEmpty) return;
+    final SettingsService settings = context.read<SettingsService>();
+    await settings.saveEqualizerCustomPreset(clean, _levels);
+    await NativeBridge.eqSetEnabled(true);
+    await settings.setEqualizerProfile(name: clean, levels: _levels, enabled: true);
+    if (!mounted) return;
+    setState(() {
+      _preset = clean;
+      _enabled = true;
+      _savedPresets = settings.equalizerCustomPresets;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Saved "$clean"')));
   }
 
   List<int> _curve(String name, EqualizerInfo info) {
@@ -147,20 +208,12 @@ class _EqualizerPageState extends State<EqualizerPage> {
       child: Scaffold(
         backgroundColor: Colors.transparent,
         appBar: AppBar(
-          title: const Text('Equalizer & 8D audio'),
+          title: const Text('Equalizer'),
           actions: const <Widget>[SaxifySearchButton()],
         ),
         body: ListView(
           padding: const EdgeInsets.fromLTRB(16, 6, 16, 180),
           children: <Widget>[
-            // ------------------------------------------------ 8D templates
-            GlassPanel(
-              glow: true,
-              padding: EdgeInsets.zero,
-              child: const SpatialControls(),
-            ),
-            const SizedBox(height: 18),
-
             // ------------------------------------------------ bands
             const SectionHeader(
               title: 'Studio equalizer',
@@ -177,7 +230,7 @@ class _EqualizerPageState extends State<EqualizerPage> {
                 icon: Icons.graphic_eq_rounded,
                 title: 'Equalizer unavailable',
                 message:
-                    'This device does not expose an audio session equalizer. Playback and 8D audio are unchanged.',
+                    'This device does not expose an audio session equalizer. Playback is unchanged.',
               )
             else ...<Widget>[
               GlassPanel(
@@ -196,6 +249,11 @@ class _EqualizerPageState extends State<EqualizerPage> {
                       onChanged: (bool v) async {
                         await NativeBridge.eqSetEnabled(v);
                         setState(() => _enabled = v);
+                        await context.read<SettingsService>().setEqualizerProfile(
+                          name: v ? (_preset ?? 'Custom') : 'Original audio',
+                          levels: _levels,
+                          enabled: v,
+                        );
                       },
                     ),
                     const SizedBox(height: 4),
@@ -211,6 +269,7 @@ class _EqualizerPageState extends State<EqualizerPage> {
                         for (final String name in <String>[
                           ..._custom,
                           ...?_info?.presets.where((String p) => !_custom.contains(p)),
+                        ..._savedPresets.map((Map<String, dynamic> p) => p['name'].toString()),
                         ])
                           ChoiceChip(
                             label: Text(name),
@@ -219,7 +278,15 @@ class _EqualizerPageState extends State<EqualizerPage> {
                           ),
                       ],
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 10),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton.icon(
+                        onPressed: _levels.isEmpty ? null : _saveCustomPreset,
+                        icon: const Icon(Icons.add_rounded, size: 18),
+                        label: const Text('Save current preset'),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -241,6 +308,11 @@ class _EqualizerPageState extends State<EqualizerPage> {
                       if (_levels.length > i) _levels[i] = level;
                     });
                     await NativeBridge.eqSetBand(i, level);
+                    await context.read<SettingsService>().setEqualizerProfile(
+                      name: 'Custom',
+                      levels: _levels,
+                      enabled: _enabled,
+                    );
                   },
                 ),
             ],

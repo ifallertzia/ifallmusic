@@ -35,6 +35,8 @@ class SettingsService extends ChangeNotifier {
   static const String kLastPlaylistCode = 'saxify.last_playlist_code';
   static const String kAutoPlaylistSync = 'saxify.auto_playlist_sync';
   static const String kMaxDownloadHistory = 'saxify.max_download_history';
+  static const String kEqualizerProfile = 'saxify.equalizer_profile.v1';
+  static const String kEqualizerCustomPresets = 'saxify.equalizer_custom_presets.v1';
 
   // ---------------------------------------------------------------- account
   String get displayName => _prefs.getString(kDisplayName)?.trim() ?? '';
@@ -146,6 +148,66 @@ class SettingsService extends ChangeNotifier {
       _prefs.setBool(kAutoPlaylistSync, value).then((_) => notifyListeners());
 
   int get maxDownloadHistory => _prefs.getInt(kMaxDownloadHistory) ?? 120;
+
+  // ---------------------------------------------------------- equalizer
+  Map<String, dynamic> get equalizerProfile {
+    final String? raw = _prefs.getString(kEqualizerProfile);
+    if (raw == null || raw.isEmpty) return <String, dynamic>{};
+    try {
+      final Object? decoded = jsonDecode(raw);
+      return decoded is Map ? decoded.cast<String, dynamic>() : <String, dynamic>{};
+    } catch (_) {
+      return <String, dynamic>{};
+    }
+  }
+
+  Future<void> setEqualizerProfile({
+    required String name,
+    required List<int> levels,
+    required bool enabled,
+  }) async {
+    await _prefs.setString(kEqualizerProfile, jsonEncode(<String, Object>{
+      'name': name,
+      'levels': levels,
+      'enabled': enabled,
+    }));
+    notifyListeners();
+  }
+
+  List<Map<String, dynamic>> get equalizerCustomPresets {
+    final String? raw = _prefs.getString(kEqualizerCustomPresets);
+    if (raw == null || raw.isEmpty) return <Map<String, dynamic>>[];
+    try {
+      final Object? decoded = jsonDecode(raw);
+      if (decoded is! List) return <Map<String, dynamic>>[];
+      return decoded.whereType<Map>().map((Map item) => item.cast<String, dynamic>()).toList();
+    } catch (_) {
+      return <Map<String, dynamic>>[];
+    }
+  }
+
+  Future<void> saveEqualizerCustomPreset(String name, List<int> levels) async {
+    final List<Map<String, dynamic>> presets = equalizerCustomPresets;
+    presets.removeWhere((Map<String, dynamic> p) =>
+        (p['name']?.toString().toLowerCase() ?? '') == name.trim().toLowerCase());
+    presets.add(<String, dynamic>{'name': name.trim(), 'levels': levels});
+    await _prefs.setString(kEqualizerCustomPresets, jsonEncode(presets));
+    notifyListeners();
+  }
+
+  Future<void> deleteEqualizerCustomPreset(String name) async {
+    final List<Map<String, dynamic>> presets = equalizerCustomPresets;
+    presets.removeWhere((Map<String, dynamic> p) => p['name'] == name);
+    await _prefs.setString(kEqualizerCustomPresets, jsonEncode(presets));
+    notifyListeners();
+  }
+
+  bool get equalizerEnabled => equalizerProfile['enabled'] == true;
+  String get equalizerProfileName => equalizerProfile['name']?.toString() ?? 'Original audio';
+  List<int> get equalizerLevels {
+    final Object? raw = equalizerProfile['levels'];
+    return raw is List ? raw.map((Object? value) => value is num ? value.round() : 0).toList() : <int>[];
+  }
 
   // ----------------------------------------------------- spatial audio (8D)
   String get spatialPresetId => _prefs.getString(kSpatialPreset) ?? 'off';

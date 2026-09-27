@@ -24,7 +24,7 @@ class IfallBranding {
   static const String fileSuffix = '_ifallmusic';
   static const String author = 'Siddharth ifallertzia';
   static const String contactEmail = 'dastaanenajdik@gmail.com';
-  static const String versionLabel = '2.3.1';
+  static const String versionLabel = '2.3.2';
   static const String tagline = 'Stream beyond limits';
   static const String userAgent = 'IfallMusic/2.3.1 (Flutter)';
   static const String packageName = 'com.saxify.app';
