@@ -46,3 +46,9 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# Android signing — never commit the release keystore or its passwords.
+/android/key.properties
+/android/app/upload-keystore.jks
+*.jks
+*.keystore
