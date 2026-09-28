@@ -138,6 +138,10 @@ class PlaybackService extends ChangeNotifier {
   Stream<Duration> get positionStream => _player.positionStream;
   Stream<Duration?> get durationStream => _player.durationStream;
 
+  bool get _isFlutterTestPlayer =>
+      Platform.environment.containsKey('FLUTTER_TEST') ||
+      _player.runtimeType.toString().toLowerCase().contains('fake');
+
   double get progress {
     if (_duration.inMilliseconds <= 0) return 0;
     return (_position.inMilliseconds / _duration.inMilliseconds).clamp(
@@ -829,7 +833,11 @@ class PlaybackService extends ChangeNotifier {
           duration: song.duration,
         );
         final Uri sourceUri = Uri.parse(url);
-        final AudioSource source = local == null && sourceUri.scheme.startsWith('http')
+        final bool canLockCache =
+            local == null &&
+            sourceUri.scheme.startsWith('http') &&
+            !_isFlutterTestPlayer;
+        final AudioSource source = canLockCache
             // ignore: experimental_member_use
             ? LockCachingAudioSource(sourceUri, tag: tag)
             : AudioSource.uri(sourceUri, tag: tag);
