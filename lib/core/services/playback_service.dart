@@ -830,6 +830,7 @@ class PlaybackService extends ChangeNotifier {
         );
         final Uri sourceUri = Uri.parse(url);
         final AudioSource source = local == null && sourceUri.scheme.startsWith('http')
+            // ignore: experimental_member_use
             ? LockCachingAudioSource(sourceUri, tag: tag)
             : AudioSource.uri(sourceUri, tag: tag);
         await _player
