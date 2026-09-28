@@ -37,9 +37,38 @@ playback and downloads — happens on the device.
 
 ## Playback engine
 
-`lib/core/services/playback_service.dart` keeps the existing HEAD-probe and
-`androidSdkless` → `ios` → `androidVr` stream fallback. The 8D processor and the
-equalizer ride on top and never touch the resolver.
+Playback now uses a dual-engine resolver inside `lib/core/services/playback_service.dart`:
+
+1. **Innertube primary** (`lib/core/services/innertube_resolver.dart`) posts directly to
+   YouTube's on-device `youtubei/v1/player` endpoint and rotates through Android,
+   VR, VisionOS, embedded, Music and TV clients. Direct audio URLs are HEAD-probed
+   before use.
+2. **Legacy fallback** keeps `youtube_explode_dart` with the app's existing
+   `androidSdkless` → `ios` → `androidVr` order, plus manifest/probe timeouts,
+   per-itag probe blacklisting and one network retry.
+
+Settings → Playback includes **Stream resolver** for Smart / Innertube only / Legacy
+only debugging. Resolved stream URLs are cached per video for four hours with
+in-flight coalescing, and mid-stream source failures evict the cache and retry from the
+same position. `LockCachingAudioSource` is used for streamed network sources so replayed
+tracks can start from just_audio's local cache; real file downloads remain separate and
+continue to use the Dio → `.part` → container detection pipeline.
+
+The 8D processor and equalizer ride on top and never touch the resolver.
+
+## On device music
+
+Library now includes an additive **On device** section for audio files already on the
+phone. On Android it requests `READ_MEDIA_AUDIO` on Android 13+ or
+`READ_EXTERNAL_STORAGE` on older devices, scans `MediaStore.Audio.Media` for real music
+files longer than 30 seconds, and stores the scan result locally for instant relaunch.
+The section exposes Local Songs, Local Albums and Local Artists; local tracks use
+`content://media/external/audio/media/<id>` sources in the same `PlaybackService`, so
+they can sit in the same queue as streamed tracks without going through Innertube or the
+legacy resolver. Search also shows a small **On device** group above web results.
+
+The existing Downloads tab is unchanged and remains only for files downloaded by
+IfallMusic.
 
 ## Local library JSON vs. playlist codes
 

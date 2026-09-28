@@ -188,6 +188,28 @@ class SettingsPage extends StatelessWidget {
                       }
                     },
                   ),
+                  _SwitchTile(
+                    icon: Icons.content_cut_rounded,
+                    title: 'Skip silence',
+                    subtitle: 'Best-effort just_audio silence skipping on supported devices',
+                    value: settings.skipSilence,
+                    onChanged: (bool enabled) =>
+                        context.read<PlaybackService>().setSkipSilence(enabled),
+                  ),
+                  _ChoiceTile(
+                    icon: Icons.route_rounded,
+                    title: 'Stream resolver',
+                    subtitle: 'Smart uses Innertube first, then legacy fallback',
+                    choices: const <String>['Smart', 'Innertube only', 'Legacy only'],
+                    value: settings.streamResolverLabel,
+                    onChanged: (String v) => settings.setStreamResolverMode(
+                      switch (v) {
+                        'Innertube only' => StreamResolverMode.innertubeOnly,
+                        'Legacy only' => StreamResolverMode.legacyOnly,
+                        _ => StreamResolverMode.smart,
+                      },
+                    ),
+                  ),
 
                   // ------------------------------------------------ Storage
                   const _PanelHeader(
@@ -211,6 +233,38 @@ class SettingsPage extends StatelessWidget {
                     subtitle:
                         'Save a public copy in Download/${IfallBranding.downloadFolderName}',
                     onTap: () => StoragePermission.ensure(context),
+                  ),
+                  _ChoiceTile(
+                    icon: Icons.cached_rounded,
+                    title: 'Offline cache size',
+                    subtitle: 'Smart playback cache; downloads stay separate',
+                    choices: const <String>['512MB', '1GB', '2GB', '4GB', 'Unlimited'],
+                    value: settings.offlineCacheSizeLabel,
+                    onChanged: (String label) async {
+                      await settings.setOfflineCacheSizeLabel(label);
+                      if (context.mounted) {
+                        await context.read<PlaybackService>().prunePlaybackCache();
+                      }
+                    },
+                  ),
+                  _SettingTile(
+                    icon: Icons.delete_sweep_outlined,
+                    title: 'Clear playback cache',
+                    subtitle: 'Removes temporary streamed-song cache only',
+                    trailing: FutureBuilder<int>(
+                      future: context.read<PlaybackService>().playbackCacheBytes(),
+                      builder: (BuildContext context, AsyncSnapshot<int> snap) => Text(
+                        snap.hasData ? Fmt.bytes(snap.data!) : '…',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: SaxifyColors.textSecondary,
+                        ),
+                      ),
+                    ),
+                    onTap: () async {
+                      await context.read<PlaybackService>().clearPlaybackCache();
+                      if (context.mounted) _toast(context, 'Playback cache cleared');
+                    },
                   ),
 
                   // ------------------------------------------------ System

@@ -1,6 +1,6 @@
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
-enum TrackSource { ytMusic, youtube }
+enum TrackSource { ytMusic, youtube, localDevice }
 
 enum QualityTier { high, normal }
 
@@ -26,11 +26,12 @@ class Song {
     this.album,
     this.albumId,
     this.musicVideoType,
+    this.localUri,
     this.source = TrackSource.youtube,
     QualityTier? quality,
   }) : _quality = quality;
 
-  final String? artistId, album, albumId, musicVideoType;
+  final String? artistId, album, albumId, musicVideoType, localUri;
   final TrackSource source;
   final QualityTier? _quality;
   QualityTier get quality =>
@@ -72,12 +73,14 @@ class Song {
     String? album,
     String? albumId,
     String? thumbnailUrl,
+    String? localUri,
   }) {
     return Song(
       artistId: artistId,
       album: album ?? this.album,
       albumId: albumId ?? this.albumId,
       musicVideoType: musicVideoType,
+      localUri: localUri ?? this.localUri,
       source: source,
       quality: quality,
       id: id,
@@ -97,6 +100,7 @@ class Song {
     'album': album,
     'albumId': albumId,
     'musicVideoType': musicVideoType,
+    'localUri': localUri,
     'id': id,
     'title': title,
     'artist': artist,
@@ -113,7 +117,9 @@ class Song {
     return Song(
       source: json['source'] == 'ytMusic'
           ? TrackSource.ytMusic
-          : TrackSource.youtube,
+          : json['source'] == 'localDevice'
+              ? TrackSource.localDevice
+              : TrackSource.youtube,
       quality: json['quality'] == 'high'
           ? QualityTier.high
           : json['quality'] == 'normal'
@@ -123,6 +129,7 @@ class Song {
       album: json['album'] as String?,
       albumId: json['albumId'] as String?,
       musicVideoType: json['musicVideoType'] as String?,
+      localUri: json['localUri'] as String?,
       id: json['id'] as String? ?? '',
       title: json['title'] as String? ?? 'Unknown title',
       artist: json['artist'] as String? ?? 'Unknown artist',

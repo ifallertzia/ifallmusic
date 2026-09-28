@@ -16,9 +16,10 @@ class LibraryTabs {
   static const int playlists = 1;
   static const int songs = 2;
   static const int artists = 3;
-  static const int downloads = 4;
-  static const int history = 5;
-  static const int lyrics = 6;
+  static const int onDevice = 4;
+  static const int downloads = 5;
+  static const int history = 6;
+  static const int lyrics = 7;
 }
 
 /// Coordinates the shell: which tab is showing and what the search box should

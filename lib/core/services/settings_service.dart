@@ -7,6 +7,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// Everything the Settings screen owns, persisted with shared_preferences.
 ///
 /// Keys are stable strings so the store survives renames of the Dart fields.
+enum StreamResolverMode { smart, innertubeOnly, legacyOnly }
+
 class SettingsService extends ChangeNotifier {
   SettingsService(this._prefs);
 
@@ -37,6 +39,10 @@ class SettingsService extends ChangeNotifier {
   static const String kMaxDownloadHistory = 'saxify.max_download_history';
   static const String kEqualizerProfile = 'saxify.equalizer_profile.v1';
   static const String kEqualizerCustomPresets = 'saxify.equalizer_custom_presets.v1';
+  static const String kStreamResolverMode = 'saxify.stream_resolver_mode.v1';
+  static const String kOfflineCacheSize = 'saxify.offline_cache_size.v1';
+  static const String kPersistentQueue = 'saxify.persistent_queue.v1';
+  static const String kSkipSilence = 'saxify.skip_silence.v1';
 
   // ---------------------------------------------------------------- account
   String get displayName => _prefs.getString(kDisplayName)?.trim() ?? '';
@@ -96,6 +102,45 @@ class SettingsService extends ChangeNotifier {
   Future<void> setPlaybackSpeed(double v) =>
       _prefs.setDouble(kPlaybackSpeed, v).then((_) => notifyListeners());
 
+  StreamResolverMode get streamResolverMode {
+    final String raw = _prefs.getString(kStreamResolverMode) ?? 'smart';
+    return StreamResolverMode.values.firstWhere(
+      (StreamResolverMode mode) => mode.name == raw,
+      orElse: () => StreamResolverMode.smart,
+    );
+  }
+
+  String get streamResolverLabel => switch (streamResolverMode) {
+    StreamResolverMode.smart => 'Smart',
+    StreamResolverMode.innertubeOnly => 'Innertube only',
+    StreamResolverMode.legacyOnly => 'Legacy only',
+  };
+
+  Future<void> setStreamResolverMode(StreamResolverMode mode) => _prefs
+      .setString(kStreamResolverMode, mode.name)
+      .then((_) => notifyListeners());
+
+  int? get offlineCacheSizeBytes {
+    final String raw = _prefs.getString(kOfflineCacheSize) ?? '2GB';
+    return switch (raw) {
+      '512MB' => 512 * 1024 * 1024,
+      '1GB' => 1024 * 1024 * 1024,
+      '2GB' => 2 * 1024 * 1024 * 1024,
+      '4GB' => 4 * 1024 * 1024 * 1024,
+      'Unlimited' => null,
+      _ => 2 * 1024 * 1024 * 1024,
+    };
+  }
+
+  String get offlineCacheSizeLabel => _prefs.getString(kOfflineCacheSize) ?? '2GB';
+  Future<void> setOfflineCacheSizeLabel(String label) => _prefs
+      .setString(kOfflineCacheSize, label)
+      .then((_) => notifyListeners());
+
+  bool get skipSilence => _prefs.getBool(kSkipSilence) ?? false;
+  Future<void> setSkipSilence(bool v) =>
+      _prefs.setBool(kSkipSilence, v).then((_) => notifyListeners());
+
   bool get explicitFilter => _prefs.getBool(kExplicitFilter) ?? false;
   Future<void> setExplicitFilter(bool v) =>
       _prefs.setBool(kExplicitFilter, v).then((_) => notifyListeners());
@@ -135,6 +180,23 @@ class SettingsService extends ChangeNotifier {
   }
 
   Future<void> forgetPositions() => _prefs.remove(kLastPositions);
+
+  Map<String, dynamic>? get persistentQueue {
+    final String? raw = _prefs.getString(kPersistentQueue);
+    if (raw == null || raw.isEmpty) return null;
+    try {
+      final Object? decoded = jsonDecode(raw);
+      return decoded is Map ? decoded.cast<String, dynamic>() : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> savePersistentQueue(Map<String, dynamic> value) async {
+    await _prefs.setString(kPersistentQueue, jsonEncode(value));
+  }
+
+  Future<void> clearPersistentQueue() => _prefs.remove(kPersistentQueue);
 
   // ------------------------------------------------------- playlist codes
   String? get lastPlaylistCode => _prefs.getString(kLastPlaylistCode);

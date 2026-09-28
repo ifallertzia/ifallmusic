@@ -5,6 +5,7 @@ import '../../core/models/artist.dart';
 import '../../core/models/playlist.dart';
 import '../../core/models/song.dart';
 import '../../core/services/library_service.dart';
+import '../../core/services/local_music_service.dart';
 import '../../core/services/music_download_service.dart';
 import '../../core/services/playback_service.dart';
 import '../../core/theme/glass.dart';
@@ -96,6 +97,7 @@ class _LibraryPageState extends State<LibraryPage>
                   const _PlaylistsTab(),
                   const _SongsTab(),
                   const _ArtistsTab(),
+                  const _OnDeviceTab(),
                   const _DownloadsTab(),
                   const _HistoryTab(),
                   Center(
@@ -154,6 +156,11 @@ class _LibraryTabSpec {
       color: Color(0xFF10B981),
     ),
     _LibraryTabSpec(
+      label: 'On device',
+      icon: Icons.perm_media_rounded,
+      color: Color(0xFF14B8A6),
+    ),
+    _LibraryTabSpec(
       label: 'Downloads',
       icon: Icons.download_rounded,
       color: Color(0xFFF59E0B),
@@ -169,6 +176,182 @@ class _LibraryTabSpec {
       color: Color(0xFF06B6D4),
     ),
   ];
+}
+
+
+class _OnDeviceTab extends StatelessWidget {
+  const _OnDeviceTab();
+
+  @override
+  Widget build(BuildContext context) {
+    final LocalMusicService local = context.watch<LocalMusicService>();
+    if (!local.hasScanned && local.songs.isEmpty) {
+      return EmptyState(
+        icon: Icons.perm_media_rounded,
+        title: 'On device',
+        message: 'Show songs already saved on this phone.',
+        actionLabel: 'Scan device music',
+        onAction: () => context.read<LocalMusicService>().scan(context: context),
+      );
+    }
+    return DefaultTabController(
+      length: 3,
+      child: Column(
+        children: <Widget>[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+            child: Row(
+              children: <Widget>[
+                Expanded(
+                  child: Text(
+                    local.scanning
+                        ? 'Scanning device music…'
+                        : '${local.songs.length} songs on this device',
+                    style: const TextStyle(
+                      color: SaxifyColors.textSecondary,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+                TextButton.icon(
+                  onPressed: local.scanning
+                      ? null
+                      : () => context.read<LocalMusicService>().scan(context: context),
+                  icon: const Icon(Icons.refresh_rounded, size: 18),
+                  label: const Text('Re-scan'),
+                ),
+              ],
+            ),
+          ),
+          const TabBar(
+            tabs: <Widget>[
+              Tab(text: 'Songs'),
+              Tab(text: 'Albums'),
+              Tab(text: 'Artists'),
+            ],
+          ),
+          Expanded(
+            child: TabBarView(
+              children: <Widget>[
+                _LocalSongsList(songs: local.songs),
+                _LocalAlbumsList(albums: local.albums),
+                _LocalArtistsList(artists: local.artists),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LocalSongsList extends StatelessWidget {
+  const _LocalSongsList({required this.songs});
+
+  final List<Song> songs;
+
+  @override
+  Widget build(BuildContext context) {
+    if (songs.isEmpty) {
+      return const EmptyState(
+        icon: Icons.music_off_rounded,
+        title: 'No local songs found',
+        message: 'Tap re-scan after adding music files to your phone.',
+      );
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 210),
+      itemCount: songs.length,
+      itemBuilder: (BuildContext context, int index) => SongTile(
+        song: songs[index],
+        showMenu: false,
+        subtitle: 'On device · ${songs[index].artist}',
+        onTap: () => context.read<PlaybackService>().playQueue(songs, startIndex: index),
+      ),
+    );
+  }
+}
+
+class _LocalAlbumsList extends StatelessWidget {
+  const _LocalAlbumsList({required this.albums});
+
+  final List<LocalAlbum> albums;
+
+  @override
+  Widget build(BuildContext context) {
+    if (albums.isEmpty) {
+      return const EmptyState(
+        icon: Icons.album_outlined,
+        title: 'No local albums found',
+        message: 'Albums appear after scanning device music.',
+      );
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 210),
+      itemCount: albums.length,
+      itemBuilder: (BuildContext context, int index) {
+        final LocalAlbum album = albums[index];
+        return GlassListTile(
+          leading: Artwork(url: album.artworkUri, size: 52, radius: 8),
+          trailing: const Icon(Icons.chevron_right_rounded, size: 18),
+          onTap: () => context.read<PlaybackService>().playQueue(album.songs),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(album.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+              const SizedBox(height: 3),
+              Text(
+                '${album.artist} · ${album.songs.length} songs',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: SaxifyColors.textSecondary, fontSize: 12),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _LocalArtistsList extends StatelessWidget {
+  const _LocalArtistsList({required this.artists});
+
+  final List<LocalArtist> artists;
+
+  @override
+  Widget build(BuildContext context) {
+    if (artists.isEmpty) {
+      return const EmptyState(
+        icon: Icons.person_search_rounded,
+        title: 'No local artists found',
+        message: 'Artists appear after scanning device music.',
+      );
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 210),
+      itemCount: artists.length,
+      itemBuilder: (BuildContext context, int index) {
+        final LocalArtist artist = artists[index];
+        return GlassListTile(
+          leading: const CircleAvatar(child: Icon(Icons.person_rounded)),
+          trailing: const Icon(Icons.chevron_right_rounded, size: 18),
+          onTap: () => context.read<PlaybackService>().playQueue(artist.songs),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(artist.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+              const SizedBox(height: 3),
+              Text(
+                '${artist.songs.length} songs · On device',
+                style: const TextStyle(color: SaxifyColors.textSecondary, fontSize: 12),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
 }
 
 class _LibraryHeader extends StatelessWidget {
