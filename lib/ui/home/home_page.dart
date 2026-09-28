@@ -615,14 +615,15 @@ class _BrandRow extends StatelessWidget {
 class _WhatsNewCard extends StatelessWidget {
   const _WhatsNewCard();
 
-  static const String _version = 'Update 2.3.4';
-  static const String _date = '27 Sept 2026';
+  static const String _version = 'Update 2.3.5';
+  static const String _date = '28 Sept 2026';
   static const String _headline =
-      'Playlists fixed, all-new ifallertzia server branding';
+      'Playback engine overhaul, your on-device music';
 
   static const List<String> _notes = <String>[
-    'Home playlists now open and play reliably — no more "tracks unavailable".',
-    'Fresh ifallertzia server branding across search, playlists and albums.',
+    'Playback resolver rebuilt with client rotation and fallbacks, so streams keep working.',
+    'New "On device" library plays the songs already stored on your phone.',
+    'Local results in search, skip-silence, cache controls and Android Auto browse roots.',
   ];
 
   @override

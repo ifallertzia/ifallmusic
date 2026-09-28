@@ -1,12 +1,13 @@
-# IfallMusic 2.3.4
+# IfallMusic 2.3.5
 
 ## What's new
 
-- Fixed the Home "Playlists you may like" section — playlists and albums now open and play reliably instead of showing "Tracks unavailable".
-- Playlist and album pages are fetched more robustly, with better handling of long playlists.
-- All-new ifallertzia server branding across search headings, playlists, albums and the About card.
-- Removed the song "Share · copy link" action.
-- Removed external channel-open shortcuts from artist and label pages.
+- Playback resolver overhaul: rotating Innertube clients with a decipher-capable fallback engine, so streams keep working when YouTube changes signatures.
+- Mid-stream failures now evict the stale stream URL and resume playback at the same position from a working source.
+- New **On device** music library — browse and play the songs, albums and artists already stored on your phone via the MediaStore, with a fast re-scan and cached results.
+- Local results now appear in search above web results, alongside a new voice-search mic button.
+- New playback settings: skip silence, plus a playback cache manager with size display, pruning and a clear action.
+- Android Auto browse roots for Liked songs, playlists, downloads and your on-device library.
 
 ## Installation note
 
