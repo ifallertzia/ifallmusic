@@ -221,7 +221,7 @@ class MusicDownloadService extends ChangeNotifier {
     File? temp;
     try {
       final String streamUrl = await playback
-          .resolvePlayableStreamUrl(VideoId(job.song.id))
+          .resolveDownloadStreamUrl(VideoId(job.song.id))
           .timeout(const Duration(seconds: 35));
       final Directory cache = await getTemporaryDirectory();
       String filename = Filenames.saxify(

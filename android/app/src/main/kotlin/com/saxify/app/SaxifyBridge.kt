@@ -56,6 +56,7 @@ class SaxifyBridge(private val activity: Activity) {
                     deleteDownload(call.argument<String>("uri"), call.argument<String>("path"))
                 }
                 "listDownloads" -> io(result) { listDownloads() }
+                "listLocalAudio" -> io(result) { listLocalAudio() }
                 "shareFile" -> {
                     shareFile(
                         call.argument<String>("path"),
@@ -236,6 +237,64 @@ class SaxifyBridge(private val activity: Activity) {
                         "uri" to itemUri.toString(),
                         "size" to cursor.getLong(sizeIdx),
                         "modifiedMs" to cursor.getLong(modIdx) * 1000,
+                    ),
+                )
+            }
+        }
+        return out
+    }
+
+    private fun listLocalAudio(): List<Map<String, Any?>> {
+        val collection = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+        val projection = arrayOf(
+            MediaStore.Audio.Media._ID,
+            MediaStore.Audio.Media.TITLE,
+            MediaStore.Audio.Media.ALBUM,
+            MediaStore.Audio.Media.ALBUM_ID,
+            MediaStore.Audio.Media.ARTIST,
+            MediaStore.Audio.Media.ARTIST_ID,
+            MediaStore.Audio.Media.DURATION,
+            MediaStore.Audio.Media.SIZE,
+            MediaStore.Audio.Media.YEAR,
+            MediaStore.Audio.Media.TRACK,
+            MediaStore.Audio.Media.DATE_ADDED,
+            MediaStore.Audio.Media.MIME_TYPE,
+        )
+        val out = ArrayList<Map<String, Any?>>()
+        activity.contentResolver.query(
+            collection,
+            projection,
+            "${MediaStore.Audio.Media.IS_MUSIC}=1 AND ${MediaStore.Audio.Media.DURATION}>?",
+            arrayOf("30000"),
+            "${MediaStore.Audio.Media.TITLE} COLLATE NOCASE ASC",
+        )?.use { cursor ->
+            val idIdx = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
+            val titleIdx = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
+            val albumIdx = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
+            val albumIdIdx = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
+            val artistIdx = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
+            val artistIdIdx = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST_ID)
+            val durationIdx = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+            val sizeIdx = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE)
+            val yearIdx = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.YEAR)
+            val trackIdx = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TRACK)
+            val addedIdx = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
+            val mimeIdx = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.MIME_TYPE)
+            while (cursor.moveToNext()) {
+                out.add(
+                    mapOf(
+                        "id" to cursor.getLong(idIdx),
+                        "title" to (cursor.getString(titleIdx) ?: ""),
+                        "album" to (cursor.getString(albumIdx) ?: ""),
+                        "albumId" to cursor.getLong(albumIdIdx),
+                        "artist" to (cursor.getString(artistIdx) ?: ""),
+                        "artistId" to cursor.getLong(artistIdIdx),
+                        "durationMs" to cursor.getLong(durationIdx),
+                        "size" to cursor.getLong(sizeIdx),
+                        "year" to cursor.getInt(yearIdx),
+                        "track" to cursor.getInt(trackIdx),
+                        "dateAdded" to cursor.getLong(addedIdx),
+                        "mimeType" to (cursor.getString(mimeIdx) ?: ""),
                     ),
                 )
             }

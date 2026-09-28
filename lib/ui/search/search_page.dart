@@ -4,12 +4,14 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 import '../../core/models/album_card.dart';
 import '../../core/models/song.dart';
 import '../../core/services/home_catalog.dart';
 import '../../core/services/app_feedback.dart';
 import '../../core/services/library_service.dart';
+import '../../core/services/local_music_service.dart';
 import '../../core/services/playback_service.dart';
 import '../../core/services/recommendation_service.dart';
 import '../../core/services/youtube_service.dart';
@@ -50,6 +52,8 @@ class _SearchPageState extends State<SearchPage> {
   bool _musicAvailable = true;
   Timer? _debounce;
   CancelToken? _cancel;
+  final stt.SpeechToText _speech = stt.SpeechToText();
+  bool _listening = false;
   String? _error;
   String _activeQuery = '';
   int _lastNonce = -1;
@@ -175,8 +179,35 @@ class _SearchPageState extends State<SearchPage> {
     }
   }
 
+  Future<void> _voiceSearch() async {
+    if (_listening) {
+      await _speech.stop();
+      if (mounted) setState(() => _listening = false);
+      return;
+    }
+    final bool ready = await _speech.initialize();
+    if (!ready) {
+      showAppNotice('Voice search is not available on this device.');
+      return;
+    }
+    setState(() => _listening = true);
+    await _speech.listen(
+      onResult: (result) {
+        final String words = result.recognizedWords.trim();
+        if (words.isEmpty) return;
+        _controller.text = words;
+        if (result.finalResult) {
+          _speech.stop();
+          if (mounted) setState(() => _listening = false);
+          _runSearch(words);
+        }
+      },
+    );
+  }
+
   @override
   void dispose() {
+    _speech.cancel();
     _debounce?.cancel();
     _cancel?.cancel();
     _controller.dispose();
@@ -189,6 +220,10 @@ class _SearchPageState extends State<SearchPage> {
     final LibraryService library = context.watch<LibraryService>();
     final SaxifyAccent accent = context.accent;
     final PlaybackService playback = context.read<PlaybackService>();
+    final LocalMusicService localMusic = context.watch<LocalMusicService>();
+    final List<Song> localResults = _kind == _SearchKind.songs
+        ? localMusic.search(_activeQuery, limit: 8)
+        : <Song>[];
     final bool idle = _activeQuery.isEmpty && !_loading && _error == null;
 
     return AuroraBackdrop(
@@ -260,6 +295,14 @@ class _SearchPageState extends State<SearchPage> {
                       ),
                     ),
                     IconButton(
+                      tooltip: 'Voice search',
+                      icon: Icon(
+                        _listening ? Icons.mic_rounded : Icons.mic_none_rounded,
+                        color: _listening ? Colors.redAccent : SaxifyColors.textFaint,
+                      ),
+                      onPressed: _voiceSearch,
+                    ),
+                    IconButton(
                       tooltip: 'Search',
                       icon: Icon(
                         Icons.arrow_forward_rounded,
@@ -321,6 +364,7 @@ class _SearchPageState extends State<SearchPage> {
                           if (_loading) const LinearProgressIndicator(),
                           if (!idle &&
                               !_loading &&
+                              localResults.isEmpty &&
                               _results.isEmpty &&
                               _browseResults.isEmpty)
                             const EmptyState(
@@ -340,6 +384,22 @@ class _SearchPageState extends State<SearchPage> {
                                 ),
                               ),
                             ),
+                          if (localResults.isNotEmpty) ...<Widget>[
+                            const SectionHeader(
+                              title: 'On device',
+                              subtitle: 'Songs saved on this phone',
+                            ),
+                            for (int i = 0; i < localResults.length; i++)
+                              SongTile(
+                                song: localResults[i],
+                                showMenu: false,
+                                subtitle: 'On device · ${localResults[i].artist}',
+                                onTap: () => playback.playQueue(
+                                  localResults,
+                                  startIndex: i,
+                                ),
+                              ),
+                          ],
                           for (final item in _browseResults)
                             ListTile(
                               leading: Artwork(url: item.artwork, size: 52),

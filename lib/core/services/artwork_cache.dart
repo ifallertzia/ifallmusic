@@ -11,7 +11,9 @@ class ArtworkCache {
   static const ImageProvider logo = AssetImage(IfallBranding.logoAsset);
 
   static ImageProvider providerFor(String url) {
-    if (url.isEmpty) return logo;
+    if (url.isEmpty || url.startsWith('content:') || url.startsWith('file:')) {
+      return logo;
+    }
     return _providers.putIfAbsent(
       url,
       () => CachedNetworkImageProvider(url, maxWidth: 512, maxHeight: 512),

@@ -119,6 +119,21 @@ class NativeBridge {
     }
   }
 
+  static Future<List<LocalAudioFile>> listLocalAudio() async {
+    if (kIsWeb || !Platform.isAndroid) return <LocalAudioFile>[];
+    try {
+      final Object? raw = await _channel.invokeMethod<Object>('listLocalAudio');
+      if (raw is! List) return <LocalAudioFile>[];
+      return raw
+          .whereType<Map>()
+          .map((Map item) => LocalAudioFile.fromMap(item.cast<Object?, Object?>()))
+          .toList();
+    } catch (e) {
+      debugPrint('[IfallMusic][MediaStore] listLocalAudio failed: $e');
+      return <LocalAudioFile>[];
+    }
+  }
+
   static Future<void> shareFile({
     required String path,
     required String mime,
@@ -225,6 +240,57 @@ class NativeBridge {
     } catch (e) {
       debugPrint('[IfallMusic][Spatial] disable failed: $e');
     }
+  }
+}
+
+class LocalAudioFile {
+  const LocalAudioFile({
+    required this.id,
+    required this.title,
+    required this.album,
+    required this.albumId,
+    required this.artist,
+    required this.artistId,
+    required this.durationMs,
+    required this.size,
+    required this.year,
+    required this.track,
+    required this.dateAdded,
+    required this.mimeType,
+  });
+
+  final int id;
+  final String title;
+  final String album;
+  final int albumId;
+  final String artist;
+  final int artistId;
+  final int durationMs;
+  final int size;
+  final int year;
+  final int track;
+  final int dateAdded;
+  final String mimeType;
+
+  factory LocalAudioFile.fromMap(Map<Object?, Object?> raw) => LocalAudioFile(
+        id: _int(raw['id']),
+        title: raw['title']?.toString() ?? '',
+        album: raw['album']?.toString() ?? '',
+        albumId: _int(raw['albumId']),
+        artist: raw['artist']?.toString() ?? '',
+        artistId: _int(raw['artistId']),
+        durationMs: _int(raw['durationMs']),
+        size: _int(raw['size']),
+        year: _int(raw['year']),
+        track: _int(raw['track']),
+        dateAdded: _int(raw['dateAdded']),
+        mimeType: raw['mimeType']?.toString() ?? '',
+      );
+
+  static int _int(Object? value) {
+    if (value is int) return value;
+    if (value is num) return value.round();
+    return int.tryParse(value?.toString() ?? '') ?? 0;
   }
 }
 

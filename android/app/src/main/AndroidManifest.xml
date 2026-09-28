@@ -8,6 +8,7 @@
 
     <!-- 8D spatial audio attaches Virtualizer / EnvironmentalReverb to the output mix. -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
 
     <!-- Notification player. Playback itself stays on the existing AudioPlayer. -->
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
@@ -18,6 +19,7 @@
     <!-- Android 9 and below only. Android 10+ writes Download/IfallMusic via MediaStore. -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28"/>
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO"/>
 
     <queries>
         <intent>

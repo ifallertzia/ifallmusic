@@ -14,6 +14,7 @@ import 'core/services/artist_service.dart';
 import 'core/services/boot_log.dart';
 import 'core/services/home_catalog.dart';
 import 'core/services/library_service.dart';
+import 'core/services/local_music_service.dart';
 import 'core/services/music_download_service.dart';
 import 'core/services/native_bridge.dart';
 import 'core/services/notification_bootstrap.dart';
@@ -112,21 +113,28 @@ Future<AppBoot> _initializeApp() async {
 
   final SettingsService settings = SettingsService(prefs);
   final LibraryService library = LibraryService(prefs);
+  final LocalMusicService localMusic = LocalMusicService(prefs);
   final YoutubeService youtube = YoutubeService();
   final PlaybackService playback = PlaybackService(
     youtube: youtube,
     settings: settings,
     library: library,
   );
-  NotificationBootstrap.handler?.attach(playback, library);
+  final MusicDownloadService musicDownloads = MusicDownloadService(
+    prefs: prefs,
+  );
+  await playback.restorePersistedQueue();
+  NotificationBootstrap.handler?.attach(
+    playback,
+    library,
+    localMusic: localMusic,
+    downloads: musicDownloads,
+  );
   library.onUserNotice = showAppNotice;
   final RecommendationService recommendations = RecommendationService(
     youtube: youtube,
   );
   final ArtistService artists = ArtistService(youtube: youtube);
-  final MusicDownloadService musicDownloads = MusicDownloadService(
-    prefs: prefs,
-  );
   // Ensure an older saved 8D effect is disabled while the feature is Coming soon.
   await NativeBridge.spatialDisable();
 
@@ -153,6 +161,7 @@ Future<AppBoot> _initializeApp() async {
   return AppBoot(
     settings: settings,
     library: library,
+    localMusic: localMusic,
     youtube: youtube,
     playback: playback,
     recommendations: recommendations,
@@ -196,6 +205,7 @@ class AppBoot {
   const AppBoot({
     required this.settings,
     required this.library,
+    required this.localMusic,
     required this.youtube,
     required this.playback,
     required this.recommendations,
@@ -206,6 +216,7 @@ class AppBoot {
 
   final SettingsService settings;
   final LibraryService library;
+  final LocalMusicService localMusic;
   final YoutubeService youtube;
   final PlaybackService playback;
   final RecommendationService recommendations;
@@ -223,12 +234,14 @@ class IfallMusicApp extends StatefulWidget {
   State<IfallMusicApp> createState() => _IfallMusicAppState();
 }
 
-class _IfallMusicAppState extends State<IfallMusicApp> {
+class _IfallMusicAppState extends State<IfallMusicApp>
+    with WidgetsBindingObserver {
   Timer? _syncTimer;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) => _afterFirstFrame());
   }
 
@@ -263,7 +276,17 @@ class _IfallMusicAppState extends State<IfallMusicApp> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.detached) {
+      unawaited(widget.boot.playback.persistQueueNow());
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _syncTimer?.cancel();
     super.dispose();
   }
@@ -275,6 +298,7 @@ class _IfallMusicAppState extends State<IfallMusicApp> {
       providers: [
         ChangeNotifierProvider<SettingsService>.value(value: boot.settings),
         ChangeNotifierProvider<LibraryService>.value(value: boot.library),
+        ChangeNotifierProvider<LocalMusicService>.value(value: boot.localMusic),
         ChangeNotifierProvider<PlaybackService>.value(value: boot.playback),
         ChangeNotifierProvider<RecommendationService>.value(
           value: boot.recommendations,

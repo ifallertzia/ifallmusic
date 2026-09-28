@@ -15,6 +15,16 @@ class Fmt {
 
   static String clock(Duration d) => duration(d);
 
+  static String bytes(int value) {
+    if (value < 1024) return '$value B';
+    final double kb = value / 1024;
+    if (kb < 1024) return '${kb.toStringAsFixed(kb >= 10 ? 0 : 1)} KB';
+    final double mb = kb / 1024;
+    if (mb < 1024) return '${mb.toStringAsFixed(mb >= 10 ? 0 : 1)} MB';
+    final double gb = mb / 1024;
+    return '${gb.toStringAsFixed(gb >= 10 ? 0 : 1)} GB';
+  }
+
   /// `1.2M subscribers`
   static String count(int? value) {
     if (value == null || value <= 0) return '';
