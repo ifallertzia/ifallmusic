@@ -1,7 +1,7 @@
 # IfallMusic
 
 IfallMusic — *Stream beyond limits.* A premium, liquid-glass music player built with
-Flutter, from `ifallertzia/Saxify-v1`. Version **2.2.0**.
+Flutter, from `ifallertzia/Saxify-v1`. Version **2.4.0**.
 
 ## Features
 
@@ -89,16 +89,43 @@ Flutter/native layout, the recommended native libraries (AndroidX Media3
 `AudioProcessor`, Oboe/AAudio, `Virtualizer`/`EnvironmentalReverb`) and the tuning
 table behind each template.
 
-## In-app updater and releases
+## Releases, signing and the in-app updater
 
-The updater checks the latest release from `ifallertzia/Saxify-v1` and looks for an APK
-asset named `app-release.apk`. The Actions workflow builds on feature branches and pull
-requests but **never publishes a release from those runs**. A versioned GitHub Release
-(`v<version>`) with the APK is created only when the complete build job succeeds on the
-default `main` branch. Release notes come from `RELEASE_NOTES.md`.
+Full details: [`docs/RELEASE_SIGNING.md`](docs/RELEASE_SIGNING.md).
 
-To prepare a later release, bump `version:` in `pubspec.yaml`, keep
-`IfallBranding.versionLabel` and `RELEASE_NOTES.md` aligned, then merge.
+**Signing.** Every release APK is signed with one permanent release key
+(`upload-keystore.jks`, alias `upload`, RSA-2048, valid until 2054). The key lives
+only in the GitHub Actions secrets `SIGNING_KEY`, `KEY_ALIAS`, `KEY_PASSWORD` and
+`STORE_PASSWORD`; CI decodes it to a temporary path outside the checkout, uses it,
+verifies the built APK's certificate fingerprint against it, and deletes it — on
+success *and* on failure. `android/app/build.gradle.kts` reads the credentials from
+environment variables (or the git-ignored `android/key.properties` for local builds)
+and contains **no hardcoded credentials**. A partial configuration fails the build
+instead of silently signing with a different key, which is what caused the
+"App not installed as package conflicts with an existing package" error.
+
+**Publishing.** `.github/workflows/build_apk.yml` is the gate for every push and pull
+request (analyze, all tests, release-mode APK *and* AAB) and never publishes a release
+from a feature branch or PR. On `main` it also bumps the Android build number and moves
+the `v<version>` tag, which triggers `.github/workflows/build.yml` to build, signature-
+verify and publish the GitHub Release with `app-release.apk` plus a `latest.json`
+manifest. Release notes come from `RELEASE_NOTES.md`. Pushing a `v*` tag directly does
+the same thing.
+
+**Build number.** `pubspec.yaml`'s `version: x.y.z+build` feeds Gradle's `versionCode`.
+Android only treats an APK as an update when `versionCode` strictly increases, so CI
+increments it automatically via `scripts/bump_build_number.sh`, which also regenerates
+`lib/config/branding.dart` through `scripts/sync_version.sh`. To bump by hand:
+
+```sh
+bash scripts/bump_build_number.sh            # 2.4.0+13 -> 2.4.0+14
+bash scripts/bump_build_number.sh 2.5.0      # 2.4.0+13 -> 2.5.0+14
+```
+
+**Updater.** `lib/core/services/update_service.dart` checks the latest release from
+`ifallertzia/Saxify-v1`, prefers the `latest.json` asset so it can compare the build
+number as well as the version, downloads `app-release.apk` with progress and hands it
+to the system installer. It runs silently on app start and on demand from Settings.
 
 ## Build
 
@@ -108,6 +135,21 @@ flutter analyze
 flutter test
 flutter build apk --release
 ```
+
+For a locally *signed* release build, create `android/key.properties` (git-ignored):
+
+```properties
+storeFile=/absolute/path/to/upload-keystore.jks
+storeType=JKS
+keyAlias=upload
+keyPassword=YOUR_KEY_PASSWORD
+storePassword=YOUR_STORE_PASSWORD
+```
+
+or export `SIGNING_KEYSTORE_FILE`, `SIGNING_KEY_ALIAS`, `SIGNING_KEY_PASSWORD` and
+`SIGNING_STORE_PASSWORD`. With neither, Gradle signs with the debug key and warns
+loudly — that APK must not be distributed, because it will not install over a
+release-signed build.
 
 CI also builds a release app bundle. Flutter analysis, all unit/widget tests, APK and
 AAB builds are blocking steps; any failure prevents release publication.

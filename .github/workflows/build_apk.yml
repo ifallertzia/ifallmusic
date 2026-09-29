@@ -1,5 +1,13 @@
 name: Build Flutter APK
 
+# CI gate for every push and pull request: analyze, test, and build the
+# release-mode APK/AAB. On `main` it also bumps the Android build number and
+# moves the release tag, which triggers `build.yml` to publish the signed APK.
+#
+# Signing secrets (all four, or none):
+#   SIGNING_KEY / KEY_ALIAS / KEY_PASSWORD / STORE_PASSWORD
+# Legacy ANDROID_RELEASE_* names are still accepted for compatibility.
+
 on:
   push:
     branches: [ main, master, 'arena/**' ]
@@ -8,9 +16,13 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   issues: write
   pull-requests: write
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -48,39 +60,68 @@ jobs:
         shell: bash
         run: set -o pipefail && flutter test --reporter expanded 2>&1 | tee test.log
 
-      # Stable signing is optional for now. With no secrets configured, Gradle
-      # uses the runner debug key; see docs/UPDATE_FIX.md for update limitations.
-      - name: Configure optional Android release signing
-        if: github.ref == 'refs/heads/main'
+      # -------------------------------------------------------------------
+      # Decode the stable release key into a TEMPORARY path outside the
+      # checkout. Gradle reads the credentials from the environment; nothing
+      # is hardcoded in android/app/build.gradle.kts.
+      #
+      # Without secrets this stays a warning (fork PRs have no secret access),
+      # but the APK is then debug-signed and must not be distributed.
+      # -------------------------------------------------------------------
+      - name: Configure Android release signing
+        id: signing
         env:
-          ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
-          ANDROID_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
-          ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
-          ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY || secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS || secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD || secrets.ANDROID_RELEASE_STORE_PASSWORD }}
         shell: bash
         run: |
           set -euo pipefail
-          if [[ -z "$ANDROID_RELEASE_KEYSTORE_BASE64" && -z "$ANDROID_RELEASE_STORE_PASSWORD" && -z "$ANDROID_RELEASE_KEY_ALIAS" && -z "$ANDROID_RELEASE_KEY_PASSWORD" ]]; then
-            echo "::warning::No release signing secrets configured. Using the runner debug key; updates may require backup, uninstall and reinstall."
-            echo "### Signing: temporary debug-key fallback" >> "$GITHUB_STEP_SUMMARY"
-            echo "This APK is not signed with a stable release key. See docs/UPDATE_FIX.md before distributing it." >> "$GITHUB_STEP_SUMMARY"
+          if [[ -z "${SIGNING_KEY:-}${KEY_ALIAS:-}${KEY_PASSWORD:-}${STORE_PASSWORD:-}" ]]; then
+            echo "::warning::No release signing secrets configured. This APK is debug-signed and will NOT install over a signed build (package conflict). See docs/RELEASE_SIGNING.md."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "### Signing: debug-key fallback" >> "$GITHUB_STEP_SUMMARY"
+            echo "This APK is **not** signed with the stable release key. Do not distribute it. See \`docs/RELEASE_SIGNING.md\`." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          if [[ -z "$ANDROID_RELEASE_KEYSTORE_BASE64" || -z "$ANDROID_RELEASE_STORE_PASSWORD" || -z "$ANDROID_RELEASE_KEY_ALIAS" || -z "$ANDROID_RELEASE_KEY_PASSWORD" ]]; then
-            echo "::error::Incomplete signing configuration. Set all four ANDROID_RELEASE_* secrets or remove all four to use the temporary fallback."
+          missing=()
+          [[ -n "${SIGNING_KEY:-}" ]]    || missing+=(SIGNING_KEY)
+          [[ -n "${KEY_ALIAS:-}" ]]      || missing+=(KEY_ALIAS)
+          [[ -n "${KEY_PASSWORD:-}" ]]   || missing+=(KEY_PASSWORD)
+          [[ -n "${STORE_PASSWORD:-}" ]] || missing+=(STORE_PASSWORD)
+          if (( ${#missing[@]} > 0 )); then
+            echo "::error::Incomplete signing configuration — missing: ${missing[*]}. Set all four secrets or none."
             exit 1
           fi
-          printf '%s' "$ANDROID_RELEASE_KEYSTORE_BASE64" | base64 --decode > android/app/upload-keystore.jks
-          cat > android/key.properties <<EOF
-          storeFile=upload-keystore.jks
-          keyAlias=$ANDROID_RELEASE_KEY_ALIAS
-          keyPassword=$ANDROID_RELEASE_KEY_PASSWORD
-          storePassword=$ANDROID_RELEASE_STORE_PASSWORD
-          EOF
+
+          KEYSTORE_DIR="${RUNNER_TEMP}/signing"
+          rm -rf "$KEYSTORE_DIR"; mkdir -p "$KEYSTORE_DIR"; chmod 700 "$KEYSTORE_DIR"
+          KEYSTORE_PATH="$KEYSTORE_DIR/upload-keystore.jks"
+          printf '%s' "$SIGNING_KEY" | tr -d '\r\n\t ' | base64 --decode > "$KEYSTORE_PATH"
+          chmod 600 "$KEYSTORE_PATH"
+
+          if [[ "$(od -An -tx1 -N4 "$KEYSTORE_PATH" | tr -d ' \n')" != "feedfeed" ]]; then
+            echo "::error::SIGNING_KEY is not a valid JKS keystore. Re-create it with: base64 -w 0 upload-keystore.jks"
+            exit 1
+          fi
+
+          # Validates store password, alias and key password in one call.
+          keytool -list -keystore "$KEYSTORE_PATH" -storetype JKS \
+                  -alias "$KEY_ALIAS" -storepass "$STORE_PASSWORD" -keypass "$KEY_PASSWORD" >/dev/null
+          echo "Release keystore verified (alias '$KEY_ALIAS')."
+          echo "keystore_path=$KEYSTORE_PATH" >> "$GITHUB_OUTPUT"
+          echo "signed=true" >> "$GITHUB_OUTPUT"
 
       # Validate the same release-mode APK/AAB on PRs as on main, so a green
       # debug-only PR cannot hide release build failures.
       - name: Build APK (release)
+        env:
+          SIGNING_KEYSTORE_FILE: ${{ steps.signing.outputs.keystore_path }}
+          SIGNING_KEYSTORE_TYPE: JKS
+          SIGNING_KEY_ALIAS: ${{ secrets.KEY_ALIAS || secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.STORE_PASSWORD || secrets.ANDROID_RELEASE_STORE_PASSWORD }}
         shell: bash
         run: set -o pipefail && flutter build apk --release 2>&1 | tee build.log
 
@@ -92,6 +133,12 @@ jobs:
           if-no-files-found: error
 
       - name: Build App Bundle (release validation)
+        env:
+          SIGNING_KEYSTORE_FILE: ${{ steps.signing.outputs.keystore_path }}
+          SIGNING_KEYSTORE_TYPE: JKS
+          SIGNING_KEY_ALIAS: ${{ secrets.KEY_ALIAS || secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.STORE_PASSWORD || secrets.ANDROID_RELEASE_STORE_PASSWORD }}
         shell: bash
         run: set -o pipefail && flutter build appbundle --release 2>&1 | tee appbundle.log
 
@@ -101,6 +148,15 @@ jobs:
           name: app-release-aab
           path: build/app/outputs/bundle/release/app-release.aab
           if-no-files-found: error
+
+      # Temporary key material must not survive the job, pass or fail.
+      - name: Clean up temporary keystore
+        if: always()
+        shell: bash
+        run: |
+          rm -rf "${RUNNER_TEMP:-/tmp}/signing"
+          rm -f android/app/upload-keystore.jks android/key.properties
+          echo "Temporary keystore removed."
 
       # GitHub truncates what we can read from a failed run, so lift every
       # compiler error into job annotations + errors.log (readable via the API).
@@ -181,11 +237,21 @@ jobs:
             "https://api.github.com/repos/${REPO}/issues/${PR_NUMBER}/comments" \
             -d @payload.json | head -c 400
 
-  # A release is created only after the complete build job succeeds on main.
-  # PR and feature-branch builds produce artifacts but never publish releases.
-  release:
-    name: Publish versioned APK release
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  # ---------------------------------------------------------------------------
+  # Automatic build-number increment.
+  #
+  # Android needs a strictly increasing versionCode (pubspec's `+N`) or it will
+  # not treat the new APK as an update. Bumping it by hand is how releases end
+  # up flat and users hit "package conflicts", so main pushes bump it here.
+  # The tag push then triggers build.yml, which publishes the signed release.
+  # ---------------------------------------------------------------------------
+  bump-and-release:
+    name: Bump build number & move release tag
+    if: >
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      github.repository == 'ifallertzia/Saxify-v1' &&
+      !contains(github.event.head_commit.message, '[skip ci]')
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -193,31 +259,51 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Download release APK artifact
-        uses: actions/download-artifact@v4
         with:
-          name: app-release
-          path: release
+          ref: main
+          fetch-depth: 0
+          # Needed to push the bump commit and the tag back to main.
+          persist-credentials: true
 
-      - name: Read app version
-        id: version
+      - name: Bump build number and sync branding
+        id: bump
         shell: bash
         run: |
-          RAW_VERSION="$(awk '/^version:/ { sub(/^version:[[:space:]]*/, ""); print; exit }' pubspec.yaml)"
-          VERSION="${RAW_VERSION%%+*}"
-          if [[ -z "$VERSION" ]]; then
-            echo "pubspec.yaml is missing a version" >&2
-            exit 1
-          fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          BEFORE="$(bash scripts/bump_build_number.sh --check)"
+          bash scripts/bump_build_number.sh
+          AFTER="$(bash scripts/bump_build_number.sh --check)"
+          echo "before=$BEFORE" >> "$GITHUB_OUTPUT"
+          echo "after=$AFTER"   >> "$GITHUB_OUTPUT"
+          echo "version=${AFTER%%+*}" >> "$GITHUB_OUTPUT"
+          echo "Version ${BEFORE} -> ${AFTER}"
+          git --no-pager diff --stat
 
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ steps.version.outputs.version }}
-          name: IfallMusic v${{ steps.version.outputs.version }}
-          body_path: RELEASE_NOTES.md
-          files: release/app-release.apk
-          fail_on_unmatched_files: true
-          make_latest: true
+      - name: Commit bumped version
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- pubspec.yaml lib/config/branding.dart; then
+            echo "No version change to commit."
+            exit 0
+          fi
+          git add pubspec.yaml lib/config/branding.dart
+          git commit -m "chore(release): bump build number to ${{ steps.bump.outputs.after }} [skip ci]"
+          git push origin HEAD:main
+
+      - name: Move release tag (triggers the signed release build)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.bump.outputs.version }}"
+          TAG="v$VERSION"
+          git tag -f "$TAG"
+          # Force-move so a build-number-only change still publishes a fresh APK.
+          git push -f origin "$TAG"
+          echo "Pushed $TAG — build.yml will publish the signed release."

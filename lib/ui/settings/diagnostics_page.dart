@@ -34,7 +34,7 @@ class DiagnosticsPage extends StatelessWidget {
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                          '${IfallBranding.appName} ${IfallBranding.versionLabel}',
+                          '${IfallBranding.appName} ${IfallBranding.fullVersionLabel}',
                           style: const TextStyle(fontWeight: FontWeight.w700),
                         ),
                       ),

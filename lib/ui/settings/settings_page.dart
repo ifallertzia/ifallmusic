@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -1110,8 +1111,43 @@ class _Channel extends StatelessWidget {
   }
 }
 
-class _AboutCard extends StatelessWidget {
+class _AboutCard extends StatefulWidget {
   const _AboutCard();
+
+  @override
+  State<_AboutCard> createState() => _AboutCardState();
+}
+
+class _AboutCardState extends State<_AboutCard> {
+  /// The real version and build number of the *installed* APK, read from the
+  /// platform rather than from a compile-time constant. This is what lets a
+  /// user confirm at a glance that they are on the new build — the build number
+  /// is also what Android compares when deciding an APK is an update.
+  PackageInfo? _packageInfo;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadVersion();
+  }
+
+  Future<void> _loadVersion() async {
+    try {
+      final PackageInfo info = await PackageInfo.fromPlatform();
+      if (mounted) setState(() => _packageInfo = info);
+    } catch (_) {
+      // Fall back to the compile-time label below.
+    }
+  }
+
+  /// `2.4.0 (build 13)` from the platform, or the branding constant until it
+  /// has loaded (or if the platform call failed).
+  String get _versionText {
+    final PackageInfo? info = _packageInfo;
+    if (info == null) return IfallBranding.fullVersionLabel;
+    final String build = info.buildNumber;
+    return build.isEmpty ? info.version : '${info.version} (build $build)';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1182,24 +1218,32 @@ class _AboutCard extends StatelessWidget {
           const SizedBox(height: 12),
           Row(
             children: <Widget>[
-              const Expanded(
+              Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: <Widget>[
-                    Text(
+                    const Text(
                       'App version',
                       style: TextStyle(
                         fontSize: 12.5,
                         color: SaxifyColors.textSecondary,
                       ),
                     ),
-                    SizedBox(height: 2),
+                    const SizedBox(height: 2),
                     Text(
-                      'IfallMusic · ${IfallBranding.versionLabel}',
-                      style: TextStyle(
+                      'IfallMusic · $_versionText',
+                      style: const TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${IfallBranding.packageName} · updates install in place',
+                      style: const TextStyle(
+                        fontSize: 10.5,
+                        color: SaxifyColors.textMuted,
                       ),
                     ),
                   ],
@@ -1209,7 +1253,7 @@ class _AboutCard extends StatelessWidget {
                 onPressed: () => showAboutDialog(
                   context: context,
                   applicationName: IfallBranding.appName,
-                  applicationVersion: IfallBranding.versionLabel,
+                  applicationVersion: _versionText,
                   applicationIcon: const SaxifyLogo(size: 46),
                   children: const <Widget>[
                     Text(

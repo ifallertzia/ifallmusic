@@ -43,9 +43,16 @@ enum _Phase { idle, downloading, done, error }
 /// Clean, short changelog shown in the in-app update dialog — only the items
 /// that matter to the listener. The full release body on GitHub is intentionally
 /// not shown here so the dialog stays focused.
+///
+/// Keep this in step with RELEASE_NOTES.md: the top entry is always the newest
+/// release.
 const String _kShortChangelog =
-    '• Lyrics support added\n'
-    '• Important bug fixes';
+    '• Stable release signing — updates now install straight over the old '
+    'app.\n'
+    '• No more "package conflicts with an existing package" errors.\n'
+    '• Update check now compares the build number, so every new build is '
+    'detected.\n'
+    '• Settings → About shows the exact version and build you are running.';
 
 class _UpdateDialog extends StatefulWidget {
   const _UpdateDialog({required this.info});
@@ -121,7 +128,7 @@ class _UpdateDialogState extends State<_UpdateDialog> {
                               fontSize: 18, fontWeight: FontWeight.w700)),
                       const SizedBox(height: 3),
                       Text(
-                        '${info.currentVersion} → ${info.latestVersion}'
+                        '${info.currentLabel} → ${info.latestLabel}'
                         '${info.sizeLabel.isNotEmpty ? ' · ${info.sizeLabel}' : ''}',
                         style: const TextStyle(
                             fontSize: 12.5, color: SaxifyColors.textMuted),
@@ -222,10 +229,13 @@ class _UpdateDialogState extends State<_UpdateDialog> {
               const SizedBox(height: 10),
               Text(
                 'APK downloaded — the installer should now open.\n\n'
-                'If you see "App not installed / package conflicts", that '
-                'means the old app was signed with a different key. '
-                'Uninstall the old IfallMusic (your library can be backed '
-                'up from Settings > Backup library) and install again.',
+                'From this release on, the app is signed with one stable '
+                'release key, so future updates install straight over the top.\n\n'
+                'One last exception: if your currently installed copy was '
+                'signed with an older temporary key, Android will still show '
+                '"package conflicts" for this update only. Back up your library '
+                '(Settings → Backup library), uninstall, install this APK, then '
+                'restore. You will not have to do that again.',
                 style: TextStyle(fontSize: 11.5, height: 1.45, color: accent.primary),
               ),
             ],
