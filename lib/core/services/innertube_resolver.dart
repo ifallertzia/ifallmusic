@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:ui' show PlatformDispatcher;
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -395,10 +394,6 @@ class InnertubeResolver {
     return <String, dynamic>{
       'context': <String, dynamic>{
         'client': clientJson,
-        if (client.embed)
-          'thirdParty': <String, String>{
-            'embedUrl': 'https://www.youtube.com/watch?v=$videoId',
-          },
       },
       'videoId': videoId,
       // Lets otherwise-acceptable music through region/kid gates.
@@ -538,7 +533,6 @@ class _InnertubeClient {
     this.androidSdkVersion,
     this.osName,
     this.osVersion,
-    this.embed = false,
   });
 
   final String clientName;
@@ -553,5 +547,4 @@ class _InnertubeClient {
   final int? androidSdkVersion;
   final String? osName;
   final String? osVersion;
-  final bool embed;
 }

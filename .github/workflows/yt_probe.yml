@@ -1,8 +1,9 @@
 name: Innertube live probe
 
 # Temporary: validates the resolver's client roster against live YouTube
-# from the CI runner (datacenter IP ⇒ bot checks; a cookie/visitorData
-# bootstrap pass shows whether the configs themselves are valid).
+# from the CI runner. Uses curl (browser-like TLS/HTTP2) because the
+# runner's datacenter IP triggers bot checks; a cookie/visitorData
+# bootstrap shows whether configs themselves are valid.
 # Removed after the results are reviewed.
 
 on:
@@ -18,13 +19,16 @@ jobs:
       - name: Probe player clients
         run: |
           python3 - <<'PY'
-          import json, re, sys, http.cookiejar, urllib.request
+          import json, re, subprocess, sys
 
           VIDEO = 'Gayw5AQvWcQ'  # the track from the field report
           URL = 'https://www.youtube.com/youtubei/v1/player?prettyPrint=false'
+          HOME = 'https://www.youtube.com/'
           SAFARI = ('Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) '
                     'AppleWebKit/605.1.15 (KHTML, like Gecko) '
                     'Version/26.0 Safari/605.1.15')
+          JAR = '/tmp/yjar'
+          PAGE = '/tmp/yhome.html'
 
           CLIENTS = [
             # name, id, body-client dict, extra headers  (roster order)
@@ -68,27 +72,36 @@ jobs:
             }, {'User-Agent': 'com.google.ios.youtube/1.1.2 (VisionPro1,1; U; CPU OS 1_1 like Mac OS X; en_US)'}),
           ]
 
-          jar = http.cookiejar.CookieJar()
-          opener = urllib.request.build_opener(
-              urllib.request.HTTPCookieProcessor(jar))
+          def curl(args, timeout=20):
+            return subprocess.run(['curl', '-sS', '--http2', '-m', str(timeout)] + args,
+                                  capture_output=True, text=True)
+
+          def jar_cookies(path):
+            out = []
+            try:
+              for line in open(path):
+                if line.startswith('#') or not line.strip():
+                  continue
+                parts = line.rstrip('\n').split('\t')
+                if len(parts) >= 7:
+                  out.append(f'{parts[5]}={parts[6]}')
+            except FileNotFoundError:
+              pass
+            return '; '.join(out)
 
           def bootstrap():
-            """Cookies (SOCS/CONSENT) + visitorData from the homepage —
-            the standard way to survive bot checks from awkward IPs."""
-            req = urllib.request.Request('https://www.youtube.com/',
-                                         headers={'User-Agent': SAFARI,
-                                                  'Accept-Language': 'en-US,en;q=0.9'})
+            r = curl(['-A', SAFARI, '-H', 'Accept-Language: en-US,en;q=0.9',
+                      '-c', JAR, '-o', PAGE, HOME], timeout=15)
+            vd, cookie = None, jar_cookies(JAR)
             try:
-              with opener.open(req, timeout=15) as r:
-                html = r.read().decode('utf-8', 'ignore')
-            except Exception as e:
-              print(f'bootstrap: homepage failed: {e}', flush=True)
-              return None, ''
-            m = re.search(r'"visitorData":"([^"]+)"', html)
-            vd = m.group(1) if m else None
-            cookie = '; '.join(f'{c.name}={c.value}' for c in jar)
-            print(f'bootstrap: visitorData={"yes" if vd else "no"} '
-                  f'cookies={cookie[:120]}', flush=True)
+              html = open(PAGE, errors='ignore').read()
+              m = re.search(r'"visitorData":"([^"]+)"', html)
+              vd = m.group(1) if m else None
+            except FileNotFoundError:
+              pass
+            print(f'bootstrap: curl_rc={r.returncode} '
+                  f'visitorData={"yes" if vd else "no"} '
+                  f'cookies={cookie[:140]}', flush=True)
             return vd, cookie
 
           def post(client_id, client_json, headers,
@@ -103,24 +116,26 @@ jobs:
               'videoId': VIDEO,
               'contentCheckOk': True,
               'racyCheckOk': True,
-            }).encode()
-            h = {
-              'Content-Type': 'application/json',
-              'X-YouTube-Client-Version': client_json.get('clientVersion', ''),
-            }
+            })
+            args = ['-X', 'POST', URL,
+                    '-H', 'Content-Type: application/json',
+                    '-H', f'X-YouTube-Client-Version: {client_json.get("clientVersion", "")}']
             if client_id is not None:
-              h['X-YouTube-Client-Name'] = str(client_id)
+              args += ['-H', f'X-YouTube-Client-Name: {client_id}']
             if visitor:
-              h['X-Goog-Visitor-Id'] = visitor
+              args += ['-H', f'X-Goog-Visitor-Id: {visitor}']
             if cookie:
-              h['Cookie'] = cookie
-            h.update(headers)
-            req = urllib.request.Request(URL, data=payload, headers=h)
+              args += ['-H', f'Cookie: {cookie}']
+            for k, v in headers.items():
+              args += ['-H', f'{k}: {v}']
+            args += ['--data-binary', payload]
+            r = curl(args, timeout=timeout)
+            if r.returncode != 0:
+              return {'transportError': (r.stderr or r.stdout)[:300]}
             try:
-              with urllib.request.urlopen(req, timeout=timeout) as r:
-                return json.loads(r.read().decode())
+              return json.loads(r.stdout)
             except Exception as e:
-              return {'transportError': str(e)}
+              return {'transportError': f'parse {e}: {r.stdout[:200]}'}
 
           def fmt_summary(data):
             sd = data.get('streamingData') or {}
@@ -133,12 +148,8 @@ jobs:
             return len(adaptive), len(muxed), len(direct_audio)
 
           def head_probe(url):
-            req = urllib.request.Request(url, method='HEAD')
-            try:
-              with urllib.request.urlopen(req, timeout=8) as r:
-                return r.status
-            except Exception as e:
-              return getattr(e, 'code', str(e))
+            r = curl(['-o', '/dev/null', '-w', '%{http_code}', '-I', url], timeout=8)
+            return r.stdout.strip() or f'rc{r.returncode}'
 
           def status_of(data):
             if 'transportError' in data:
