@@ -231,6 +231,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      ref: ${{ steps.head.outputs.sha }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -281,4 +283,36 @@ jobs:
           git tag -f "$TAG"
           # Force-move so a build-number-only change still publishes a fresh APK.
           git push -f origin "$TAG"
-          echo "Pushed $TAG — build.yml will publish the signed release."
+          echo "Pushed $TAG — the publish-release job below now runs build.yml."
+
+      - name: Expose released commit
+        id: head
+        shell: bash
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------------
+  # Publish the signed APK in THIS run.
+  #
+  # `bump-and-release` moves the tag with the workflow's own GITHUB_TOKEN, and a
+  # tag pushed that way does not reliably start build.yml's `on: push: tags`
+  # trigger (GITHUB_TOKEN-originated events are suppressed). That is how a merged
+  # version sat unpublished while the in-app updater kept answering "you are on
+  # the latest version".
+  #
+  # Calling the release workflow as a reusable workflow is not an event, so it
+  # always runs: merge to main -> bump -> tag -> signed, verified release.
+  # ---------------------------------------------------------------------------
+  publish-release:
+    name: Publish signed release
+    needs: bump-and-release
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      github.repository == 'ifallertzia/Saxify-v1' &&
+      !contains(github.event.head_commit.message, '[skip ci]')
+    permissions:
+      contents: write
+    uses: ./.github/workflows/build.yml
+    with:
+      ref: ${{ needs.bump-and-release.outputs.ref }}
+    secrets: inherit

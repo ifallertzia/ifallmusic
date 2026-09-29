@@ -19,7 +19,16 @@ Future<void> checkAndPromptUpdate(BuildContext context, {bool silent = true}) as
       return;
     }
     if (!info.hasUpdate) {
-      if (!silent) _toast(context, 'You are on the latest version');
+      // Name the build the check actually compared against. Without it,
+      // "you are on the latest version" looks the same whether the newest
+      // release really is installed or the newest release was never published.
+      if (!silent) {
+        _toast(
+          context,
+          'You are on the latest version — published build is '
+          '${info.latestLabel}',
+        );
+      }
       return;
     }
     await showDialog<void>(
