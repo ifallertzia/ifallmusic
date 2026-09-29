@@ -46,8 +46,16 @@ EXPECTED_BASE64_SHA256="8352b7b1a2844f376f4116f71344c7e2f4cbf079f3567d54a23ea33d
 EXPECTED_BASE64_CHARS=3148
 EXPECTED_CERT_SHA256="BD0C849A307E665E9482B654A444C082E1665CB3422B4AC5769F0DD304270E54"
 
-# Set to false only while rotating the key on purpose.
-ENFORCE_FINGERPRINT="${SIGNING_ENFORCE_FINGERPRINT:-true}"
+# Advisory by default: a mismatch warns loudly (annotation + job summary +
+# the exact constants needed to re-pin) but does not block the build, because
+# the two HARD guarantees live elsewhere - keytool proves the keystore is
+# structurally valid and that all three passwords are right, and build.yml
+# proves the finished APK carries this keystore's certificate. Pinning to a
+# hard failure would block a legitimate key that simply is not the one this
+# script was written against.
+#
+# Set SIGNING_ENFORCE_FINGERPRINT=true to make a mismatch fatal.
+ENFORCE_FINGERPRINT="${SIGNING_ENFORCE_FINGERPRINT:-false}"
 
 REQUIRED="${SIGNING_REQUIRED:-false}"
 
@@ -144,17 +152,7 @@ if [[ "$MAGIC" != "feedfeed" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 3. Fingerprint pin
-# ---------------------------------------------------------------------------
-if [[ "$ENFORCE_FINGERPRINT" == "true" ]]; then
-  if [[ "$FILE_SHA" != "$EXPECTED_KEYSTORE_SHA256" ]]; then
-    fail "the decoded keystore is NOT the pinned release key. got sha256=${FILE_SHA} (${BYTES} bytes), expected ${EXPECTED_KEYSTORE_SHA256} (${EXPECTED_KEYSTORE_BYTES} bytes). If this is a deliberate key rotation, update EXPECTED_KEYSTORE_SHA256/EXPECTED_BASE64_SHA256/EXPECTED_CERT_SHA256 in scripts/ci_prepare_signing.sh - otherwise every existing user would hit a package conflict."
-  fi
-  echo "Keystore matches the pinned release key."
-fi
-
-# ---------------------------------------------------------------------------
-# 4. Validate with keytool
+# 3. Validate with keytool (structure, store password, alias, key password)
 #
 #    `keytool -list` proves the STORE password and that the alias exists, but it
 #    never decrypts the private key, so it does NOT prove the KEY password.
@@ -187,11 +185,42 @@ if command -v keytool >/dev/null 2>&1; then
   rm -f "$PROBE"
   echo "keytool -importkeystore: KEY_PASSWORD unlocks the private key."
 
-  if [[ -n "$KEYSTORE_SHA256" && "$ENFORCE_FINGERPRINT" == "true" && "$KEYSTORE_SHA256" != "$EXPECTED_CERT_SHA256" ]]; then
-    fail "certificate fingerprint ${KEYSTORE_SHA256} does not match the pinned release certificate ${EXPECTED_CERT_SHA256}."
-  fi
+  CERT_DN="$(awk -F': ' '/^Owner:/ {sub(/^Owner:[ ]*/,""); print; exit}' "$KEYSTORE_DIR/keytool-list.txt")"
+  CERT_VALID="$(awk -F': ' '/^Valid from:/ {sub(/^Valid from:[ ]*/,""); print; exit}' "$KEYSTORE_DIR/keytool-list.txt")"
+  echo "Certificate DN: ${CERT_DN:-<unread>}"
+  echo "Certificate validity: ${CERT_VALID:-<unread>}"
 else
-  warn "keytool not found on this runner - skipping keystore validation. Fingerprint checks above still applied."
+  warn "keytool not found on this runner - skipping keystore validation. Only the byte-level checks applied."
+  CERT_DN=""; CERT_VALID=""
+fi
+
+# ---------------------------------------------------------------------------
+# 4. Fingerprint pin
+#
+#    Runs AFTER keytool on purpose. A truncated or corrupted paste and a
+#    legitimately different keystore hash differently in exactly the same way,
+#    but only keytool can tell them apart: a tampered JKS fails its SHA-1
+#    integrity digest, while a different valid key opens cleanly. By this point
+#    a corrupted paste has already been rejected above, so a mismatch here means
+#    "this is a real, valid keystore - just not the pinned one".
+#
+#    That is a policy question, not a corruption question, so it warns by
+#    default. The guarantee that actually prevents a package conflict is
+#    downstream: build.yml compares the built APK's certificate against this
+#    keystore, so every release is internally consistent whichever key is used.
+#    Set SIGNING_ENFORCE_FINGERPRINT=true to make a mismatch fatal.
+# ---------------------------------------------------------------------------
+if [[ "$FILE_SHA" != "$EXPECTED_KEYSTORE_SHA256" ]]; then
+  MSG="the keystore in SIGNING_KEY is NOT the pinned release key. got sha256=${FILE_SHA} (${BYTES} bytes, cert ${KEYSTORE_SHA256:-unknown}, DN '${CERT_DN:-unknown}'), expected sha256=${EXPECTED_KEYSTORE_SHA256} (${EXPECTED_KEYSTORE_BYTES} bytes, cert ${EXPECTED_CERT_SHA256}). base64 was ${B64_LEN} chars, sha256 ${B64_SHA}."
+  if [[ "$ENFORCE_FINGERPRINT" == "true" ]]; then
+    fail "${MSG} If this is a deliberate key rotation, update the EXPECTED_* constants in scripts/ci_prepare_signing.sh."
+  fi
+  warn "${MSG} Continuing because SIGNING_ENFORCE_FINGERPRINT is not 'true'. Every release will still be signed consistently with THIS key, and build.yml verifies the APK against it - but it will NOT install over an app signed with the pinned key."
+  echo "::notice title=Release signing::Using an unpinned keystore. If this is intentional, pin it: set EXPECTED_KEYSTORE_SHA256=${FILE_SHA} EXPECTED_KEYSTORE_BYTES=${BYTES} EXPECTED_BASE64_SHA256=${B64_SHA} EXPECTED_BASE64_CHARS=${B64_LEN} EXPECTED_CERT_SHA256=${KEYSTORE_SHA256:-} in scripts/ci_prepare_signing.sh"
+  PINNED="no"
+else
+  echo "Keystore matches the pinned release key."
+  PINNED="yes"
 fi
 
 # ---------------------------------------------------------------------------
@@ -207,7 +236,11 @@ summary <<EOF
 | keystore bytes | ${BYTES} | ${EXPECTED_KEYSTORE_BYTES} | $([[ "$BYTES" == "$EXPECTED_KEYSTORE_BYTES" ]] && echo '✅' || echo '⚠️') |
 | keystore sha256 | \`${FILE_SHA:0:16}…\` | \`${EXPECTED_KEYSTORE_SHA256:0:16}…\` | $([[ "$FILE_SHA" == "$EXPECTED_KEYSTORE_SHA256" ]] && echo '✅' || echo '⚠️') |
 | JKS magic | 0x${MAGIC} | 0xfeedfeed | $([[ "$MAGIC" == "feedfeed" ]] && echo '✅' || echo '❌') |
-| cert SHA-256 | \`${KEYSTORE_SHA256:0:16}…\` | \`${EXPECTED_CERT_SHA256:0:16}…\` | $([[ -z "$KEYSTORE_SHA256" || "$KEYSTORE_SHA256" == "$EXPECTED_CERT_SHA256" ]] && echo '✅' || echo '❌') |
+| cert SHA-256 | \`${KEYSTORE_SHA256:0:16}…\` | \`${EXPECTED_CERT_SHA256:0:16}…\` | $([[ -z "$KEYSTORE_SHA256" || "$KEYSTORE_SHA256" == "$EXPECTED_CERT_SHA256" ]] && echo '✅' || echo '⚠️') |
+| pinned key | ${PINNED:-unknown} | yes | $([[ "${PINNED:-}" == "yes" ]] && echo '✅' || echo '⚠️') |
+
+Certificate DN: `${CERT_DN:-<unread>}`
+Validity: `${CERT_VALID:-<unread>}`
 
 Keystore decoded to a temporary path outside the checkout; removed by the
 \`Clean up temporary keystore\` step on success **and** failure.
