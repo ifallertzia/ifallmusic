@@ -119,10 +119,13 @@ jobs:
 
           failed = False
           ok_new = False
+          lines = []
           for idx, (name, cid, cjson, headers) in enumerate(CLIENTS):
             data = post(cid, cjson, headers)
             if 'transportError' in data:
-              print(f'{name}: TRANSPORT {data["transportError"]}')
+              line = f'{name}: TRANSPORT {data["transportError"]}'
+              print(line, flush=True)
+              lines.append(line)
               failed = True
               continue
             pa = (data.get('playabilityStatus') or {})
@@ -134,6 +137,13 @@ jobs:
                     or data.get('visitorData'))
               if vd:
                 data = post(cid, cjson, headers, visitor=vd)
+                if 'transportError' in data:
+                  line = (f'{name}: RETRY TRANSPORT '
+                          f'{data["transportError"]}')
+                  print(line, flush=True)
+                  lines.append(line)
+                  failed = True
+                  continue
                 pa = (data.get('playabilityStatus') or {})
                 retried = f' -> retry: {pa.get("status")}'
                 status = pa.get('status')
@@ -147,14 +157,24 @@ jobs:
                   first = f['url']; break
               if first:
                 probe = f' head={head_probe(first)}'
-            print(f'{name}: status={status}{retried} reason={reason!r} '
-                  f'adaptive={adaptive} muxed={muxed} direct_audio={direct_audio}{probe}')
+            line = (f'{name}: status={status}{retried} reason={reason!r} '
+                    f'adaptive={adaptive} muxed={muxed} '
+                    f'direct_audio={direct_audio}{probe}')
+            print(line, flush=True)
+            lines.append(line)
             if status == 'OK' and direct_audio:
               if idx < 6:
                 ok_new = True
             else:
               failed = True
-          print(f'new-roster-usable={ok_new} any-failure={failed}')
+          summary = f'new-roster-usable={ok_new} any-failure={failed}'
+          print(summary, flush=True)
+          lines.append(summary)
+          # Logs are not fetchable from this sandbox; one aggregate
+          # annotation is (keep it under the per-step annotation cap).
+          level = 'notice' if ok_new else 'error'
+          joined = '%0A'.join(lines)
+          print(f'::{level} title=innertube-probe::{joined}', flush=True)
           # Old roster entries are expected to fail; only the new roster
           # being unusable makes this job red.
           sys.exit(0 if ok_new else 1)
