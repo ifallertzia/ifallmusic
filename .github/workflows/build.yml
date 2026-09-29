@@ -98,10 +98,14 @@ jobs:
           flutter build apk --release 2>&1 | tee build.log
           APK="build/app/outputs/flutter-apk/app-release.apk"
           [[ -f "$APK" ]] || { echo "::error::$APK was not produced"; exit 1; }
-          # Gradle logs the keystore it actually used; keep it visible.
-          grep -E "Release signing:|WARNING: no release keystore" build.log || true
-          if grep -q "WARNING: no release keystore" build.log; then
-            echo "::error::Gradle fell back to debug signing even though the secrets were supplied."
+          # Gradle announces the debug fallback at WARN level, which is visible
+          # here. Its "Release signing: ..." confirmation is LIFECYCLE level and
+          # is swallowed by Flutter's Gradle invocation, so it can NOT be used as
+          # evidence that the release config was applied — the certificate check
+          # in the next step is the real gate.
+          grep -iE "release signing|no release keystore|debug key" build.log | head -5 || true
+          if grep -qiE "no release keystore|local debug key" build.log; then
+            echo "::error title=Debug signing::Gradle fell back to the debug key even though the secrets were supplied."
             exit 1
           fi
           echo "Built $(stat -c %s "$APK") bytes -> $APK"
@@ -109,6 +113,15 @@ jobs:
       # ---------------------------------------------------------------------
       # Prove the APK really carries the release certificate. This is the step
       # that guarantees we never publish another debug-signed APK again.
+      #
+      # The digest is matched by its PAYLOAD, never by field position:
+      # apksigner has renamed this line at least once —
+      #   build-tools <= 35:  "Signer #1 certificate SHA-256 digest: <hex>"
+      #   build-tools 37:     "V2 Signer: certificate SHA-256 digest: <hex>"
+      # — and a field-index parser read the LABEL instead of the digest on 37,
+      # so every release failed with "APK is NOT signed with the release
+      # keystore" while the APK was in fact signed correctly. The label is no
+      # longer trusted and the 64-hex payload is mandatory.
       # ---------------------------------------------------------------------
       - name: Verify APK signature matches the release key
         env:
@@ -117,6 +130,25 @@ jobs:
         run: |
           set -uo pipefail
           APK="build/app/outputs/flutter-apk/app-release.apk"
+          [[ -f "$APK" ]] || { echo "::error::$APK is missing; nothing to verify."; exit 1; }
+
+          # Signing-certificate SHA-256 (64 hex chars) from apksigner's output.
+          # "certificate SHA-256 digest:" is anchored so the sibling
+          # "public key SHA-256 digest:" line can never be picked up.
+          cert_sha_from_apksigner_log() {
+            grep -oE 'certificate SHA-256 digest:[[:space:]]*[0-9A-Fa-f]{64}' "$1" 2>/dev/null \
+              | head -1 | grep -oE '[0-9A-Fa-f]{64}' | tr 'a-f' 'A-F'
+          }
+          # keytool prints it colon-separated ("SHA256: AB:CD:...").
+          cert_sha_from_keytool_log() {
+            awk -F': ' '/SHA256:/ {gsub(/:/,"",$2); print toupper($2); exit}' "$1" 2>/dev/null
+          }
+          # Non-secret tool output as an annotation: CI log archives are not
+          # always retrievable, annotations are.
+          notice_b64() { # notice_b64 <title> <file> [bytes]
+            [[ -s "$2" ]] || return 0
+            echo "::notice title=$1::$(head -c "${3:-1200}" "$2" | base64 -w0)"
+          }
 
           # Locate apksigner. It understands v1/v2/v3/v4 schemes; keytool only
           # reads v1 (JAR) signatures, which modern minSdk builds may omit.
@@ -135,35 +167,51 @@ jobs:
           APK_SHA256=""
           if [[ -n "$APKSIGNER" ]]; then
             "$APKSIGNER" verify --print-certs -v "$APK" 2>&1 | tee apksigner.log || true
-            APK_SHA256="$(awk -F': ' '/SHA-256 digest/ {gsub(/:/,"",$2); print toupper($2); exit}' apksigner.log 2>/dev/null || true)"
-            echo "apksigner: ${APKSIGNER}"
+            echo "apksigner: ${APKSIGNER} ($("$APKSIGNER" --version 2>/dev/null | head -1))"
+            APK_SHA256="$(cert_sha_from_apksigner_log apksigner.log)"
+            # If the label changes again, the annotation carries the raw output.
+            [[ -n "$APK_SHA256" ]] || notice_b64 "apksigner output (no cert digest parsed)" apksigner.log 1600
           else
             echo "::warning::apksigner unavailable; falling back to keytool (v1 signatures only)."
           fi
 
           if [[ -z "$APK_SHA256" ]]; then
             keytool -printcert -jarfile "$APK" 2>&1 | tee keytool-apk.log || true
-            APK_SHA256="$(awk -F': ' '/SHA256:/ {gsub(/:/,"",$2); print toupper($2); exit}' keytool-apk.log 2>/dev/null || true)"
+            APK_SHA256="$(cert_sha_from_keytool_log keytool-apk.log)"
+            [[ -n "$APK_SHA256" ]] || notice_b64 "keytool -printcert -jarfile output (no cert digest parsed)" keytool-apk.log 1200
           fi
 
-          echo "Keystore cert SHA-256: $EXPECTED_SHA256"
+          echo "Keystore cert SHA-256: ${EXPECTED_SHA256:-<unread>}"
           echo "APK cert      SHA-256: ${APK_SHA256:-<unread>}"
 
           if [[ -z "$APK_SHA256" ]]; then
-            # We cannot read a certificate, so we cannot prove a mismatch.
-            # The Gradle build already fails if signing config is incomplete,
-            # and the previous step fails on a debug-signing warning, so this
-            # is a visibility gap rather than a known-bad APK.
-            echo "::warning title=Signature not verified::Could not read the APK's signing certificate. The build did not report debug signing, so it is expected to be correct — but this could not be confirmed."
-            exit 0
+            # Both readers failed, so this release cannot be PROVEN to carry the
+            # release key. Publishing an unverified APK is exactly how users end
+            # up with "package conflicts with an existing package", so refuse.
+            echo "::error title=Signature not verified::Could not read the APK's signing certificate, so this release cannot be proven to carry the release key. Refusing to publish an unverified APK. The raw tool output is in the base64 annotation above; note that apksigner renamed this line in build-tools 37 to 'V2 Signer: certificate SHA-256 digest:'."
+            exit 1
           fi
 
           if [[ "$APK_SHA256" != "$EXPECTED_SHA256" ]]; then
-            echo "::error title=Signature mismatch::The APK is NOT signed with the release keystore."
-            echo "Publishing it would cause 'package conflicts with an existing package'."
+            # Name the most common cause instead of leaving it to be guessed.
+            DEBUG_SHA=""
+            DEBUG_KS="${HOME}/.android/debug.keystore"
+            if [[ -f "$DEBUG_KS" ]]; then
+              DEBUG_SHA="$(keytool -list -v -keystore "$DEBUG_KS" -storepass android \
+                -alias androiddebugkey 2>/dev/null \
+                | awk -F': ' '/SHA256:/ {gsub(/:/,"",$2); print toupper($2); exit}' || true)"
+            fi
+            if [[ -n "$DEBUG_SHA" && "$APK_SHA256" == "$DEBUG_SHA" ]]; then
+              echo "::error title=Debug-signed APK::The APK is signed with the runner's DEBUG key (${DEBUG_SHA:0:16}…), not the release key. Gradle did not apply the release signing config: check SIGNING_KEYSTORE_FILE, SIGNING_KEY_ALIAS, SIGNING_KEY_PASSWORD and SIGNING_STORE_PASSWORD in the build step."
+            else
+              echo "::error title=Signature mismatch::The APK is NOT signed with the release keystore. APK cert ${APK_SHA256}, keystore cert ${EXPECTED_SHA256}. Publishing it would cause 'package conflicts with an existing package'."
+            fi
+            notice_b64 "apksigner verify --print-certs (APK)" apksigner.log 1600
             exit 1
           fi
+
           echo "✓ APK is signed with the stable release key ($APK_SHA256)."
+          echo "::notice title=Release signing verified::APK certificate SHA-256 ${APK_SHA256} matches the keystore in SIGNING_KEY."
 
       - name: Read version from pubspec.yaml
         id: version

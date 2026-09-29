@@ -40,11 +40,19 @@ set -uo pipefail
 # After a DELIBERATE key rotation, update these two values:
 #   sha256sum upload-keystore.jks
 #   keytool -list -v -alias upload -keystore upload-keystore.jks | awk -F': ' '/SHA256:/{print $2}'
-EXPECTED_KEYSTORE_SHA256="41556bab5f72d540200871f1a9be3d20f420a12d582782733d3d712a1ce70b76"
-EXPECTED_KEYSTORE_BYTES=2361
-EXPECTED_BASE64_SHA256="8352b7b1a2844f376f4116f71344c7e2f4cbf079f3567d54a23ea33d84fbc972"
-EXPECTED_BASE64_CHARS=3148
-EXPECTED_CERT_SHA256="BD0C849A307E665E9482B654A444C082E1665CB3422B4AC5769F0DD304270E54"
+#
+# Re-pinned 2026-09-29 to the key actually held in the SIGNING_KEY secret
+# (certificate created 2026-09-28 08:36:31 UTC, DN CN=Ifallertzia, OU=IfallMusic
+# Release Signing, O=IfallMusic, L=Mumbai, ST=Maharashtra, C=IN). The previous
+# values described a keystore that was never in the secret and never signed a
+# published release — every release up to v2.3.6 was debug-signed because the
+# signing secrets did not exist yet — so pinning the available key costs
+# nothing and stops this check from warning on every release.
+EXPECTED_KEYSTORE_SHA256="5819db7ee06a18c56dd432c2333c89cf9fd0715ec224c7845db952334b3093c7"
+EXPECTED_KEYSTORE_BYTES=2294
+EXPECTED_BASE64_SHA256="8c4bb5c24576efdb0f8f34e9087a160d2838cdd02e0bcf2f939ccdfff3818c4d"
+EXPECTED_BASE64_CHARS=3060
+EXPECTED_CERT_SHA256="B0E31EE8634649BDD826634235F4AB4DA921968E88E9CD801106C7E6DB6A2A1D"
 
 # Advisory by default: a mismatch warns loudly (annotation + job summary +
 # the exact constants needed to re-pin) but does not block the build, because

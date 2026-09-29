@@ -25,11 +25,19 @@ sign/verify round-trip against its own certificate):
 | Keystore type | JKS (magic `0xFEEDFEED`, format version 2) |
 | Alias | `upload` |
 | Key algorithm | RSA, 2048-bit |
-| Validity | 10,000 days — 2026-09-29 → **2054-02-14** |
+| Validity | 10,000 days — 2026-09-28 → **2054-02-14** |
 | Signature | `sha256WithRSAEncryption` |
 | Distinguished name | `CN=Ifallertzia, OU=IfallMusic Release Signing, O=IfallMusic, L=Mumbai, ST=Maharashtra, C=IN` |
-| Certificate SHA-256 | `BD:0C:84:9A:30:7E:66:5E:94:82:B6:54:A4:44:C0:82:E1:66:5C:B3:42:2B:4A:C5:76:9F:0D:D3:04:27:0E:54` |
-| Certificate SHA-1 | `C8:5D:08:3A:35:48:B5:22:5F:4D:FA:BC:39:61:06:AB:94:E0:B8:20` |
+| Certificate SHA-256 | `B0:E3:1E:E8:63:46:49:BD:D8:26:63:42:35:F4:AB:4D:A9:21:96:8E:88:E9:CD:80:11:06:C7:E6:DB:6A:2A:1D` |
+| Certificate SHA-1 | `C6:A2:35:E8:4C:2A:1A:DF:1E:9B:58:10:0E:9E:0F:1B:1D:11:1D:1E` |
+| Keystore SHA-256 | `5819db7ee06a18c56dd432c2333c89cf9fd0715ec224c7845db952334b3093c7` (2294 bytes) |
+
+These values were re-pinned on 2026-09-29 to the key that is actually held in the
+`SIGNING_KEY` secret (`scripts/ci_prepare_signing.sh` carries the same constants).
+Every release up to v2.3.6 was **debug-signed**, because the signing secrets did
+not exist until 2026-09-29 — so no published APK is tied to any earlier release
+certificate, and existing installs need one uninstall/reinstall whichever key is
+used from here on.
 
 The fingerprints above are public (they ship inside every APK) and are recorded
 here so a built APK can be checked against the intended key at any time.
@@ -200,8 +208,13 @@ Triggered by `push` of a `v*` tag (and `workflow_dispatch`). Steps:
    if Gradle logs its debug-signing warning despite the secrets being present.
 5. **Verify the APK's own certificate** with `apksigner verify --print-certs`
    (falling back to `keytool -printcert -jarfile`) and compare its SHA-256 with
-   the keystore's. A mismatch fails the run — this is the guarantee that a
-   debug-signed APK can never be published again.
+   the keystore's. The digest is extracted by matching the 64-hex payload on the
+   `certificate SHA-256 digest:` line, never by field position, because
+   apksigner renamed that line in build-tools 37 (`Signer #1 certificate SHA-256
+   digest:` → `V2 Signer: certificate SHA-256 digest:`) and a positional parser
+   then read the label as if it were the digest. A mismatch fails the run, and an
+   unreadable certificate now fails the run too — this is the guarantee that a
+   debug-signed or unverifiable APK can never be published.
 6. Write `latest.json` (`version`, `build`, `tag`, `apk`, `releasedAt`) and
    publish a GitHub Release with **`app-release.apk`** — that exact asset name
    is what the in-app updater looks for.
@@ -303,7 +316,8 @@ git tag -f v2.5.0 && git push -f origin v2.5.0
 | Workflow fails: *KEY_PASSWORD does not unlock alias* | Key password wrong | Re-set `KEY_PASSWORD` |
 | Workflow fails: *not a JKS keystore (magic=…)* | `SIGNING_KEY` truncated, or base64 of the wrong file | Re-run `base64 -w 0 upload-keystore.jks` and replace the secret |
 | Workflow fails: *keytool could not read alias 'upload'* | Alias or password does not match the keystore | Re-set `KEY_ALIAS` / `KEY_PASSWORD` / `STORE_PASSWORD` |
-| Workflow fails: *APK is NOT signed with the release keystore* | Gradle did not receive the env vars | Check `SIGNING_KEYSTORE_FILE` etc. in the build step |
+| Workflow fails: *APK is NOT signed with the release keystore* | Gradle did not receive the env vars, **or** the parser read apksigner's label instead of its digest | Check `SIGNING_KEYSTORE_FILE` etc. in the build step. The base64 `apksigner verify` annotation on the run shows the raw output; build-tools 37 prints `V2 Signer: certificate SHA-256 digest: <hex>` where 35 and older printed `Signer #1 certificate SHA-256 digest: <hex>` |
+| Workflow fails: *Signature not verified* | Neither apksigner nor keytool could read the APK certificate | Read the base64 tool annotation on the run, then update the extraction in the verify step to the new label |
 | Update not offered in-app | Release missing, tag not newer, or no `app-release.apk` asset | Confirm the release is marked *latest* and the asset name is exact |
 | `HTTP 403: Resource not accessible by integration` when setting secrets | The automation token lacks `actions: write` | Grant the GitHub App secrets permission, or use an admin token / the web UI |
 
