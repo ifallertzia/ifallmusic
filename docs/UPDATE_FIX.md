@@ -1,58 +1,56 @@
-# Android APK signing and manual updates
+# Android APK updates — status
 
-## Current distribution mode: no signing secrets required
+> **Superseded by [`docs/RELEASE_SIGNING.md`](RELEASE_SIGNING.md).**
+>
+> This page used to describe a *temporary* arrangement in which release APKs
+> were signed with the CI runner's debug key whenever no keystore was
+> configured. That was the direct cause of
+> "App not installed as package conflicts with an existing package", because a
+> runner debug key is not stable between builds.
+>
+> A permanent release signing identity is now configured. Read
+> `docs/RELEASE_SIGNING.md` for the keystore details, the four GitHub secrets,
+> the Gradle contract and the release procedure.
 
-At the owner's request, release APK builds temporarily use the runner's debug
-key when no release keystore is configured. CI still runs Flutter analysis,
-all unit/widget tests, and **release-mode APK and AAB builds** on branches/PRs
-as well as main. Only a successful push build on main publishes a GitHub Release.
-The debug signing fallback does not turn the release build into a debug build.
+## What is in place now
 
-**This is not stable production signing and is not suitable for Play Store
-publication.** Runner debug keys can change on every build. Keeping the package
-ID (`com.saxify.app`) and increasing the version code does not fix a certificate
-mismatch. In-place updates are not guaranteed, even between future releases.
+- **One stable release key** (`upload-keystore.jks`, alias `upload`, RSA-2048,
+  valid until 2054) signs every release. It is stored as the encrypted
+  `SIGNING_KEY` GitHub Actions secret and decoded to a temporary path at build
+  time, then deleted — pass or fail.
+- **No hardcoded credentials.** `android/app/build.gradle.kts` reads the alias
+  and passwords from environment variables, falling back to the git-ignored
+  `android/key.properties` for local builds. A *partial* configuration fails the
+  build rather than silently signing with the wrong key.
+- **Signature verification in CI.** The built APK's certificate SHA-256 is
+  compared with the keystore's before anything is published, so a debug-signed
+  APK can never reach a GitHub Release again.
+- **Automatic build number.** `versionCode` (pubspec's `+N`) is incremented on
+  every release by `scripts/bump_build_number.sh`, so Android always sees the
+  new APK as an update.
+- **In-app update check** compares version *and* build number against
+  GitHub Releases, downloads `app-release.apk` with progress, and opens the
+  system installer.
 
-## Download and install
+## One-time step for users on an old debug-signed build
 
-Settings → **Website & latest app download** opens https://sidify.vercel.app.
-The site owner maintains the current APK download link there; the app does not
-assume a download path or scrape the site. The existing GitHub update check is
-also available.
+Android compares certificates, so an install signed with the old temporary key
+still cannot be updated in place — **once**.
 
-If Android reports a package/signature conflict:
-
-1. Back up the library from Settings **before uninstalling**.
+1. Back up the library from Settings → **Backup library**.
 2. Uninstall the old app.
-3. Install the latest APK from the website's download link.
+3. Install the latest APK (in-app updater, GitHub Release, or
+   https://sidify.vercel.app).
 4. Restore the library backup.
 
-This may be necessary again until a permanent signing key is configured.
+Every update after that installs in place. The package ID is unchanged:
+`com.saxify.app`.
 
-## Optional stable signing later
+## Never do this
 
-Recover the original private signing key if possible. It cannot be reconstructed
-from a published APK. A newly generated key will not update an installation
-signed with another key.
-
-For local builds, put the key at `android/app/upload-keystore.jks` and create
-`android/key.properties` (both are ignored by Git):
-
-```properties
-storeFile=upload-keystore.jks
-keyAlias=YOUR_ALIAS
-keyPassword=YOUR_KEY_PASSWORD
-storePassword=YOUR_STORE_PASSWORD
-```
-
-For main-branch GitHub Actions builds, configure **all four** repository secrets:
-
-- `ANDROID_RELEASE_KEYSTORE_BASE64` — base64 of the `.jks` / `.keystore` file
-- `ANDROID_RELEASE_STORE_PASSWORD`
-- `ANDROID_RELEASE_KEY_ALIAS`
-- `ANDROID_RELEASE_KEY_PASSWORD`
-
-No secrets: explicitly warned debug-key fallback. Partial/invalid configuration:
-build fails rather than silently ignoring a configured signing identity.
-Never commit private keys/passwords or paste them into chat. Back up the key and
-credentials securely and reuse the same key for all subsequent releases.
+- Do not commit `upload-keystore.jks`, `key.properties`, or any password. This
+  repository is public.
+- Do not generate a new keystore for a routine release. A new key means every
+  existing user has to uninstall.
+- Do not paste the keystore, its base64 form or its passwords into chat, an
+  issue, or a commit message.

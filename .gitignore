@@ -52,3 +52,7 @@ app.*.map.json
 /android/app/upload-keystore.jks
 *.jks
 *.keystore
+
+# --- Release signing handoff: keystore, base64 blob and credentials ---
+# NEVER commit these. The signing key lives only in GitHub Actions secrets.
+/signing-handoff/

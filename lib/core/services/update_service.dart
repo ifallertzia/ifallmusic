@@ -8,9 +8,18 @@ import 'package:open_filex/open_filex.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 
-/// Everything the Phase-2 "In-App Update" needs:
-/// version compare against GitHub Releases, in-app APK download with progress,
-/// and hand-off to the system installer.
+/// Everything the in-app updater needs: version + build-number compare against
+/// GitHub Releases, in-app APK download with progress, and hand-off to the
+/// system installer.
+///
+/// Two things decide whether an update is offered:
+///   1. the semantic version (`2.4.0`), and
+///   2. the build number (`+13`) — pubspec's `+N`, which Android uses as
+///      `versionCode`.
+///
+/// Comparing the build number too matters because a release can be rebuilt
+/// with the same `x.y.z` and a higher versionCode. Reading only the tag would
+/// miss it, and Android would still accept the new APK as an update.
 class UpdateService {
   /// This is the repository that publishes the canonical versioned APK release
   /// consumed by the in-app updater.
@@ -18,20 +27,34 @@ class UpdateService {
     'ifallertzia/Saxify-v1',
   ];
 
+  /// Canonical APK asset name. `build.yml` always uploads the APK under this
+  /// exact name so the updater can find it without guessing.
   static const String _apkAssetName = 'app-release.apk';
+
+  /// Machine-readable version manifest published alongside the APK. Optional —
+  /// the updater falls back to the release tag when it is absent.
+  static const String _manifestAssetName = 'latest.json';
 
   final http.Client _client = http.Client();
 
   PackageInfo? _packageInfo;
 
-  Future<String> currentVersion() async {
+  Future<PackageInfo> _info() async {
     _packageInfo ??= await PackageInfo.fromPlatform();
-    return _packageInfo!.version; // e.g. "1.1.0"
+    return _packageInfo!;
   }
+
+  Future<String> currentVersion() async => (await _info()).version;
+
+  /// Android `versionCode`, i.e. pubspec's `+N`. Zero when unavailable.
+  Future<int> currentBuildNumber() async =>
+      int.tryParse((await _info()).buildNumber) ?? 0;
 
   /// Returns null when we could not reach any release endpoint.
   Future<UpdateInfo?> check() async {
-    final String current = await currentVersion();
+    final PackageInfo info = await _info();
+    final String current = info.version;
+    final int currentBuild = int.tryParse(info.buildNumber) ?? 0;
 
     for (final String repo in releaseRepos) {
       try {
@@ -51,17 +74,29 @@ class UpdateService {
         final String tag = (json['tag_name'] as String? ?? '').trim();
         if (tag.isEmpty) continue;
 
-        final String? apkUrl = _findApkAsset(json);
+        final String? apkUrl = _findAssetUrl(json, _apkAssetName, '.apk');
         final int? size = _findApkSize(json);
         final String notes = json['body'] as String? ?? '';
 
+        // Prefer the explicit manifest: it carries the build number, which the
+        // tag alone does not.
+        final _Manifest? manifest =
+            await _readManifest(_findAssetUrl(json, _manifestAssetName, null));
+
+        final String latestVersion =
+            manifest?.version ?? _stripV(tag);
+        final int? latestBuild = manifest?.build;
+
         return UpdateInfo(
           currentVersion: current,
-          latestVersion: _stripV(tag),
+          currentBuildNumber: currentBuild,
+          latestVersion: latestVersion,
+          latestBuildNumber: latestBuild,
           apkUrl: apkUrl,
           notes: notes,
           sizeBytes: size,
           releaseUrl: json['html_url'] as String?,
+          buildNumberFromManifest: manifest != null,
         );
       } catch (e) {
         debugPrint('update check ($repo) failed: $e');
@@ -70,19 +105,49 @@ class UpdateService {
     return null;
   }
 
-  String? _findApkAsset(Map<String, dynamic> json) {
+  Future<_Manifest?> _readManifest(String? url) async {
+    if (url == null || url.isEmpty) return null;
+    try {
+      final http.Response res = await _client
+          .get(Uri.parse(url), headers: const <String, String>{
+            'Accept': 'application/json',
+          })
+          .timeout(const Duration(seconds: 10));
+      if (res.statusCode != 200) return null;
+      final Map<String, dynamic> json =
+          jsonDecode(res.body) as Map<String, dynamic>;
+      final String version = (json['version'] as String? ?? '').trim();
+      if (version.isEmpty) return null;
+      final Object? build = json['build'];
+      return _Manifest(
+        version: version,
+        build: build is int ? build : int.tryParse('$build'),
+      );
+    } catch (e) {
+      debugPrint('latest.json read failed: $e');
+      return null;
+    }
+  }
+
+  /// Exact-name match first, then any asset ending in [suffixFallback].
+  String? _findAssetUrl(
+    Map<String, dynamic> json,
+    String exactName,
+    String? suffixFallback,
+  ) {
     final Object? assets = json['assets'];
     if (assets is! List) return null;
 
-    // Prefer the canonical asset name, else any .apk.
     String? fallback;
     for (final Object? a in assets) {
       if (a is! Map) continue;
       final String name = (a['name'] as String? ?? '').toLowerCase();
       final String url = a['browser_download_url'] as String? ?? '';
       if (url.isEmpty) continue;
-      if (name == _apkAssetName) return url;
-      if (name.endsWith('.apk')) fallback ??= url;
+      if (name == exactName) return url;
+      if (suffixFallback != null && name.endsWith(suffixFallback)) {
+        fallback ??= url;
+      }
     }
     return fallback;
   }
@@ -163,6 +228,25 @@ class UpdateService {
     return false;
   }
 
+  /// Version first, build number second. Used when the release publishes a
+  /// `latest.json` manifest, or when two releases share the same `x.y.z`.
+  ///
+  /// A null [latestBuild] means "unknown", so the build number is not compared
+  /// and the decision falls back to the semantic version alone.
+  static bool isNewerBuild(
+    String currentVersion,
+    int currentBuild,
+    String latestVersion,
+    int? latestBuild,
+  ) {
+    if (isNewer(currentVersion, latestVersion)) return true;
+    if (_parse(currentVersion).join('.') != _parse(latestVersion).join('.')) {
+      return false; // latest is strictly older
+    }
+    if (latestBuild == null) return false;
+    return latestBuild > currentBuild;
+  }
+
   static List<int> _parse(String v) {
     final List<int> out = <int>[0, 0, 0];
     final List<String> parts = v.split('+').first.split('.');
@@ -173,25 +257,59 @@ class UpdateService {
   }
 }
 
+class _Manifest {
+  const _Manifest({required this.version, this.build});
+
+  final String version;
+  final int? build;
+}
+
 class UpdateInfo {
   const UpdateInfo({
     required this.currentVersion,
     required this.latestVersion,
+    this.currentBuildNumber = 0,
+    this.latestBuildNumber,
     this.apkUrl,
     this.notes = '',
     this.sizeBytes,
     this.releaseUrl,
+    this.buildNumberFromManifest = false,
   });
 
   final String currentVersion;
   final String latestVersion;
+  final int currentBuildNumber;
+  final int? latestBuildNumber;
   final String? apkUrl;
   final String notes;
   final int? sizeBytes;
   final String? releaseUrl;
 
-  bool get hasUpdate => UpdateService.isNewer(currentVersion, latestVersion);
+  /// True when the build number came from `latest.json` rather than being
+  /// unknown. Drives whether the build number is shown as authoritative.
+  final bool buildNumberFromManifest;
+
+  bool get hasUpdate => UpdateService.isNewerBuild(
+        currentVersion,
+        currentBuildNumber,
+        latestVersion,
+        latestBuildNumber,
+      );
+
   bool get downloadable => apkUrl != null && apkUrl!.isNotEmpty;
+
+  /// `2.3.6 (build 12)` — what the dialog shows, so a rebuild of the same
+  /// version is still visibly a different APK.
+  String get currentLabel => currentBuildNumber > 0
+      ? '$currentVersion (build $currentBuildNumber)'
+      : currentVersion;
+
+  String get latestLabel {
+    final int? b = latestBuildNumber;
+    if (b == null || b <= 0) return latestVersion;
+    return '$latestVersion (build $b)';
+  }
 
   String get sizeLabel {
     final int? s = sizeBytes;

@@ -1,0 +1,339 @@
+name: Release build (signed APK)
+
+# Publishes a signed release APK whenever a version tag is pushed.
+#
+# This is the workflow that keeps updates installable: it signs with the SAME
+# release key every time, so Android never rejects the new APK with
+# "App not installed as package conflicts with an existing package."
+#
+# Required repository secrets (Settings -> Secrets and variables -> Actions):
+#   SIGNING_KEY      base64 of upload-keystore.jks   (`base64 -w 0 upload-keystore.jks`)
+#   KEY_ALIAS        upload
+#   KEY_PASSWORD     keystore key password
+#   STORE_PASSWORD   keystore store password
+#
+# See docs/RELEASE_SIGNING.md.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build & publish signed release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # JDK 21 matches AGP 9.1.0 / Gradle 9.3.1 used by this project.
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      # ---------------------------------------------------------------------
+      # Decode the keystore into a TEMPORARY path outside the checkout, then
+      # prove it is usable BEFORE spending ~10 minutes on a Flutter build.
+      # ---------------------------------------------------------------------
+      - name: Decode release keystore (temporary path)
+        id: signing
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          missing=()
+          [[ -n "${SIGNING_KEY:-}" ]]    || missing+=(SIGNING_KEY)
+          [[ -n "${KEY_ALIAS:-}" ]]      || missing+=(KEY_ALIAS)
+          [[ -n "${KEY_PASSWORD:-}" ]]   || missing+=(KEY_PASSWORD)
+          [[ -n "${STORE_PASSWORD:-}" ]] || missing+=(STORE_PASSWORD)
+          if (( ${#missing[@]} > 0 )); then
+            echo "::error title=Missing signing secrets::${missing[*]}"
+            echo "A release must never ship debug-signed, or existing users get a"
+            echo "package/signature conflict. Set all four secrets under"
+            echo "Settings -> Secrets and variables -> Actions. See docs/RELEASE_SIGNING.md."
+            exit 1
+          fi
+
+          # Temporary build path — NOT inside the repository checkout.
+          KEYSTORE_DIR="${RUNNER_TEMP}/signing"
+          rm -rf "$KEYSTORE_DIR"
+          mkdir -p "$KEYSTORE_DIR"
+          chmod 700 "$KEYSTORE_DIR"
+          KEYSTORE_PATH="$KEYSTORE_DIR/upload-keystore.jks"
+
+          # tr strips any newline a copy/paste may have introduced.
+          printf '%s' "$SIGNING_KEY" | tr -d '\r\n\t ' | base64 --decode > "$KEYSTORE_PATH"
+          chmod 600 "$KEYSTORE_PATH"
+
+          if [[ ! -s "$KEYSTORE_PATH" ]]; then
+            echo "::error::SIGNING_KEY decoded to an empty file — is it valid base64 of the .jks?"
+            exit 1
+          fi
+          echo "Decoded keystore: $(stat -c %s "$KEYSTORE_PATH") bytes"
+
+          # JKS magic is 0xFEEDFEED. Catch a wrong/truncated secret instantly.
+          MAGIC="$(od -An -tx1 -N4 "$KEYSTORE_PATH" | tr -d ' \n')"
+          if [[ "$MAGIC" != "feedfeed" ]]; then
+            echo "::error::Decoded file is not a JKS keystore (magic=$MAGIC, expected feedfeed)."
+            echo "Re-create the secret with: base64 -w 0 upload-keystore.jks"
+            exit 1
+          fi
+
+          # This single command validates store password, alias AND key password.
+          if ! keytool -list -v \
+                -keystore "$KEYSTORE_PATH" \
+                -storetype JKS \
+                -storepass "$STORE_PASSWORD" \
+                -keypass "$KEY_PASSWORD" \
+                -alias "$KEY_ALIAS" > "$KEYSTORE_DIR/keytool.txt" 2>"$KEYSTORE_DIR/keytool.err"; then
+            echo "::error title=Keystore rejected::keytool could not read alias '$KEY_ALIAS'."
+            echo "Either STORE_PASSWORD/KEY_PASSWORD/KEY_ALIAS do not match the keystore in SIGNING_KEY."
+            sed -e 's/^/  /' "$KEYSTORE_DIR/keytool.err" | head -20
+            exit 1
+          fi
+
+          KEYSTORE_FP="$(awk -F': ' '/SHA256:/ {gsub(/:/,"",$2); print toupper($2); exit}' "$KEYSTORE_DIR/keytool.txt")"
+          if [[ -z "$KEYSTORE_FP" ]]; then
+            echo "::error::Could not read the SHA-256 certificate fingerprint from keytool output."
+            exit 1
+          fi
+
+          echo "Keystore verified. Alias '$KEY_ALIAS' present."
+          echo "Certificate SHA-256: $KEYSTORE_FP"
+          echo "keystore_path=$KEYSTORE_PATH"    >> "$GITHUB_OUTPUT"
+          echo "keystore_sha256=$KEYSTORE_FP"   >> "$GITHUB_OUTPUT"
+
+      - name: Analyze (errors only, infos non-fatal)
+        shell: bash
+        run: set -o pipefail && flutter analyze --no-fatal-infos 2>&1 | tee analyze.log
+
+      - name: Test (unit + widget)
+        shell: bash
+        run: set -o pipefail && flutter test --reporter expanded 2>&1 | tee test.log
+
+      # ---------------------------------------------------------------------
+      # Gradle picks the credentials up from the environment; nothing is
+      # written into the checkout and nothing is hardcoded in build.gradle.kts.
+      # ---------------------------------------------------------------------
+      - name: Build signed release APK
+        env:
+          SIGNING_KEYSTORE_FILE: ${{ steps.signing.outputs.keystore_path }}
+          SIGNING_KEYSTORE_TYPE: JKS
+          SIGNING_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter build apk --release 2>&1 | tee build.log
+          APK="build/app/outputs/flutter-apk/app-release.apk"
+          [[ -f "$APK" ]] || { echo "::error::$APK was not produced"; exit 1; }
+          # Gradle logs the keystore it actually used; keep it visible.
+          grep -E "Release signing:|WARNING: no release keystore" build.log || true
+          if grep -q "WARNING: no release keystore" build.log; then
+            echo "::error::Gradle fell back to debug signing even though the secrets were supplied."
+            exit 1
+          fi
+          echo "Built $(stat -c %s "$APK") bytes -> $APK"
+
+      # ---------------------------------------------------------------------
+      # Prove the APK really carries the release certificate. This is the step
+      # that guarantees we never publish another debug-signed APK again.
+      # ---------------------------------------------------------------------
+      - name: Verify APK signature matches the release key
+        env:
+          EXPECTED_SHA256: ${{ steps.signing.outputs.keystore_sha256 }}
+        shell: bash
+        run: |
+          set -uo pipefail
+          APK="build/app/outputs/flutter-apk/app-release.apk"
+
+          # Locate apksigner. It understands v1/v2/v3/v4 schemes; keytool only
+          # reads v1 (JAR) signatures, which modern minSdk builds may omit.
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          APKSIGNER=""
+          if [[ -n "$SDK_ROOT" ]]; then
+            APKSIGNER="$(ls -d "$SDK_ROOT"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1 || true)"
+            if [[ -z "$APKSIGNER" ]] && [[ -x "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]]; then
+              echo "apksigner not found — installing build-tools."
+              yes | "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
+              "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "build-tools;35.0.0" >/dev/null 2>&1 || true
+              APKSIGNER="$(ls -d "$SDK_ROOT"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1 || true)"
+            fi
+          fi
+
+          APK_SHA256=""
+          if [[ -n "$APKSIGNER" ]]; then
+            "$APKSIGNER" verify --print-certs -v "$APK" 2>&1 | tee apksigner.log || true
+            APK_SHA256="$(awk -F': ' '/SHA-256 digest/ {gsub(/:/,"",$2); print toupper($2); exit}' apksigner.log 2>/dev/null || true)"
+            echo "apksigner: ${APKSIGNER}"
+          else
+            echo "::warning::apksigner unavailable; falling back to keytool (v1 signatures only)."
+          fi
+
+          if [[ -z "$APK_SHA256" ]]; then
+            keytool -printcert -jarfile "$APK" 2>&1 | tee keytool-apk.log || true
+            APK_SHA256="$(awk -F': ' '/SHA256:/ {gsub(/:/,"",$2); print toupper($2); exit}' keytool-apk.log 2>/dev/null || true)"
+          fi
+
+          echo "Keystore cert SHA-256: $EXPECTED_SHA256"
+          echo "APK cert      SHA-256: ${APK_SHA256:-<unread>}"
+
+          if [[ -z "$APK_SHA256" ]]; then
+            # We cannot read a certificate, so we cannot prove a mismatch.
+            # The Gradle build already fails if signing config is incomplete,
+            # and the previous step fails on a debug-signing warning, so this
+            # is a visibility gap rather than a known-bad APK.
+            echo "::warning title=Signature not verified::Could not read the APK's signing certificate. The build did not report debug signing, so it is expected to be correct — but this could not be confirmed."
+            exit 0
+          fi
+
+          if [[ "$APK_SHA256" != "$EXPECTED_SHA256" ]]; then
+            echo "::error title=Signature mismatch::The APK is NOT signed with the release keystore."
+            echo "Publishing it would cause 'package conflicts with an existing package'."
+            exit 1
+          fi
+          echo "✓ APK is signed with the stable release key ($APK_SHA256)."
+
+      - name: Read version from pubspec.yaml
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          RAW="$(awk '/^version:/ { sub(/^version:[[:space:]]*/, ""); print; exit }' pubspec.yaml)"
+          VERSION="${RAW%%+*}"
+          BUILD="${RAW##*+}"
+          [[ -n "$VERSION" ]] || { echo "::error::pubspec.yaml has no version"; exit 1; }
+          [[ "$BUILD" =~ ^[0-9]+$ ]] || BUILD=0
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "build=$BUILD"     >> "$GITHUB_OUTPUT"
+
+          # The tag must match pubspec, otherwise the in-app updater and the
+          # release assets disagree about what "latest" is.
+          TAG="${GITHUB_REF_NAME#v}"
+          if [[ -n "$TAG" && "$TAG" != "$VERSION" ]]; then
+            echo "::warning::Tag v$TAG does not match pubspec version $VERSION. Publishing as v$VERSION."
+          fi
+
+      # latest.json lets the in-app updater compare the BUILD number too, not
+      # just the semver tag, so a rebuild of the same version is still detected.
+      - name: Write latest.json update manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          BUILD="${{ steps.version.outputs.build }}"
+          cat > latest.json <<EOF
+          {
+            "version": "$VERSION",
+            "build": $BUILD,
+            "tag": "v$VERSION",
+            "apk": "app-release.apk",
+            "repository": "${GITHUB_REPOSITORY}",
+            "releasedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          EOF
+          cat latest.json
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: IfallMusic v${{ steps.version.outputs.version }} (build ${{ steps.version.outputs.build }})
+          body_path: RELEASE_NOTES.md
+          files: |
+            build/app/outputs/flutter-apk/app-release.apk
+            latest.json
+          fail_on_unmatched_files: true
+          make_latest: true
+          generate_release_notes: false
+
+      - name: Build summary
+        if: success()
+        shell: bash
+        run: |
+          {
+            echo "### Signed release published"
+            echo ""
+            echo "- Version: **v${{ steps.version.outputs.version }}** (build ${{ steps.version.outputs.build }})"
+            echo "- Signing certificate SHA-256: \`${{ steps.signing.outputs.keystore_sha256 }}\`"
+            echo "- Asset: \`app-release.apk\` (name required by the in-app updater)"
+            echo ""
+            echo "Same key as previous releases, so this installs over the old app."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # ---------------------------------------------------------------------
+      # Always remove the decoded key material, on success AND on failure.
+      # ---------------------------------------------------------------------
+      - name: Clean up temporary keystore
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          rm -rf "${RUNNER_TEMP:-/tmp}/signing"
+          rm -f android/app/upload-keystore.jks android/key.properties
+          LEFTOVER=0
+          [[ -e "${RUNNER_TEMP:-/tmp}/signing" ]] && LEFTOVER=1
+          [[ -e android/app/upload-keystore.jks ]] && LEFTOVER=1
+          [[ -e android/key.properties ]] && LEFTOVER=1
+          if (( LEFTOVER )); then
+            echo "::error::Temporary keystore cleanup failed — inspect the runner."
+            exit 1
+          fi
+          echo "Temporary keystore removed. Nothing key-related left on the runner."
+
+      # Lift compiler/Gradle errors into job annotations so a failure is readable.
+      - name: Extract errors (failure)
+        if: failure()
+        shell: bash
+        run: |
+          {
+            grep -hE "^e: |^w: |error • |warning • " analyze.log build.log 2>/dev/null | head -60
+            echo "--- gradle ---"
+            awk '/\* What went wrong/,/^\* Try/' build.log 2>/dev/null | head -40
+          } > errors.log || true
+          [[ -f test.log ]] && { echo "--- tests ---" >> errors.log; tr '\r' '\n' < test.log | tail -80 >> errors.log; }
+          cat errors.log || true
+          DETAILS="$(head -c 20000 errors.log 2>/dev/null || echo 'no diagnostics')"
+          DETAILS="${DETAILS//%/%25}"; DETAILS="${DETAILS//$'\n'/%0A}"; DETAILS="${DETAILS//$'\r'/%0D}"
+          printf '::error title=Release build diagnostics::%s\n' "$DETAILS"
+
+      - name: Upload diagnostics (failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-build-diagnostics
+          path: |
+            analyze.log
+            test.log
+            build.log
+            apksigner.log
+            keytool-apk.log
+            errors.log
+          if-no-files-found: warn

@@ -24,9 +24,17 @@ class IfallBranding {
   static const String fileSuffix = '_ifallmusic';
   static const String author = 'Siddharth ifallertzia';
   static const String contactEmail = 'dastaanenajdik@gmail.com';
-  static const String versionLabel = '2.3.6';
+  /// Kept in step with pubspec.yaml by `scripts/sync_version.sh`, which CI runs
+  /// on every version bump. Do not edit these three by hand.
+  static const String versionLabel = '2.4.0';
+  static const String buildLabel = '13';
   static const String tagline = 'Stream beyond limits';
-  static const String userAgent = 'IfallMusic/2.3.6 (Flutter)';
+  static const String userAgent = 'IfallMusic/2.4.0 (Flutter)';
+
+  /// `2.4.0 (build 13)` — the string that tells one release from another.
+  /// The build number is what Android compares when deciding whether an APK is
+  /// an update, so it is shown to the user as well.
+  static const String fullVersionLabel = '$versionLabel (build $buildLabel)';
   static const String websiteUrl = 'https://sidify.vercel.app';
   static const String latestDownloadMessage =
       'Check here for the latest app download link: sidify.vercel.app';
