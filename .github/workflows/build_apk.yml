@@ -68,6 +68,15 @@ jobs:
       # Without secrets this stays a warning (fork PRs have no secret access),
       # but the APK is then debug-signed and must not be distributed.
       # -------------------------------------------------------------------
+      # -------------------------------------------------------------------
+      # Decode the stable release key into a TEMPORARY path outside the
+      # checkout. Gradle reads the credentials from the environment; nothing
+      # is hardcoded in android/app/build.gradle.kts.
+      #
+      # SIGNING_REQUIRED=false: a fork PR has no secret access, so a missing
+      # key warns and falls back to debug signing. A PRESENT but invalid key
+      # still fails, and a wrong key is caught by the pinned fingerprint.
+      # -------------------------------------------------------------------
       - name: Configure Android release signing
         id: signing
         env:
@@ -75,43 +84,9 @@ jobs:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS || secrets.ANDROID_RELEASE_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || secrets.ANDROID_RELEASE_KEY_PASSWORD }}
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD || secrets.ANDROID_RELEASE_STORE_PASSWORD }}
+          SIGNING_REQUIRED: 'false'
         shell: bash
-        run: |
-          set -euo pipefail
-          if [[ -z "${SIGNING_KEY:-}${KEY_ALIAS:-}${KEY_PASSWORD:-}${STORE_PASSWORD:-}" ]]; then
-            echo "::warning::No release signing secrets configured. This APK is debug-signed and will NOT install over a signed build (package conflict). See docs/RELEASE_SIGNING.md."
-            echo "signed=false" >> "$GITHUB_OUTPUT"
-            echo "### Signing: debug-key fallback" >> "$GITHUB_STEP_SUMMARY"
-            echo "This APK is **not** signed with the stable release key. Do not distribute it. See \`docs/RELEASE_SIGNING.md\`." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          missing=()
-          [[ -n "${SIGNING_KEY:-}" ]]    || missing+=(SIGNING_KEY)
-          [[ -n "${KEY_ALIAS:-}" ]]      || missing+=(KEY_ALIAS)
-          [[ -n "${KEY_PASSWORD:-}" ]]   || missing+=(KEY_PASSWORD)
-          [[ -n "${STORE_PASSWORD:-}" ]] || missing+=(STORE_PASSWORD)
-          if (( ${#missing[@]} > 0 )); then
-            echo "::error::Incomplete signing configuration — missing: ${missing[*]}. Set all four secrets or none."
-            exit 1
-          fi
-
-          KEYSTORE_DIR="${RUNNER_TEMP}/signing"
-          rm -rf "$KEYSTORE_DIR"; mkdir -p "$KEYSTORE_DIR"; chmod 700 "$KEYSTORE_DIR"
-          KEYSTORE_PATH="$KEYSTORE_DIR/upload-keystore.jks"
-          printf '%s' "$SIGNING_KEY" | tr -d '\r\n\t ' | base64 --decode > "$KEYSTORE_PATH"
-          chmod 600 "$KEYSTORE_PATH"
-
-          if [[ "$(od -An -tx1 -N4 "$KEYSTORE_PATH" | tr -d ' \n')" != "feedfeed" ]]; then
-            echo "::error::SIGNING_KEY is not a valid JKS keystore. Re-create it with: base64 -w 0 upload-keystore.jks"
-            exit 1
-          fi
-
-          # Validates store password, alias and key password in one call.
-          keytool -list -keystore "$KEYSTORE_PATH" -storetype JKS \
-                  -alias "$KEY_ALIAS" -storepass "$STORE_PASSWORD" -keypass "$KEY_PASSWORD" >/dev/null
-          echo "Release keystore verified (alias '$KEY_ALIAS')."
-          echo "keystore_path=$KEYSTORE_PATH" >> "$GITHUB_OUTPUT"
-          echo "signed=true" >> "$GITHUB_OUTPUT"
+        run: bash scripts/ci_prepare_signing.sh
 
       # Validate the same release-mode APK/AAB on PRs as on main, so a green
       # debug-only PR cannot hide release build failures.
