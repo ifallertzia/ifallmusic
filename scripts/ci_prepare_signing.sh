@@ -125,15 +125,18 @@ KEYSTORE_PATH="$KEYSTORE_DIR/upload-keystore.jks"
 
 # Report what arrived WITHOUT revealing it. These four numbers uniquely identify
 # a correct paste, so a wrong one is obvious at a glance.
-B64_CLEAN="$(printf '%s' "$SIGNING_KEY" | tr -d '\r\n\t ')"
+B64_CLEAN="$(echo -n "$SIGNING_KEY" | tr -cd 'A-Za-z0-9+/=')"
 B64_LEN="${#B64_CLEAN}"
 B64_SHA="$(printf '%s' "$B64_CLEAN" | sha256sum | cut -d' ' -f1)"
 echo "SIGNING_KEY received: ${B64_LEN} base64 chars (expected ${EXPECTED_BASE64_CHARS})"
 echo "SIGNING_KEY base64 sha256: ${B64_SHA}"
 echo "KEY_ALIAS length: ${#KEY_ALIAS} | KEY_PASSWORD length: ${#KEY_PASSWORD} | STORE_PASSWORD length: ${#STORE_PASSWORD}"
 
-if ! printf '%s' "$B64_CLEAN" | base64 --decode > "$KEYSTORE_PATH" 2>/tmp/b64err; then
-  fail "SIGNING_KEY is not valid base64: $(head -c 200 /tmp/b64err | tr '\n' ' '). Re-create the secret with: base64 -w 0 upload-keystore.jks"
+if ! echo -n "$B64_CLEAN" | base64 --decode > "$KEYSTORE_PATH" 2>/tmp/b64err; then
+  # Fallback also try the explicit requested pipeline (same effect)
+  if ! echo -n "$SIGNING_KEY" | tr -cd 'A-Za-z0-9+/=' | base64 --decode > "$KEYSTORE_PATH" 2>/tmp/b64err; then
+    fail "SIGNING_KEY is not valid base64: $(head -c 200 /tmp/b64err | tr '\n' ' '). Re-create the secret with: base64 -w 0 upload-keystore.jks"
+  fi
 fi
 chmod 600 "$KEYSTORE_PATH"
 
