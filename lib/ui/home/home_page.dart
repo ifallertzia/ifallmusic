@@ -615,15 +615,15 @@ class _BrandRow extends StatelessWidget {
 class _WhatsNewCard extends StatelessWidget {
   const _WhatsNewCard();
 
-  static const String _version = 'Update 2.3.5';
+  static const String _version = 'Update 2.3.6';
   static const String _date = '28 Sept 2026';
   static const String _headline =
-      'Playback engine overhaul, your on-device music';
+      'Library fixed, playback resolver back in sync';
 
   static const List<String> _notes = <String>[
-    'Playback resolver rebuilt with client rotation and fallbacks, so streams keep working.',
-    'New "On device" library plays the songs already stored on your phone.',
-    'Local results in search, skip-silence, cache controls and Android Auto browse roots.',
+    'Fixed the blank Library screen — a missing tab counter crashed the page before it could render.',
+    'Stream resolver re-synced with YouTube\'s current player clients, so songs play again.',
+    'Tighter timeouts and smarter URL checks: failures surface faster and the queue moves on sooner.',
   ];
 
   @override

@@ -1,3 +1,12 @@
+# IfallMusic 2.3.6
+
+## What's new
+
+- **Library screen fixed:** a missing tab counter made the whole Library page crash into a blank screen on open. Counters now cover every tab (including the new On-device tab), with a regression test guarding the mapping.
+- **Playback fixed:** the Innertube stream resolver was re-synced with YouTube's current player clients (lead client corrected and refreshed from yt-dlp's live roster), so tracks load again after YouTube's latest client changes.
+- Smarter stream validation: HEAD-probe timeouts and transient errors no longer blacklist good formats or burn the resolution budget; unproven URLs are handed to the player instead of stalling the queue.
+- Tighter resolve budgets (Innertube 18s + legacy 12s) fit inside the song-load timeout, so a failing track fails fast with a clear reason and auto-advances instead of hanging for half a minute.
+
 # IfallMusic 2.3.5
 
 ## What's new

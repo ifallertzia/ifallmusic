@@ -1,0 +1,161 @@
+name: Innertube live probe
+
+# Temporary: validates the resolver's client roster against live YouTube
+# from the CI runner. Removed after the results are reviewed.
+
+on:
+  push:
+    branches:
+      - 'arena/**'
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe player clients
+        run: |
+          python3 - <<'PY'
+          import json, urllib.request, sys
+
+          VIDEO = 'Gayw5AQvWcQ'  # the track from the field report
+          URL = 'https://www.youtube.com/youtubei/v1/player?prettyPrint=false'
+
+          SAFARI = ('Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) '
+                    'AppleWebKit/605.1.15 (KHTML, like Gecko) '
+                    'Version/26.0 Safari/605.1.15')
+
+          CLIENTS = [
+            # name, id, body-client dict, extra headers
+            ('VISIONOS', 101, {
+              'clientName': 'VISIONOS', 'clientVersion': '1.02',
+              'deviceMake': 'Apple', 'deviceModel': 'RealityDevice17,1',
+              'userAgent': SAFARI, 'osName': 'visionOS',
+              'osVersion': '26.5.23O471',
+            }, {'User-Agent': SAFARI}),
+            ('TVHTML5', 7, {
+              'clientName': 'TVHTML5', 'clientVersion': '7.20260707.07.00',
+              'userAgent': 'Mozilla/5.0 (ChromiumStylePlatform) Cobalt/25.lts.30.1034943-gold (unlike Gecko), Unknown_TV_Unknown_0/Unknown (Unknown, Unknown)',
+            }, {'User-Agent': 'Mozilla/5.0 (ChromiumStylePlatform) Cobalt/25.lts.30.1034943-gold (unlike Gecko), Unknown_TV_Unknown_0/Unknown (Unknown, Unknown)'}),
+            ('ANDROID', 3, {
+              'clientName': 'ANDROID', 'clientVersion': '21.26.364',
+              'androidSdkVersion': 30,
+              'userAgent': 'com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip',
+              'osName': 'Android', 'osVersion': '11',
+            }, {'User-Agent': 'com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip'}),
+            ('IOS', 5, {
+              'clientName': 'IOS', 'clientVersion': '21.26.4',
+              'deviceMake': 'Apple', 'deviceModel': 'iPhone16,2',
+              'userAgent': 'com.google.ios.youtube/21.26.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)',
+              'osName': 'iPhone', 'osVersion': '18.3.2.22D82',
+            }, {'User-Agent': 'com.google.ios.youtube/21.26.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)'}),
+            ('ANDROID_VR', 28, {
+              'clientName': 'ANDROID_VR', 'clientVersion': '1.65.10',
+              'deviceMake': 'Oculus', 'deviceModel': 'Quest 3',
+              'androidSdkVersion': 32,
+              'userAgent': 'com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip',
+              'osName': 'Android', 'osVersion': '12L',
+            }, {'User-Agent': 'com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip'}),
+            ('TVHTML5_SIMPLY_EMBEDDED_PLAYER', 85, {
+              'clientName': 'TVHTML5_SIMPLY_EMBEDDED_PLAYER',
+              'clientVersion': '2.0',
+              'userAgent': 'Mozilla/5.0 (PlayStation; PlayStation 4/12.02) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.4 Safari/605.1.15',
+            }, {'User-Agent': 'Mozilla/5.0 (PlayStation; PlayStation 4/12.02) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.4 Safari/605.1.15'}),
+            # --- old roster entries for comparison ---
+            ('ANDROID_TESTSUITE(old)', None, {
+              'clientName': 'ANDROID_TESTSUITE', 'clientVersion': '1.9.31',
+              'platform': 'MOBILE', 'osName': 'Android', 'osVersion': '14',
+            }, {'User-Agent': 'com.google.android.youtube.testsuite/1.9.31 (Linux; U; Android 14; en_US; SM-S928B Build/UP1A.231005.007)'}),
+            ('VISION_OS(old-bogus)', 113, {
+              'clientName': 'VISION_OS', 'clientVersion': '1.1.2',
+              'platform': 'MOBILE', 'osName': 'iOS', 'osVersion': '1.1',
+            }, {'User-Agent': 'com.google.ios.youtube/1.1.2 (VisionPro1,1; U; CPU OS 1_1 like Mac OS X; en_US)'}),
+          ]
+
+          def post(client_id, client_json, headers, visitor=None):
+            body_client = dict(client_json)
+            body_client['hl'] = 'en'
+            body_client['gl'] = 'IN'
+            if visitor:
+              body_client['visitorData'] = visitor
+            payload = json.dumps({
+              'context': {'client': body_client},
+              'videoId': VIDEO,
+              'contentCheckOk': True,
+              'racyCheckOk': True,
+            }).encode()
+            h = {
+              'Content-Type': 'application/json',
+              'X-YouTube-Client-Version': client_json.get('clientVersion', ''),
+            }
+            if client_id is not None:
+              h['X-YouTube-Client-Name'] = str(client_id)
+            if visitor:
+              h['X-Goog-Visitor-Id'] = visitor
+            h.update(headers)
+            req = urllib.request.Request(URL, data=payload, headers=h)
+            try:
+              with urllib.request.urlopen(req, timeout=12) as r:
+                return json.loads(r.read().decode())
+            except Exception as e:
+              return {'transportError': str(e)}
+
+          def fmt_summary(data):
+            sd = data.get('streamingData') or {}
+            adaptive = sd.get('adaptiveFormats') or []
+            muxed = sd.get('formats') or []
+            direct_audio = [f for f in adaptive if f.get('url') and (str(f.get('mimeType', '')).startswith('audio/') or f.get('itag') in (139, 140, 141, 249, 250, 251))]
+            return len(adaptive), len(muxed), len(direct_audio)
+
+          def head_probe(url):
+            req = urllib.request.Request(url, method='HEAD')
+            try:
+              with urllib.request.urlopen(req, timeout=8) as r:
+                return r.status
+            except Exception as e:
+              if hasattr(e, 'code'):
+                return e.code
+              return str(e)
+
+          failed = False
+          ok_new = False
+          for idx, (name, cid, cjson, headers) in enumerate(CLIENTS):
+            data = post(cid, cjson, headers)
+            if 'transportError' in data:
+              print(f'{name}: TRANSPORT {data["transportError"]}')
+              failed = True
+              continue
+            pa = (data.get('playabilityStatus') or {})
+            status = pa.get('status')
+            reason = pa.get('reason', '')
+            retried = ''
+            if status == 'LOGIN_REQUIRED':
+              vd = ((data.get('responseContext') or {}).get('visitorData')
+                    or data.get('visitorData'))
+              if vd:
+                data = post(cid, cjson, headers, visitor=vd)
+                pa = (data.get('playabilityStatus') or {})
+                retried = f' -> retry: {pa.get("status")}'
+                status = pa.get('status')
+            adaptive, muxed, direct_audio = fmt_summary(data)
+            probe = ''
+            if direct_audio:
+              first = None
+              sd = data.get('streamingData') or {}
+              for f in (sd.get('adaptiveFormats') or []):
+                if f.get('url') and (str(f.get('mimeType', '')).startswith('audio/') or f.get('itag') in (139, 140, 141, 249, 250, 251)):
+                  first = f['url']; break
+              if first:
+                probe = f' head={head_probe(first)}'
+            print(f'{name}: status={status}{retried} reason={reason!r} '
+                  f'adaptive={adaptive} muxed={muxed} direct_audio={direct_audio}{probe}')
+            if status == 'OK' and direct_audio:
+              if idx < 6:
+                ok_new = True
+            else:
+              failed = True
+          print(f'new-roster-usable={ok_new} any-failure={failed}')
+          # Old roster entries are expected to fail; only the new roster
+          # being unusable makes this job red.
+          sys.exit(0 if ok_new else 1)
+          PY

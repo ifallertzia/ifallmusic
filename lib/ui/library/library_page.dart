@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -23,6 +24,31 @@ import '../widgets/media_cards.dart';
 import '../widgets/song_tile.dart';
 import 'playlist_detail_page.dart';
 
+/// Number of tabs shown by the library tab bar. Regression guard:
+/// [buildLibraryTabCounts] must return exactly this many entries or the
+/// tab bar crashes mid-build and the whole page renders blank.
+@visibleForTesting
+int get libraryTabCount => _LibraryTabSpec.all.length;
+
+/// Per-tab pill counters, in `_LibraryTabSpec.all` order:
+/// Liked · Playlists · Songs · Artists · On device · Downloads · History ·
+/// Lyrics Finder.
+@visibleForTesting
+List<int> buildLibraryTabCounts({
+  required LibraryService library,
+  required MusicDownloadService downloads,
+  required int onDeviceCount,
+}) => <int>[
+  library.likedSongs.length,
+  library.playlists.length,
+  library.songs.length,
+  library.artists.length,
+  onDeviceCount,
+  downloads.downloaded.length,
+  library.history.length,
+  0, // Lyrics Finder does not show a count.
+];
+
 /// Your Library.
 ///
 /// Clicking Library no longer dumps you straight into Liked Songs: the screen
@@ -40,7 +66,12 @@ class _LibraryPageState extends State<LibraryPage>
   late final TabController _tabs = TabController(
     length: _LibraryTabSpec.all.length,
     vsync: this,
-    initialIndex: context.read<ShellController>().libraryTab,
+    // Clamp: an out-of-range persisted tab index would assert in debug and
+    // crash tab switching in release.
+    initialIndex: context.read<ShellController>().libraryTab.clamp(
+      0,
+      _LibraryTabSpec.all.length - 1,
+    ),
   );
   late final ShellController _shell = context.read<ShellController>();
   int _lastNonce = -1;
@@ -75,6 +106,7 @@ class _LibraryPageState extends State<LibraryPage>
     final LibraryService library = context.watch<LibraryService>();
     final MusicDownloadService downloads = context
         .watch<MusicDownloadService>();
+    final LocalMusicService localMusic = context.watch<LocalMusicService>();
 
     return AuroraBackdrop(
       intensity: 0.55,
@@ -88,6 +120,7 @@ class _LibraryPageState extends State<LibraryPage>
               controller: _tabs,
               library: library,
               downloads: downloads,
+              onDeviceCount: localMusic.songs.length,
             ),
             Expanded(
               child: TabBarView(
@@ -412,23 +445,23 @@ class _LibraryTabBar extends StatelessWidget {
     required this.controller,
     required this.library,
     required this.downloads,
+    required this.onDeviceCount,
   });
 
   final TabController controller;
   final LibraryService library;
   final MusicDownloadService downloads;
+  final int onDeviceCount;
 
   @override
   Widget build(BuildContext context) {
-    final List<int> counts = <int>[
-      library.likedSongs.length,
-      library.playlists.length,
-      library.songs.length,
-      library.artists.length,
-      downloads.downloaded.length,
-      library.history.length,
-      0,
-    ];
+    // Must stay aligned with `_LibraryTabSpec.all` (see [libraryTabCount]):
+    // a short list used to throw RangeError mid-build and blank the page.
+    final List<int> counts = buildLibraryTabCounts(
+      library: library,
+      downloads: downloads,
+      onDeviceCount: onDeviceCount,
+    );
 
     return AnimatedBuilder(
       animation: controller,
@@ -444,7 +477,7 @@ class _LibraryTabBar extends StatelessWidget {
                   width: (constraints.maxWidth - 8) / 2,
                   child: _TabPill(
                     spec: _LibraryTabSpec.all[i],
-                    count: counts[i],
+                    count: i < counts.length ? counts[i] : 0,
                     selected: controller.index == i,
                     onTap: () {
                       if (i == LibraryTabs.lyrics) {
