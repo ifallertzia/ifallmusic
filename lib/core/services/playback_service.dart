@@ -639,6 +639,12 @@ class PlaybackService extends ChangeNotifier {
     _prewarmed.remove(videoId);
   }
 
+  // Resolution budgets. `_startSong` wraps the whole resolve in a 35s cap;
+  // the two phases must fit inside it with margin, so a slow phase fails fast
+  // with a useful error instead of being strangled by the outer timeout.
+  static const Duration _innertubeBudget = Duration(seconds: 18);
+  static const Duration _legacyBudget = Duration(seconds: 12);
+
   Future<String> _resolveFresh(
     VideoId videoId, {
     required bool preferDownload,
@@ -650,7 +656,7 @@ class PlaybackService extends ChangeNotifier {
       try {
         return (await _innertube
                 .resolve(videoId, preferDownload: preferDownload)
-                .timeout(const Duration(seconds: 34)))
+                .timeout(_innertubeBudget))
             .url
             .toString();
       } catch (error) {
@@ -662,9 +668,7 @@ class PlaybackService extends ChangeNotifier {
 
     if (mode != StreamResolverMode.innertubeOnly) {
       try {
-        return await _resolveWithExplode(videoId).timeout(
-          const Duration(seconds: 34),
-        );
+        return await _resolveWithExplode(videoId).timeout(_legacyBudget);
       } catch (error) {
         throw Exception(
           'No playable stream found. Smart resolver failed.'
@@ -678,19 +682,35 @@ class PlaybackService extends ChangeNotifier {
   }
 
   Future<String> _resolveWithExplode(VideoId videoId) async {
+    // Hard internal deadline so we always fail with a useful message well
+    // before the outer timeout would swallow the cause.
+    final DateTime deadline = DateTime.now().add(const Duration(seconds: 10));
     Object? lastError;
     bool sawNetworkError = false;
 
     for (int pass = 0; pass < 2; pass++) {
+      if (DateTime.now().isAfter(deadline)) break;
       for (final (String name, YoutubeApiClient client) in _streamClients) {
+        final Duration remaining = deadline.difference(DateTime.now());
+        if (remaining <= Duration.zero) break;
         try {
+          final Duration manifestTimeout =
+              remaining < const Duration(seconds: 5)
+              ? remaining
+              : const Duration(seconds: 5);
           final StreamManifest manifest = await _youtube.client.videos.streams
               .getManifest(videoId, ytClients: [client])
-              .timeout(const Duration(seconds: 10));
+              .timeout(manifestTimeout);
 
           final StreamInfo? playable =
-              await _firstPlayable(_sortByBitrateDesc(manifest.audioOnly)) ??
-                  await _firstPlayable(_sortByBitrateDesc(manifest.muxed));
+              await _firstPlayable(
+                _sortByBitrateDesc(manifest.audioOnly),
+                deadline,
+              ) ??
+              await _firstPlayable(
+                _sortByBitrateDesc(manifest.muxed),
+                deadline,
+              );
 
           if (playable != null) {
             debugPrint('[$name] using itag ${playable.tag} '
@@ -717,6 +737,7 @@ class PlaybackService extends ChangeNotifier {
         }
       }
       if (!sawNetworkError) break;
+      if (DateTime.now().isAfter(deadline)) break;
       sawNetworkError = false;
       debugPrint('[legacy] retrying once after network failure...');
     }
@@ -740,32 +761,56 @@ class PlaybackService extends ChangeNotifier {
   /// We probe with a HEAD request — the exact same validity check
   /// youtube_explode_dart itself uses internally — because under YouTube's
   /// anti-bot rules some URLs return 403 and ExoPlayer would fail later.
-  Future<StreamInfo?> _firstPlayable(List<StreamInfo> candidates) async {
+  ///
+  /// [deadline] bounds the probing: if the clock runs out (or the network
+  /// itself is misbehaving) the best unverified candidate is returned instead
+  /// of hanging the whole resolve — the player's own GET is the final judge.
+  Future<StreamInfo?> _firstPlayable(
+    List<StreamInfo> candidates,
+    DateTime deadline,
+  ) async {
     if (candidates.isEmpty) return null;
 
     final HttpClient httpClient = HttpClient()
-      ..connectionTimeout = const Duration(seconds: 8);
+      ..connectionTimeout = const Duration(seconds: 4);
     try {
       for (final StreamInfo candidate in candidates) {
-        final int itag = int.tryParse(candidate.tag.toString()) ?? candidate.tag.hashCode;
+        final int itag =
+            int.tryParse(candidate.tag.toString()) ?? candidate.tag.hashCode;
         if (_legacyBlacklistedItags.contains(itag)) continue;
+        if (DateTime.now().isAfter(deadline)) {
+          // Out of budget: hand the player the best we have, unprobed.
+          debugPrint('itag ${candidate.tag} unprobed (budget spent), using it');
+          return candidate;
+        }
         try {
           final HttpClientRequest request =
               await httpClient.headUrl(candidate.url);
           final HttpClientResponse response =
-              await request.close().timeout(const Duration(seconds: 8));
-          await response.drain<void>().timeout(const Duration(seconds: 8));
+              await request.close().timeout(const Duration(seconds: 4));
+          await response.drain<void>().timeout(const Duration(seconds: 2));
 
-          if (response.statusCode == HttpStatus.ok ||
-              response.statusCode == HttpStatus.partialContent) {
+          final int code = response.statusCode;
+          if (code == HttpStatus.ok || code == HttpStatus.partialContent) {
             return candidate;
           }
-          _noteLegacyProbeFailure(itag);
-          debugPrint('itag ${candidate.tag} -> HTTP ${response.statusCode}, '
-              'trying next stream');
-        } catch (e) {
-          _noteLegacyProbeFailure(itag);
-          debugPrint('itag ${candidate.tag} probe failed: $e');
+          if (code == 400 ||
+              code == 403 ||
+              code == 404 ||
+              code == 410) {
+            _noteLegacyProbeFailure(itag);
+            debugPrint('itag ${candidate.tag} -> HTTP $code, '
+                'trying next stream');
+            continue;
+          }
+          // 405/429/5xx: not proof of a dead URL — let the player decide.
+          debugPrint('itag ${candidate.tag} -> HTTP $code, using it anyway');
+          return candidate;
+        } on Exception catch (e) {
+          // Timeout/socket failure is a property of the network, not the
+          // URL: no blacklist strike, stop probing and let the player try.
+          debugPrint('itag ${candidate.tag} probe inconclusive: $e');
+          return candidate;
         }
       }
     } finally {

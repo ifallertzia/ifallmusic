@@ -24,9 +24,9 @@ class IfallBranding {
   static const String fileSuffix = '_ifallmusic';
   static const String author = 'Siddharth ifallertzia';
   static const String contactEmail = 'dastaanenajdik@gmail.com';
-  static const String versionLabel = '2.3.5';
+  static const String versionLabel = '2.3.6';
   static const String tagline = 'Stream beyond limits';
-  static const String userAgent = 'IfallMusic/2.3.5 (Flutter)';
+  static const String userAgent = 'IfallMusic/2.3.6 (Flutter)';
   static const String websiteUrl = 'https://sidify.vercel.app';
   static const String latestDownloadMessage =
       'Check here for the latest app download link: sidify.vercel.app';
