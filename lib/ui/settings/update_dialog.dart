@@ -47,12 +47,8 @@ enum _Phase { idle, downloading, done, error }
 /// Keep this in step with RELEASE_NOTES.md: the top entry is always the newest
 /// release.
 const String _kShortChangelog =
-    '• Stable release signing — updates now install straight over the old '
-    'app.\n'
-    '• No more "package conflicts with an existing package" errors.\n'
-    '• Update check now compares the build number, so every new build is '
-    'detected.\n'
-    '• Settings → About shows the exact version and build you are running.';
+    '• Some known bugs fixed.\n'
+    '• Playlist button added at the bottom of the player.';
 
 class _UpdateDialog extends StatefulWidget {
   const _UpdateDialog({required this.info});
@@ -217,9 +213,8 @@ class _UpdateDialogState extends State<_UpdateDialog> {
               if (!info.downloadable) ...<Widget>[
                 const SizedBox(height: 10),
                 const Text(
-                  'This release has no APK attached yet. Attach '
-                  '"app-release.apk" to the GitHub release to enable in-app '
-                  'install.',
+                  'This update can\'t be installed in-app yet. Please try '
+                  'again in a little while.',
                   style: TextStyle(
                       fontSize: 11.5, color: SaxifyColors.textMuted),
                 ),
@@ -228,14 +223,9 @@ class _UpdateDialogState extends State<_UpdateDialog> {
             if (_phase == _Phase.done) ...<Widget>[
               const SizedBox(height: 10),
               Text(
-                'APK downloaded — the installer should now open.\n\n'
-                'From this release on, the app is signed with one stable '
-                'release key, so future updates install straight over the top.\n\n'
-                'One last exception: if your currently installed copy was '
-                'signed with an older temporary key, Android will still show '
-                '"package conflicts" for this update only. Back up your library '
-                '(Settings → Backup library), uninstall, install this APK, then '
-                'restore. You will not have to do that again.',
+                'Download complete — the installer should open now.\n\n'
+                'Finish the install and you are on the newest version. Your '
+                'library and playlists stay exactly as they are.',
                 style: TextStyle(fontSize: 11.5, height: 1.45, color: accent.primary),
               ),
             ],

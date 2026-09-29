@@ -1,35 +1,21 @@
-# IfallMusic 2.4.0 (build 13)
+# IfallMusic 2.5.0 (build 15)
 
 ## What's new
 
-- **Stable release signing.** Every release APK is now signed with one permanent
-  release key (`upload`, RSA-2048, valid until 2054) that is stored as an
-  encrypted GitHub Actions secret and decoded to a temporary path at build time.
-  Because the signing certificate never changes, **new versions install straight
-  over the old one** — the "App not installed as package conflicts with an
-  existing package" error is fixed for good.
-- **Signature verified before publishing.** CI reads the certificate out of the
-  built APK and compares its SHA-256 fingerprint with the release keystore. A
-  debug-signed or mismatched APK can no longer be published by accident.
-- **Automatic build number.** The Android `versionCode` (`+13` in
-  `pubspec.yaml`) is incremented on every release, so Android always treats the
-  new APK as an update rather than a downgrade or a duplicate.
-- **Smarter update check.** The in-app updater now reads a `latest.json`
-  manifest published with each release and compares the build number as well as
-  the version, so a rebuilt release is still detected.
-- **Version visible in the app.** Settings → About now shows the exact installed
-  version *and* build number read from the APK itself
-  (`IfallMusic · 2.4.0 (build 13)`), which makes it obvious at a glance whether
-  you are running the new build.
-- Keystore material is never committed: the signing key, alias and passwords
-  live only in GitHub secrets and in the owner's offline backup.
+- Some known bugs fixed.
+- Playlist button added at the bottom of the player — add the song that is
+  playing to a playlist, or start a new one, without leaving the player.
+- The sleep timer now sits in the top bar of the player, next to the lyrics
+  button.
+- Settings tidied up: streaming quality options removed, small gaps added
+  between rows, and Contact / Report / Feedback moved into its own section at
+  the bottom.
 
-## One-time note for existing installs
+## How to update
 
-If the copy currently on your phone was signed with the older temporary debug
-key, Android will reject *this* update once. Back up your library from
-Settings → Backup library, uninstall, install this APK, then restore. Every
-update after this one installs in place. The package ID remains `com.saxify.app`.
+Download `app-release.apk` below and install it over your current app. It is
+signed with the same release key as before, so it installs in place — your
+library, playlists and downloads stay exactly as they are.
 
 # IfallMusic 2.3.6
 

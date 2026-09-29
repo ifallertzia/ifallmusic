@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/models/playlist.dart';
 import '../../core/models/song.dart';
 import '../../core/services/library_service.dart';
 import '../../core/services/playback_service.dart';
@@ -15,6 +16,7 @@ import '../../core/theme/saxify_accents.dart';
 import '../../core/theme/saxify_theme.dart';
 import '../../core/utils/format.dart';
 import '../../screens/lyrics_finder_screen.dart';
+import '../widgets/add_to_playlist_sheet.dart';
 import '../widgets/artwork.dart';
 import '../widgets/song_menu.dart';
 import '../widgets/song_download_button.dart';
@@ -230,6 +232,12 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
                             tooltip: 'Lyrics',
                             icon: const Icon(Icons.lyrics_outlined),
                             onPressed: () => showLyricsPanel(context, song),
+                          ),
+                          // ---- Sleep Timer (Top Right) ----
+                          IconButton(
+                            tooltip: 'Sleep Timer',
+                            icon: const Icon(Icons.bedtime_rounded),
+                            onPressed: () => _showSleepSheet(playback),
                           ),
                           IconButton(
                             icon: const Icon(Icons.more_horiz_rounded),
@@ -491,12 +499,16 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
                                   ),
                                   const SizedBox(width: 8),
                                   _ChipButton(
-                                    label: playback.sleepRemaining == null
-                                        ? 'Sleep'
-                                        : Fmt.clock(playback.sleepRemaining!),
-                                    icon: Icons.bedtime_rounded,
-                                    active: playback.sleepRemaining != null,
-                                    onTap: () => _showSleepSheet(playback),
+                                    label: 'Add Playlist',
+                                    icon: Icons.playlist_add_rounded,
+                                    // Lights up once the song is in a playlist.
+                                    active: library.playlists.any(
+                                      (Playlist p) => p.songs.any(
+                                        (Song s) => s.id == song.id,
+                                      ),
+                                    ),
+                                    onTap: () =>
+                                        showAddToPlaylistSheet(context, song),
                                   ),
                                   const SizedBox(width: 8),
                                   _ChipButton(

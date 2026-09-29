@@ -134,23 +134,7 @@ class SettingsPage extends StatelessWidget {
                   const _PanelHeader(
                     title: 'Playback',
                     subtitle:
-                        'Streaming quality, gapless handoff and auto-next',
-                  ),
-                  _ChoiceTile(
-                    icon: Icons.wifi_rounded,
-                    title: 'Streaming quality · Wi-Fi',
-                    subtitle: 'Quality badge shown in the player',
-                    choices: const <String>['low', 'medium', 'high'],
-                    value: settings.qualityWifi,
-                    onChanged: settings.setQualityWifi,
-                  ),
-                  _ChoiceTile(
-                    icon: Icons.network_cell_rounded,
-                    title: 'Streaming quality · Mobile data',
-                    subtitle: 'Save bandwidth on the go',
-                    choices: const <String>['low', 'medium', 'high'],
-                    value: settings.qualityMobile,
-                    onChanged: settings.setQualityMobile,
+                        'Gapless handoff and auto-next',
                   ),
                   _SwitchTile(
                     icon: Icons.bolt_rounded,
@@ -200,13 +184,13 @@ class SettingsPage extends StatelessWidget {
                   _ChoiceTile(
                     icon: Icons.route_rounded,
                     title: 'Stream resolver',
-                    subtitle: 'Smart uses Innertube first, then legacy fallback',
-                    choices: const <String>['Smart', 'Innertube only', 'Legacy only'],
+                    subtitle: 'Ifall server 1 uses Innertube first, then legacy fallback',
+                    choices: const <String>['Ifall server 1 (smart)', 'Ifall server 2', 'Ifall server 3'],
                     value: settings.streamResolverLabel,
                     onChanged: (String v) => settings.setStreamResolverMode(
                       switch (v) {
-                        'Innertube only' => StreamResolverMode.innertubeOnly,
-                        'Legacy only' => StreamResolverMode.legacyOnly,
+                        'Ifall server 2' => StreamResolverMode.innertubeOnly,
+                        'Ifall server 3' => StreamResolverMode.legacyOnly,
                         _ => StreamResolverMode.smart,
                       },
                     ),
@@ -342,11 +326,14 @@ class SettingsPage extends StatelessWidget {
                   _SettingTile(
                     icon: Icons.system_update_rounded,
                     title: 'Check for updates',
-                    subtitle: 'In-app updates from GitHub Releases',
+                    subtitle: 'Downloads and installs the newest build in-app',
                     onTap: () => checkAndPromptUpdate(context, silent: false),
                   ),
                   const _AboutCard(),
                   const _MadeWithLoveFooter(),
+
+                  // ------------------------------------------------ Contact
+                  const _ContactSection(),
                 ]),
               ),
             ),
@@ -1273,14 +1260,32 @@ class _AboutCardState extends State<_AboutCard> {
             ],
           ),
           const SizedBox(height: 8),
-          _SettingTile(
-            icon: Icons.mail_outline_rounded,
-            title: 'Contact / Report a problem',
-            subtitle: 'Opens email with normal spaces — no "+" signs',
-            onTap: () => _showReportDialog(context),
-          ),
         ],
       ),
+    );
+  }
+}
+
+/// The contact row lives on its own, at the very bottom of Settings, and simply
+/// says what it is — no extra explanation text.
+class _ContactSection extends StatelessWidget {
+  const _ContactSection();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        const _PanelHeader(
+          title: 'Contact',
+          subtitle: 'Reach out, report a problem or send feedback',
+        ),
+        _SettingTile(
+          icon: Icons.mail_outline_rounded,
+          title: 'Contact / Report / Feedback',
+          onTap: () => _showReportDialog(context),
+        ),
+      ],
     );
   }
 }
@@ -1441,10 +1446,10 @@ class _TileIcon extends StatelessWidget {
 }
 
 class _TileText extends StatelessWidget {
-  const _TileText({required this.title, required this.subtitle});
+  const _TileText({required this.title, this.subtitle});
 
   final String title;
-  final String subtitle;
+  final String? subtitle;
 
   @override
   Widget build(BuildContext context) {
@@ -1458,13 +1463,18 @@ class _TileText extends StatelessWidget {
           overflow: TextOverflow.ellipsis,
           style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
         ),
-        const SizedBox(height: 3),
-        Text(
-          subtitle,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontSize: 11.5, color: SaxifyColors.textMuted),
-        ),
+        if (subtitle != null && subtitle!.isNotEmpty) ...<Widget>[
+          const SizedBox(height: 3),
+          Text(
+            subtitle!,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 11.5,
+              color: SaxifyColors.textMuted,
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -1474,14 +1484,14 @@ class _SettingTile extends StatelessWidget {
   const _SettingTile({
     required this.icon,
     required this.title,
-    required this.subtitle,
+    this.subtitle,
     this.trailing,
     this.onTap,
   });
 
   final IconData icon;
   final String title;
-  final String subtitle;
+  final String? subtitle;
   final Widget? trailing;
   final VoidCallback? onTap;
 
@@ -1547,42 +1557,46 @@ class _ChoiceTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final SaxifyAccent accent = context.accent;
-    return GlassPanel(
-      radius: SaxifyTheme.radiusMd,
-      padding: const EdgeInsets.fromLTRB(14, 13, 14, 13),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Row(
-            children: <Widget>[
-              _TileIcon(icon),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _TileText(title: title, subtitle: subtitle),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: <Widget>[
-              for (final String choice in choices)
-                ChoiceChip(
-                  label: Text(choice.toUpperCase()),
-                  selected: choice == value,
-                  onSelected: (_) => onChanged(choice),
-                  labelStyle: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: choice == value
-                        ? accent.primary
-                        : SaxifyColors.textMuted,
-                  ),
+    return Padding(
+      // A small gap so stacked cards never touch each other.
+      padding: const EdgeInsets.only(bottom: 8),
+      child: GlassPanel(
+        radius: SaxifyTheme.radiusMd,
+        padding: const EdgeInsets.fromLTRB(14, 13, 14, 13),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                _TileIcon(icon),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _TileText(title: title, subtitle: subtitle),
                 ),
-            ],
-          ),
-        ],
+              ],
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: <Widget>[
+                for (final String choice in choices)
+                  ChoiceChip(
+                    label: Text(choice.toUpperCase()),
+                    selected: choice == value,
+                    onSelected: (_) => onChanged(choice),
+                    labelStyle: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: choice == value
+                          ? accent.primary
+                          : SaxifyColors.textMuted,
+                    ),
+                  ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

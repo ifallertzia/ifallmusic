@@ -1,7 +1,7 @@
 # IfallMusic
 
 IfallMusic — *Stream beyond limits.* A premium, liquid-glass music player built with
-Flutter, from `ifallertzia/Saxify-v1`. Version **2.4.0**.
+Flutter, from `ifallertzia/Saxify-v1`. Version **2.5.0**.
 
 ## Features
 
