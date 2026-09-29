@@ -138,14 +138,20 @@ the signing identity identically. It:
 3. Prints **lengths and SHA-256 digests only** — never a secret value. Those
    digests are what make a truncated or wrong paste obvious.
 4. Asserts the JKS magic bytes are `feedfeed`.
-5. Compares the decoded file against the **pinned fingerprint** of the release
-   key, so a garbled paste or an unintended key swap fails before any build.
-6. Validates with `keytool`: `-list` proves the store password and that the
+5. Validates with `keytool`: `-list` proves the store password and that the
    alias exists; `-importkeystore` into a throwaway PKCS12 proves the **key**
    password, because unlike `-list` it actually decrypts the private key. The
-   throwaway file is deleted immediately.
-7. Captures the certificate SHA-256 for the post-build comparison and writes a
-   diagnostics table to the job summary.
+   throwaway file is deleted immediately. It also captures the certificate
+   SHA-256, DN and validity for the report.
+6. Compares the decoded file against the **pinned fingerprint** of the release
+   key. This runs *after* `keytool` deliberately: a corrupted paste and a
+   legitimately different keystore hash differently in exactly the same way, but
+   only `keytool` can tell them apart — a tampered JKS fails its SHA-1 integrity
+   digest, whereas a different valid key opens cleanly. So by this point
+   corruption has already been rejected, and a mismatch means "a real, valid
+   keystore — just not the pinned one", which is a policy question. It therefore
+   warns by default and prints the exact constants needed to re-pin.
+7. Writes a pass/fail diagnostics table to the job summary.
 
 Every failure path emits a `::error::` annotation, because Actions log archives
 are not always retrievable and annotations always are.
@@ -165,9 +171,12 @@ base64 -w 0 upload-keystore.jks | tr -d '\n' | wc -c
 keytool -list -v -alias upload -keystore upload-keystore.jks | awk -F': ' '/SHA256:/{print $2}' | tr -d ':'
 ```
 
-To bypass the pin once without editing it, set the repository variable
-`SIGNING_ENFORCE_FINGERPRINT=false` in the workflow env — but rotation breaks
-updates for every existing user, so treat it as a last resort.
+To make a mismatch **fatal** instead of advisory, set `SIGNING_ENFORCE_FINGERPRINT: 'true'`
+in the workflow env. The default is advisory on purpose: the two hard guarantees
+are that `keytool` proves the keystore is structurally valid with all three
+passwords correct, and that `build.yml` proves the finished APK carries *this*
+keystore's certificate. Pinning hard would block a legitimate key that simply
+is not the one this script was first written against.
 
 ## 5. CI — `.github/workflows/build.yml`
 
