@@ -140,6 +140,10 @@ chmod 600 "$KEYSTORE_PATH"
 BYTES="$(stat -c %s "$KEYSTORE_PATH" 2>/dev/null || wc -c < "$KEYSTORE_PATH")"
 FILE_SHA="$(sha256sum "$KEYSTORE_PATH" | cut -d' ' -f1)"
 echo "Decoded keystore: ${BYTES} bytes (expected ${EXPECTED_KEYSTORE_BYTES})"
+# Non-secret digests, published as an annotation on EVERY run. These four values
+# uniquely identify what arrived, so a wrong or altered SIGNING_KEY is provable
+# without needing the (often unreachable) log archive.
+echo "::notice title=Release signing input::SIGNING_KEY ${B64_LEN} base64 chars sha256=${B64_SHA}; decoded ${BYTES} bytes sha256=${FILE_SHA}; expected ${EXPECTED_BASE64_CHARS} chars sha256=${EXPECTED_BASE64_SHA256}, ${EXPECTED_KEYSTORE_BYTES} bytes sha256=${EXPECTED_KEYSTORE_SHA256}"
 echo "Decoded keystore sha256: ${FILE_SHA}"
 
 if [[ ! -s "$KEYSTORE_PATH" ]]; then
@@ -166,6 +170,19 @@ fi
 #                                   key; importing does.
 # ---------------------------------------------------------------------------
 KEYSTORE_SHA256=""; CERT_DN=""; CERT_VALID=""; ALIASES=""
+
+# Publish the raw keytool output as base64 in an annotation. Java messages
+# contain colons, angle brackets, percent signs and X500 DNs, which GitHub
+# annotation parsing can truncate or mask - base64 cannot be truncated or
+# masked, so the real error always survives.
+kt_dump() { # kt_dump <label> <file>
+  local label="$1" file="$2"
+  [[ -f "$file" ]] || return 0
+  local b64
+  b64="$(head -c 900 "$file" | base64 -w 0)"
+  echo "::notice title=Release signing ${label} (base64 of keytool output)::${b64}"
+  return 0
+}
 if command -v keytool >/dev/null 2>&1; then
   KT="$KEYSTORE_DIR/keytool.txt"
 
@@ -174,7 +191,12 @@ if command -v keytool >/dev/null 2>&1; then
         -storepass "$STORE_PASSWORD" > "$KT" 2>&1; then
     MSG="$(head -c 400 "$KT" | tr '\n' ' ')"
     if grep -qiE "tampered with|password was incorrect|invalid keystore format" "$KT"; then
-      fail "STORE_PASSWORD does not open the keystore stored in SIGNING_KEY. keytool said: ${MSG} The keystore itself decoded correctly (${BYTES} bytes, valid JKS magic, sha256 ${FILE_SHA}), so the keystore and this password are not a matching pair. Re-set STORE_PASSWORD and KEY_PASSWORD from the SAME keystore you put in SIGNING_KEY."
+      kt_dump "stage-a" "$KT"
+    fail "STORE_PASSWORD does not open the keystore stored in SIGNING_KEY. keytool said: ${MSG} The keystore itself decoded correctly (${BYTES} bytes, valid JKS magic, sha256 ${FILE_SHA}), so the keystore and this password are not a matching pair. Re-set STORE_PASSWORD and KEY_PASSWORD from the SAME keystore you put in SIGNING_KEY."
+    fi
+    kt_dump "stage-a" "$KT"
+    if grep -qiE "CertificateParsingException|X500|invalid DER|DerInputStream|DerValue" "$KT"; then
+      fail "the CERTIFICATE inside the keystore in SIGNING_KEY cannot be parsed by this JDK. ${MSG} The store password was accepted and the JKS structure is intact, so this is not a password problem: SIGNING_KEY holds a keystore whose certificate uses an X500 name this Java version rejects. Decode the base64 annotation above for the full Java message. Fix: put the base64 of a keystore created with keytool (bash android/generate_keystore.sh), not one converted by other tooling."
     fi
     fail "keytool could not open the keystore in SIGNING_KEY. ${MSG}"
   fi
@@ -185,6 +207,7 @@ if command -v keytool >/dev/null 2>&1; then
   if ! keytool -list -v -keystore "$KEYSTORE_PATH" -storetype JKS \
         -alias "$KEY_ALIAS" -storepass "$STORE_PASSWORD" > "$KT" 2>&1; then
     MSG="$(head -c 400 "$KT" | tr '\n' ' ')"
+    kt_dump "stage-b" "$KT"
     fail "KEY_ALIAS is not present in the keystore stored in SIGNING_KEY. keytool said: ${MSG} The keystore actually contains: ${ALIASES:-<none>}. Set KEY_ALIAS to one of those entries."
   fi
   KEYSTORE_SHA256="$(awk -F': ' '/SHA256:/ {gsub(/:/,"",$2); print toupper($2); exit}' "$KT")"
@@ -207,6 +230,7 @@ if command -v keytool >/dev/null 2>&1; then
     if grep -qiE "UnrecoverableKeyException|Cannot recover key|password was incorrect" "$KEYSTORE_DIR/keytool-import.txt"; then
       fail "KEY_PASSWORD does not unlock alias '${KEY_ALIAS}'. keytool said: ${MSG} STORE_PASSWORD is correct (the keystore opened and the alias exists), so only KEY_PASSWORD is wrong. If the keystore was created with one password for both, set KEY_PASSWORD to the same value as STORE_PASSWORD."
     fi
+    kt_dump "stage-c" "$KEYSTORE_DIR/keytool-import.txt"
     fail "the private key could not be exported, so KEY_PASSWORD is unusable. ${MSG}"
   fi
   rm -f "$PROBE"
