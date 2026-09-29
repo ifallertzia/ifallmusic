@@ -71,14 +71,23 @@ class InnertubeResolver {
        _hl = hl ?? _defaultLanguage();
 
   static String _defaultCountry() {
-    final String code =
-        (PlatformDispatcher.instance.locale.countryCode ?? '').trim();
-    return code.isEmpty ? 'IN' : code;
+    try {
+      final String code =
+          (PlatformDispatcher.instance.locale.countryCode ?? '').trim();
+      return code.isEmpty ? 'IN' : code;
+    } catch (_) {
+      // Test shells / early startup may not expose a locale.
+      return 'IN';
+    }
   }
 
   static String _defaultLanguage() {
-    final String code = PlatformDispatcher.instance.locale.languageCode;
-    return (code.isEmpty || code == 'und') ? 'en' : code;
+    try {
+      final String code = PlatformDispatcher.instance.locale.languageCode;
+      return (code.isEmpty || code == 'und') ? 'en' : code;
+    } catch (_) {
+      return 'en';
+    }
   }
 
   static final Uri _playerEndpoint = Uri.parse(
@@ -114,6 +123,13 @@ class InnertubeResolver {
   ///    so they make dependable mid-tier fallbacks.
   ///  * `ANDROID_VR` formats have been 403-ing since 2026.08.17 — kept only
   ///    as a cheap late fallback in case enforcement eases.
+  ///
+  /// Removed after live probing (2026-09-29):
+  ///  * `TVHTML5_SIMPLY_EMBEDDED_PLAYER` — hard ERROR: "YouTube is no longer
+  ///    supported in this application or device" (this was the error surface
+  ///    in the 2.3.5 field report).
+  ///  * `ANDROID_TESTSUITE` (404), `VISION_OS` (400 — not a real client name),
+  ///    `ANDROID_MUSIC`, `ANDROID_EMBEDDED_PLAYER`.
   ///
   /// Deliberately absent: `WEB`/`MWEB`/`tv_simply` (withhold direct URLs
   /// without a PO token — we have no token source) and every client whose
@@ -169,14 +185,6 @@ class InnertubeResolver {
       androidSdkVersion: 32,
       osName: 'Android',
       osVersion: '12L',
-    ),
-    _InnertubeClient(
-      clientName: 'TVHTML5_SIMPLY_EMBEDDED_PLAYER',
-      clientVersion: '2.0',
-      clientId: 85,
-      userAgent:
-          'Mozilla/5.0 (PlayStation; PlayStation 4/12.02) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.4 Safari/605.1.15',
-      embed: true,
     ),
   ];
 

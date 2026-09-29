@@ -1,7 +1,9 @@
 name: Innertube live probe
 
 # Temporary: validates the resolver's client roster against live YouTube
-# from the CI runner. Removed after the results are reviewed.
+# from the CI runner (datacenter IP ⇒ bot checks; a cookie/visitorData
+# bootstrap pass shows whether the configs themselves are valid).
+# Removed after the results are reviewed.
 
 on:
   push:
@@ -16,17 +18,16 @@ jobs:
       - name: Probe player clients
         run: |
           python3 - <<'PY'
-          import json, urllib.request, sys
+          import json, re, sys, http.cookiejar, urllib.request
 
           VIDEO = 'Gayw5AQvWcQ'  # the track from the field report
           URL = 'https://www.youtube.com/youtubei/v1/player?prettyPrint=false'
-
           SAFARI = ('Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) '
                     'AppleWebKit/605.1.15 (KHTML, like Gecko) '
                     'Version/26.0 Safari/605.1.15')
 
           CLIENTS = [
-            # name, id, body-client dict, extra headers
+            # name, id, body-client dict, extra headers  (roster order)
             ('VISIONOS', 101, {
               'clientName': 'VISIONOS', 'clientVersion': '1.02',
               'deviceMake': 'Apple', 'deviceModel': 'RealityDevice17,1',
@@ -56,12 +57,7 @@ jobs:
               'userAgent': 'com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip',
               'osName': 'Android', 'osVersion': '12L',
             }, {'User-Agent': 'com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip'}),
-            ('TVHTML5_SIMPLY_EMBEDDED_PLAYER', 85, {
-              'clientName': 'TVHTML5_SIMPLY_EMBEDDED_PLAYER',
-              'clientVersion': '2.0',
-              'userAgent': 'Mozilla/5.0 (PlayStation; PlayStation 4/12.02) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.4 Safari/605.1.15',
-            }, {'User-Agent': 'Mozilla/5.0 (PlayStation; PlayStation 4/12.02) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.4 Safari/605.1.15'}),
-            # --- old roster entries for comparison ---
+            # --- old roster entries, expected to fail ---
             ('ANDROID_TESTSUITE(old)', None, {
               'clientName': 'ANDROID_TESTSUITE', 'clientVersion': '1.9.31',
               'platform': 'MOBILE', 'osName': 'Android', 'osVersion': '14',
@@ -72,7 +68,31 @@ jobs:
             }, {'User-Agent': 'com.google.ios.youtube/1.1.2 (VisionPro1,1; U; CPU OS 1_1 like Mac OS X; en_US)'}),
           ]
 
-          def post(client_id, client_json, headers, visitor=None):
+          jar = http.cookiejar.CookieJar()
+          opener = urllib.request.build_opener(
+              urllib.request.HTTPCookieProcessor(jar))
+
+          def bootstrap():
+            """Cookies (SOCS/CONSENT) + visitorData from the homepage —
+            the standard way to survive bot checks from awkward IPs."""
+            req = urllib.request.Request('https://www.youtube.com/',
+                                         headers={'User-Agent': SAFARI,
+                                                  'Accept-Language': 'en-US,en;q=0.9'})
+            try:
+              with opener.open(req, timeout=15) as r:
+                html = r.read().decode('utf-8', 'ignore')
+            except Exception as e:
+              print(f'bootstrap: homepage failed: {e}', flush=True)
+              return None, ''
+            m = re.search(r'"visitorData":"([^"]+)"', html)
+            vd = m.group(1) if m else None
+            cookie = '; '.join(f'{c.name}={c.value}' for c in jar)
+            print(f'bootstrap: visitorData={"yes" if vd else "no"} '
+                  f'cookies={cookie[:120]}', flush=True)
+            return vd, cookie
+
+          def post(client_id, client_json, headers,
+                   visitor=None, cookie=None, timeout=12):
             body_client = dict(client_json)
             body_client['hl'] = 'en'
             body_client['gl'] = 'IN'
@@ -92,10 +112,12 @@ jobs:
               h['X-YouTube-Client-Name'] = str(client_id)
             if visitor:
               h['X-Goog-Visitor-Id'] = visitor
+            if cookie:
+              h['Cookie'] = cookie
             h.update(headers)
             req = urllib.request.Request(URL, data=payload, headers=h)
             try:
-              with urllib.request.urlopen(req, timeout=12) as r:
+              with urllib.request.urlopen(req, timeout=timeout) as r:
                 return json.loads(r.read().decode())
             except Exception as e:
               return {'transportError': str(e)}
@@ -104,7 +126,10 @@ jobs:
             sd = data.get('streamingData') or {}
             adaptive = sd.get('adaptiveFormats') or []
             muxed = sd.get('formats') or []
-            direct_audio = [f for f in adaptive if f.get('url') and (str(f.get('mimeType', '')).startswith('audio/') or f.get('itag') in (139, 140, 141, 249, 250, 251))]
+            direct_audio = [f for f in adaptive
+                            if f.get('url') and (
+                                str(f.get('mimeType', '')).startswith('audio/')
+                                or f.get('itag') in (139, 140, 141, 249, 250, 251))]
             return len(adaptive), len(muxed), len(direct_audio)
 
           def head_probe(url):
@@ -113,68 +138,57 @@ jobs:
               with urllib.request.urlopen(req, timeout=8) as r:
                 return r.status
             except Exception as e:
-              if hasattr(e, 'code'):
-                return e.code
-              return str(e)
+              return getattr(e, 'code', str(e))
 
-          failed = False
-          ok_new = False
-          lines = []
-          for idx, (name, cid, cjson, headers) in enumerate(CLIENTS):
-            data = post(cid, cjson, headers)
+          def status_of(data):
             if 'transportError' in data:
-              line = f'{name}: TRANSPORT {data["transportError"]}'
-              print(line, flush=True)
-              lines.append(line)
-              failed = True
-              continue
-            pa = (data.get('playabilityStatus') or {})
-            status = pa.get('status')
-            reason = pa.get('reason', '')
-            retried = ''
-            if status == 'LOGIN_REQUIRED':
-              vd = ((data.get('responseContext') or {}).get('visitorData')
-                    or data.get('visitorData'))
-              if vd:
-                data = post(cid, cjson, headers, visitor=vd)
-                if 'transportError' in data:
-                  line = (f'{name}: RETRY TRANSPORT '
-                          f'{data["transportError"]}')
-                  print(line, flush=True)
-                  lines.append(line)
-                  failed = True
-                  continue
-                pa = (data.get('playabilityStatus') or {})
-                retried = f' -> retry: {pa.get("status")}'
-                status = pa.get('status')
-            adaptive, muxed, direct_audio = fmt_summary(data)
-            probe = ''
-            if direct_audio:
-              first = None
+              return f"TRANSPORT {data['transportError']}"
+            pa = data.get('playabilityStatus') or {}
+            return pa.get('status')
+
+          def reason_of(data):
+            pa = data.get('playabilityStatus') or {}
+            return pa.get('reason', '')
+
+          vd_boot, cookie_boot = bootstrap()
+          lines = []
+          ok_new = False
+          for idx, (name, cid, cjson, headers) in enumerate(CLIENTS):
+            # Pass 1: exactly what the app sends (cookieless, anonymous).
+            data1 = post(cid, cjson, headers)
+            s1 = status_of(data1)
+            summary = f'{name}: anon={s1!r}'
+            if 'transportError' not in data1 and s1 != 'OK':
+              r1 = reason_of(data1)
+              if r1:
+                summary += f' reason={r1!r}'
+            data = data1
+            # Pass 2: on LOGIN_REQUIRED, retry with bootstrap cookie+visitor.
+            if s1 == 'LOGIN_REQUIRED' and (vd_boot or cookie_boot):
+              data = post(cid, cjson, headers,
+                          visitor=vd_boot, cookie=cookie_boot)
+              summary += f' -> boot={status_of(data)!r}'
+            status = status_of(data)
+            adaptive, muxed, direct_audio = fmt_summary(data) \
+                if 'transportError' not in data else (0, 0, 0)
+            summary += (f' adaptive={adaptive} muxed={muxed} '
+                        f'direct_audio={direct_audio}')
+            if status == 'OK' and direct_audio:
               sd = data.get('streamingData') or {}
               for f in (sd.get('adaptiveFormats') or []):
-                if f.get('url') and (str(f.get('mimeType', '')).startswith('audio/') or f.get('itag') in (139, 140, 141, 249, 250, 251)):
-                  first = f['url']; break
-              if first:
-                probe = f' head={head_probe(first)}'
-            line = (f'{name}: status={status}{retried} reason={reason!r} '
-                    f'adaptive={adaptive} muxed={muxed} '
-                    f'direct_audio={direct_audio}{probe}')
-            print(line, flush=True)
-            lines.append(line)
-            if status == 'OK' and direct_audio:
-              if idx < 6:
+                if f.get('url') and (
+                    str(f.get('mimeType', '')).startswith('audio/')
+                    or f.get('itag') in (139, 140, 141, 249, 250, 251)):
+                  summary += f' head={head_probe(f["url"])}'
+                  break
+              if idx < 5:  # new roster only (old entries are expected dead)
                 ok_new = True
-            else:
-              failed = True
-          summary = f'new-roster-usable={ok_new} any-failure={failed}'
-          print(summary, flush=True)
-          lines.append(summary)
-          # Logs are not fetchable from this sandbox; one aggregate
-          # annotation is (keep it under the per-step annotation cap).
+            print(summary, flush=True)
+            lines.append(summary)
+          lines.append(f'new-roster-usable={ok_new}')
           level = 'notice' if ok_new else 'error'
-          joined = '%0A'.join(lines)
-          print(f'::{level} title=innertube-probe::{joined}', flush=True)
+          print(f'::{level} title=innertube-probe::'
+                f'{"%0A".join(lines)}', flush=True)
           # Old roster entries are expected to fail; only the new roster
           # being unusable makes this job red.
           sys.exit(0 if ok_new else 1)

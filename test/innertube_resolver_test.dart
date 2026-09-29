@@ -75,13 +75,14 @@ void main() {
 
   test('LOGIN_REQUIRED retries the same client with visitorData once',
       () async {
-    int calls = 0;
+    int posts = 0;
     final resolver = InnertubeResolver(
       client: MockClient((http.Request request) async {
-        calls++;
+        if (request.method == 'HEAD') return http.Response('', 200);
+        posts++;
         final body = jsonDecode(request.body) as Map<String, dynamic>;
         final client = (body['context'] as Map)['client'] as Map;
-        if (calls == 1) {
+        if (posts == 1) {
           expect(client['clientName'], 'VISIONOS');
           expect(client.containsKey('visitorData'), isFalse);
           return http.Response(
@@ -105,7 +106,7 @@ void main() {
 
     final stream = await resolver.resolve(VideoId('abcdefghijk'));
 
-    expect(calls, 2);
+    expect(posts, 2);
     expect(stream.clientName, 'VISIONOS');
     expect(stream.itag, 140);
     resolver.close();
@@ -191,13 +192,13 @@ void main() {
             contains('VISIONOS=ERROR'),
             contains('The video you are trying to watch is not available'),
             contains('TVHTML5=LOGIN_REQUIRED'),
-            contains('TVHTML5_SIMPLY_EMBEDDED_PLAYER=LOGIN_REQUIRED'),
+            contains('ANDROID_VR=LOGIN_REQUIRED'),
           ),
         ),
       ),
     );
     // No visitorData in these responses, so no client is retried.
-    expect(calls, 6);
+    expect(calls, 5);
     resolver.close();
   });
 
