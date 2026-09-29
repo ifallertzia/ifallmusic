@@ -135,7 +135,7 @@ echo "KEY_ALIAS length: ${#KEY_ALIAS} | KEY_PASSWORD length: ${#KEY_PASSWORD} | 
 if ! echo -n "$B64_CLEAN" | base64 --decode > "$KEYSTORE_PATH" 2>/tmp/b64err; then
   # Fallback also try the explicit requested pipeline (same effect)
   if ! echo -n "$SIGNING_KEY" | tr -cd 'A-Za-z0-9+/=' | base64 --decode > "$KEYSTORE_PATH" 2>/tmp/b64err; then
-    fail "SIGNING_KEY is not valid base64: $(head -c 200 /tmp/b64err | tr '\n' ' '). Re-create the secret with: base64 -w 0 upload-keystore.jks"
+    fail "SIGNING_KEY is not valid base64 (received ${B64_LEN} chars, sha256 ${B64_SHA:0:12}..., expected ${EXPECTED_BASE64_CHARS} chars): $(head -c 200 /tmp/b64err | tr '\n' ' '). Re-create the secret with: base64 -w 0 upload-keystore.jks"
   fi
 fi
 chmod 600 "$KEYSTORE_PATH"
