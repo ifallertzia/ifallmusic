@@ -152,46 +152,67 @@ if [[ "$MAGIC" != "feedfeed" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 3. Validate with keytool (structure, store password, alias, key password)
+# 3. Validate with keytool
 #
-#    `keytool -list` proves the STORE password and that the alias exists, but it
-#    never decrypts the private key, so it does NOT prove the KEY password.
-#    `-importkeystore` into a throwaway PKCS12 does decrypt the key, so it
-#    validates all three credentials. Both are run.
+#    keytool writes its diagnostics to STDOUT, not stderr - capturing only
+#    stderr is what produced an empty explanation for the first failure.
+#
+#    Three stages, because each credential fails differently and the message
+#    says exactly which secret to fix:
+#      a) -list without -alias   -> STORE_PASSWORD + keystore integrity
+#      b) -list -alias           -> the alias actually exists
+#      c) -importkeystore into a -> KEY_PASSWORD. `-list` never checks this,
+#         throwaway PKCS12          because it does not decrypt the private
+#                                   key; importing does.
 # ---------------------------------------------------------------------------
-KEYSTORE_SHA256=""
+KEYSTORE_SHA256=""; CERT_DN=""; CERT_VALID=""; ALIASES=""
 if command -v keytool >/dev/null 2>&1; then
-  if ! keytool -list -v -keystore "$KEYSTORE_PATH" -storetype JKS \
-        -alias "$KEY_ALIAS" -storepass "$STORE_PASSWORD" \
-        > "$KEYSTORE_DIR/keytool-list.txt" 2> "$KEYSTORE_DIR/keytool-list.err"; then
-    DETAIL="$(head -c 400 "$KEYSTORE_DIR/keytool-list.err" | tr '\n' ' ')"
-    fail "keytool could not read alias '$KEY_ALIAS' with STORE_PASSWORD. ${DETAIL}"
+  KT="$KEYSTORE_DIR/keytool.txt"
+
+  # (a) store password + integrity -------------------------------------------
+  if ! keytool -list -keystore "$KEYSTORE_PATH" -storetype JKS \
+        -storepass "$STORE_PASSWORD" > "$KT" 2>&1; then
+    MSG="$(head -c 400 "$KT" | tr '\n' ' ')"
+    if grep -qiE "tampered with|password was incorrect|invalid keystore format" "$KT"; then
+      fail "STORE_PASSWORD does not open the keystore stored in SIGNING_KEY. keytool said: ${MSG} The keystore itself decoded correctly (${BYTES} bytes, valid JKS magic, sha256 ${FILE_SHA}), so the keystore and this password are not a matching pair. Re-set STORE_PASSWORD and KEY_PASSWORD from the SAME keystore you put in SIGNING_KEY."
+    fi
+    fail "keytool could not open the keystore in SIGNING_KEY. ${MSG}"
   fi
-  echo "keytool -list: store password and alias '$KEY_ALIAS' are valid."
+  ALIASES="$(awk -F', ' '/PrivateKeyEntry|trustedCertEntry|SecretKeyEntry/ {print $1}' "$KT" | paste -sd, -)"
+  echo "keytool opened the keystore. Entries: ${ALIASES:-<none>}"
 
-  KEYSTORE_SHA256="$(awk -F': ' '/SHA256:/ {gsub(/:/,"",$2); print toupper($2); exit}' "$KEYSTORE_DIR/keytool-list.txt")"
-  echo "Certificate SHA-256: ${KEYSTORE_SHA256:-<unread>}"
+  # (b) alias exists ---------------------------------------------------------
+  if ! keytool -list -v -keystore "$KEYSTORE_PATH" -storetype JKS \
+        -alias "$KEY_ALIAS" -storepass "$STORE_PASSWORD" > "$KT" 2>&1; then
+    MSG="$(head -c 400 "$KT" | tr '\n' ' ')"
+    fail "KEY_ALIAS is not present in the keystore stored in SIGNING_KEY. keytool said: ${MSG} The keystore actually contains: ${ALIASES:-<none>}. Set KEY_ALIAS to one of those entries."
+  fi
+  KEYSTORE_SHA256="$(awk -F': ' '/SHA256:/ {gsub(/:/,"",$2); print toupper($2); exit}' "$KT")"
+  CERT_DN="$(awk -F': ' '/^Owner:/ {sub(/^Owner:[ ]*/,""); print; exit}' "$KT")"
+  CERT_VALID="$(awk -F': ' '/^Valid from:/ {sub(/^Valid from:[ ]*/,""); print; exit}' "$KT")"
+  echo "keytool -list -alias: alias present. cert SHA-256 ${KEYSTORE_SHA256:-<unread>}"
+  echo "Certificate DN: ${CERT_DN:-<unread>}"
+  echo "Certificate validity: ${CERT_VALID:-<unread>}"
 
+  # (c) key password ---------------------------------------------------------
   PROBE="$KEYSTORE_DIR/keypass-probe.p12"
+  rm -f "$PROBE"
   if ! keytool -importkeystore \
         -srckeystore "$KEYSTORE_PATH" -srcstoretype JKS \
         -srcalias "$KEY_ALIAS" -srcstorepass "$STORE_PASSWORD" -srckeypass "$KEY_PASSWORD" \
         -destkeystore "$PROBE" -deststoretype PKCS12 -deststorepass "$STORE_PASSWORD" \
-        -noprompt > "$KEYSTORE_DIR/keytool-import.txt" 2> "$KEYSTORE_DIR/keytool-import.err"; then
-    DETAIL="$(head -c 400 "$KEYSTORE_DIR/keytool-import.err" | tr '\n' ' ')"
+        -noprompt > "$KEYSTORE_DIR/keytool-import.txt" 2>&1; then
+    MSG="$(head -c 400 "$KEYSTORE_DIR/keytool-import.txt" | tr '\n' ' ')"
     rm -f "$PROBE"
-    fail "KEY_PASSWORD does not unlock alias '$KEY_ALIAS' (the private key could not be decrypted). keytool said: ${DETAIL}"
+    if grep -qiE "UnrecoverableKeyException|Cannot recover key|password was incorrect" "$KEYSTORE_DIR/keytool-import.txt"; then
+      fail "KEY_PASSWORD does not unlock alias '${KEY_ALIAS}'. keytool said: ${MSG} STORE_PASSWORD is correct (the keystore opened and the alias exists), so only KEY_PASSWORD is wrong. If the keystore was created with one password for both, set KEY_PASSWORD to the same value as STORE_PASSWORD."
+    fi
+    fail "the private key could not be exported, so KEY_PASSWORD is unusable. ${MSG}"
   fi
   rm -f "$PROBE"
   echo "keytool -importkeystore: KEY_PASSWORD unlocks the private key."
-
-  CERT_DN="$(awk -F': ' '/^Owner:/ {sub(/^Owner:[ ]*/,""); print; exit}' "$KEYSTORE_DIR/keytool-list.txt")"
-  CERT_VALID="$(awk -F': ' '/^Valid from:/ {sub(/^Valid from:[ ]*/,""); print; exit}' "$KEYSTORE_DIR/keytool-list.txt")"
-  echo "Certificate DN: ${CERT_DN:-<unread>}"
-  echo "Certificate validity: ${CERT_VALID:-<unread>}"
 else
   warn "keytool not found on this runner - skipping keystore validation. Only the byte-level checks applied."
-  CERT_DN=""; CERT_VALID=""
 fi
 
 # ---------------------------------------------------------------------------
@@ -239,8 +260,8 @@ summary <<EOF
 | cert SHA-256 | \`${KEYSTORE_SHA256:0:16}…\` | \`${EXPECTED_CERT_SHA256:0:16}…\` | $([[ -z "$KEYSTORE_SHA256" || "$KEYSTORE_SHA256" == "$EXPECTED_CERT_SHA256" ]] && echo '✅' || echo '⚠️') |
 | pinned key | ${PINNED:-unknown} | yes | $([[ "${PINNED:-}" == "yes" ]] && echo '✅' || echo '⚠️') |
 
-Certificate DN: `${CERT_DN:-<unread>}`
-Validity: `${CERT_VALID:-<unread>}`
+Certificate DN: \`${CERT_DN:-<unread>}\`
+Validity: \`${CERT_VALID:-<unread>}\`
 
 Keystore decoded to a temporary path outside the checkout; removed by the
 \`Clean up temporary keystore\` step on success **and** failure.

@@ -138,11 +138,20 @@ the signing identity identically. It:
 3. Prints **lengths and SHA-256 digests only** — never a secret value. Those
    digests are what make a truncated or wrong paste obvious.
 4. Asserts the JKS magic bytes are `feedfeed`.
-5. Validates with `keytool`: `-list` proves the store password and that the
-   alias exists; `-importkeystore` into a throwaway PKCS12 proves the **key**
-   password, because unlike `-list` it actually decrypts the private key. The
-   throwaway file is deleted immediately. It also captures the certificate
-   SHA-256, DN and validity for the report.
+5. Validates with `keytool` in **three stages**, because each credential fails
+   differently and the message says exactly which secret to fix. `keytool` writes
+   its diagnostics to **stdout**, not stderr, so both streams are captured —
+   reading only stderr is what first produced an empty explanation.
+   - `keytool -list` with no `-alias` → proves `STORE_PASSWORD` and keystore
+     integrity, and inventories the aliases actually present.
+   - `keytool -list -v -alias …` → proves `KEY_ALIAS` exists. On mismatch the
+     error names the real aliases in the keystore.
+   - `keytool -importkeystore` into a throwaway PKCS12 → proves `KEY_PASSWORD`.
+     `-list` never checks it, because it reads certificate metadata and does not
+     decrypt the private key; importing does. The throwaway file is deleted
+     immediately.
+
+   It also captures the certificate SHA-256, DN and validity for the report.
 6. Compares the decoded file against the **pinned fingerprint** of the release
    key. This runs *after* `keytool` deliberately: a corrupted paste and a
    legitimately different keystore hash differently in exactly the same way, but
