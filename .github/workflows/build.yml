@@ -19,6 +19,13 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Commit/ref to build (build_apk.yml passes the bump commit)'
+        type: string
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -35,6 +42,11 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          # When called from build_apk.yml, github.sha is the PRE-bump merge
+          # commit; `inputs.ref` points at the bump commit so the published
+          # APK carries the incremented build number. Empty -> default ref.
+          ref: ${{ inputs.ref || github.ref }}
 
       # JDK 21 matches AGP 9.1.0 / Gradle 9.3.1 used by this project.
       - name: Set up Java
@@ -226,11 +238,14 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "build=$BUILD"     >> "$GITHUB_OUTPUT"
 
-          # The tag must match pubspec, otherwise the in-app updater and the
-          # release assets disagree about what "latest" is.
-          TAG="${GITHUB_REF_NAME#v}"
-          if [[ -n "$TAG" && "$TAG" != "$VERSION" ]]; then
-            echo "::warning::Tag v$TAG does not match pubspec version $VERSION. Publishing as v$VERSION."
+          # Only meaningful on a tag push. When this workflow is called by
+          # build_apk.yml the ref is `main`, which is not a tag and must not
+          # produce a "does not match" warning.
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+            TAG="${GITHUB_REF_NAME#v}"
+            if [[ -n "$TAG" && "$TAG" != "$VERSION" ]]; then
+              echo "::warning::Tag v$TAG does not match pubspec version $VERSION. Publishing as v$VERSION."
+            fi
           fi
 
       # latest.json lets the in-app updater compare the BUILD number too, not
