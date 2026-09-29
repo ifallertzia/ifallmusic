@@ -121,38 +121,83 @@ flutter build apk --release
 
 ---
 
-## 4. CI — `.github/workflows/build.yml`
+## 4. CI — `scripts/ci_prepare_signing.sh`
+
+Both workflows call this one script, so a release build and a PR build validate
+the signing identity identically. It:
+
+1. Checks that all four secrets are present. `SIGNING_REQUIRED=true`
+   (`build.yml`) fails when none are set, because a release must never ship
+   debug-signed; `SIGNING_REQUIRED=false` (`build_apk.yml`) warns instead, since
+   a fork PR has no secret access. A *partially* configured set always fails,
+   naming exactly which keys are missing.
+2. Decodes `SIGNING_KEY` into `${RUNNER_TEMP}/signing/upload-keystore.jks` —
+   a **temporary path outside the checkout**, dir `700`, file `600`. Newlines,
+   tabs and spaces from a copy/paste are stripped first, so a line-wrapped
+   secret still works.
+3. Prints **lengths and SHA-256 digests only** — never a secret value. Those
+   digests are what make a truncated or wrong paste obvious.
+4. Asserts the JKS magic bytes are `feedfeed`.
+5. Compares the decoded file against the **pinned fingerprint** of the release
+   key, so a garbled paste or an unintended key swap fails before any build.
+6. Validates with `keytool`: `-list` proves the store password and that the
+   alias exists; `-importkeystore` into a throwaway PKCS12 proves the **key**
+   password, because unlike `-list` it actually decrypts the private key. The
+   throwaway file is deleted immediately.
+7. Captures the certificate SHA-256 for the post-build comparison and writes a
+   diagnostics table to the job summary.
+
+Every failure path emits a `::error::` annotation, because Actions log archives
+are not always retrievable and annotations always are.
+
+### Rotating the key
+
+The pinned constants live at the top of `scripts/ci_prepare_signing.sh`:
+`EXPECTED_KEYSTORE_SHA256`, `EXPECTED_KEYSTORE_BYTES`, `EXPECTED_BASE64_SHA256`,
+`EXPECTED_BASE64_CHARS`, `EXPECTED_CERT_SHA256`. After a *deliberate* rotation,
+regenerate them:
+
+```bash
+sha256sum upload-keystore.jks
+wc -c < upload-keystore.jks
+base64 -w 0 upload-keystore.jks | tr -d '\n' | sha256sum
+base64 -w 0 upload-keystore.jks | tr -d '\n' | wc -c
+keytool -list -v -alias upload -keystore upload-keystore.jks | awk -F': ' '/SHA256:/{print $2}' | tr -d ':'
+```
+
+To bypass the pin once without editing it, set the repository variable
+`SIGNING_ENFORCE_FINGERPRINT=false` in the workflow env — but rotation breaks
+updates for every existing user, so treat it as a last resort.
+
+## 5. CI — `.github/workflows/build.yml`
 
 Triggered by `push` of a `v*` tag (and `workflow_dispatch`). Steps:
 
 1. Check out, install JDK 21 (matches AGP 9.1.0 / Gradle 9.3.1) and stable Flutter.
-2. **Fail immediately if any of the four secrets is missing** — a release must
-   never ship debug-signed.
-3. Decode `SIGNING_KEY` into `${RUNNER_TEMP}/signing/upload-keystore.jks` —
-   a **temporary path outside the checkout**, mode `600`, parent dir `700`.
-   Newlines/whitespace from copy-paste are stripped first.
-4. Assert the JKS magic bytes are `feedfeed`.
-5. `keytool -list -v -alias upload -storepass … -keypass …` — validates the
-   store password, alias **and** key password before any Flutter build, and
-   captures the certificate SHA-256.
-6. Analyze, test, then `flutter build apk --release` with the credentials
-   exported as environment variables.
-7. **Verify the APK's own certificate** with `apksigner verify --print-certs`
+2. `scripts/ci_prepare_signing.sh` with `SIGNING_REQUIRED=true` — fails the run
+   immediately if the signing identity is absent or wrong.
+3. Analyze and test.
+4. `flutter build apk --release` with `SIGNING_KEYSTORE_FILE` pointing at the
+   temporary path and the credentials exported as environment variables. Fails
+   if Gradle logs its debug-signing warning despite the secrets being present.
+5. **Verify the APK's own certificate** with `apksigner verify --print-certs`
    (falling back to `keytool -printcert -jarfile`) and compare its SHA-256 with
    the keystore's. A mismatch fails the run — this is the guarantee that a
    debug-signed APK can never be published again.
-8. Write `latest.json` (`version`, `build`, `tag`, `apk`, `releasedAt`) and
+6. Write `latest.json` (`version`, `build`, `tag`, `apk`, `releasedAt`) and
    publish a GitHub Release with **`app-release.apk`** — that exact asset name
    is what the in-app updater looks for.
-9. **Clean up `if: always()`** — removes `${RUNNER_TEMP}/signing` and any stray
+7. **Clean up `if: always()`** — removes `${RUNNER_TEMP}/signing` and any stray
    `android/app/upload-keystore.jks` / `android/key.properties`, then fails the
    step if anything key-related survived. On success *and* on failure.
 
-## 5. CI — `.github/workflows/build_apk.yml`
+## 6. CI — `.github/workflows/build_apk.yml`
 
 Push/PR gate: analyze → test → release-mode APK → release-mode AAB, signed with
 the same key when secrets are available (warning, not failure, when they are
-not — fork PRs cannot read secrets).
+not — fork PRs cannot read secrets). It calls the same
+`ci_prepare_signing.sh` with `SIGNING_REQUIRED=false`, and cleans up the
+temporary keystore with `if: always()` too.
 
 On a push to `main` it additionally:
 
@@ -162,9 +207,12 @@ On a push to `main` it additionally:
 3. Force-moves tag `v<version>`, which triggers `build.yml` to publish the
    signed release.
 
+This job is skipped when the build job fails, so a failed signing step never
+leaves a stray version bump or a moved tag behind.
+
 ---
 
-## 6. Version and build-number rule
+## 7. Version and build-number rule
 
 `pubspec.yaml` carries `version: x.y.z+build`. Flutter maps `x.y.z` →
 `versionName` and `build` → `versionCode`.
@@ -189,7 +237,7 @@ bash scripts/bump_build_number.sh --check    # print, change nothing
 
 ---
 
-## 7. In-app update flow
+## 8. In-app update flow
 
 `lib/core/services/update_service.dart`:
 
@@ -209,7 +257,7 @@ demand from Settings.
 
 ---
 
-## 8. Releasing
+## 9. Releasing
 
 ```bash
 # 1. write the user-facing notes for this release
@@ -227,12 +275,14 @@ git tag -f v2.5.0 && git push -f origin v2.5.0
 
 ---
 
-## 9. Troubleshooting
+## 10. Troubleshooting
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | "package conflicts with an existing package" on install | Old build signed with a different certificate | One-time uninstall + reinstall. Afterwards signing is stable. |
 | Workflow fails: *Missing signing secrets* | Secrets not set (or set on the wrong repo/branch scope) | Add all four under Settings → Secrets and variables → Actions |
+| Workflow fails: *not the pinned release key* | `SIGNING_KEY` truncated or a different keystore | Compare the printed sha256 with `EXPECTED_KEYSTORE_SHA256`; re-paste the correct base64 |
+| Workflow fails: *KEY_PASSWORD does not unlock alias* | Key password wrong | Re-set `KEY_PASSWORD` |
 | Workflow fails: *not a JKS keystore (magic=…)* | `SIGNING_KEY` truncated, or base64 of the wrong file | Re-run `base64 -w 0 upload-keystore.jks` and replace the secret |
 | Workflow fails: *keytool could not read alias 'upload'* | Alias or password does not match the keystore | Re-set `KEY_ALIAS` / `KEY_PASSWORD` / `STORE_PASSWORD` |
 | Workflow fails: *APK is NOT signed with the release keystore* | Gradle did not receive the env vars | Check `SIGNING_KEYSTORE_FILE` etc. in the build step |

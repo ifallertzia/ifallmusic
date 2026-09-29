@@ -56,78 +56,22 @@ jobs:
       # Decode the keystore into a TEMPORARY path outside the checkout, then
       # prove it is usable BEFORE spending ~10 minutes on a Flutter build.
       # ---------------------------------------------------------------------
-      - name: Decode release keystore (temporary path)
+      # ---------------------------------------------------------------------
+      # Decode the keystore into a TEMPORARY path outside the checkout, then
+      # prove it is the pinned release key BEFORE spending ~10 minutes on a
+      # Flutter build. Every failure path emits an annotation, because CI log
+      # files are not always retrievable.
+      # ---------------------------------------------------------------------
+      - name: Decode and validate release keystore
         id: signing
         env:
           SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          SIGNING_REQUIRED: 'true'
         shell: bash
-        run: |
-          set -euo pipefail
-
-          missing=()
-          [[ -n "${SIGNING_KEY:-}" ]]    || missing+=(SIGNING_KEY)
-          [[ -n "${KEY_ALIAS:-}" ]]      || missing+=(KEY_ALIAS)
-          [[ -n "${KEY_PASSWORD:-}" ]]   || missing+=(KEY_PASSWORD)
-          [[ -n "${STORE_PASSWORD:-}" ]] || missing+=(STORE_PASSWORD)
-          if (( ${#missing[@]} > 0 )); then
-            echo "::error title=Missing signing secrets::${missing[*]}"
-            echo "A release must never ship debug-signed, or existing users get a"
-            echo "package/signature conflict. Set all four secrets under"
-            echo "Settings -> Secrets and variables -> Actions. See docs/RELEASE_SIGNING.md."
-            exit 1
-          fi
-
-          # Temporary build path — NOT inside the repository checkout.
-          KEYSTORE_DIR="${RUNNER_TEMP}/signing"
-          rm -rf "$KEYSTORE_DIR"
-          mkdir -p "$KEYSTORE_DIR"
-          chmod 700 "$KEYSTORE_DIR"
-          KEYSTORE_PATH="$KEYSTORE_DIR/upload-keystore.jks"
-
-          # tr strips any newline a copy/paste may have introduced.
-          printf '%s' "$SIGNING_KEY" | tr -d '\r\n\t ' | base64 --decode > "$KEYSTORE_PATH"
-          chmod 600 "$KEYSTORE_PATH"
-
-          if [[ ! -s "$KEYSTORE_PATH" ]]; then
-            echo "::error::SIGNING_KEY decoded to an empty file — is it valid base64 of the .jks?"
-            exit 1
-          fi
-          echo "Decoded keystore: $(stat -c %s "$KEYSTORE_PATH") bytes"
-
-          # JKS magic is 0xFEEDFEED. Catch a wrong/truncated secret instantly.
-          MAGIC="$(od -An -tx1 -N4 "$KEYSTORE_PATH" | tr -d ' \n')"
-          if [[ "$MAGIC" != "feedfeed" ]]; then
-            echo "::error::Decoded file is not a JKS keystore (magic=$MAGIC, expected feedfeed)."
-            echo "Re-create the secret with: base64 -w 0 upload-keystore.jks"
-            exit 1
-          fi
-
-          # This single command validates store password, alias AND key password.
-          if ! keytool -list -v \
-                -keystore "$KEYSTORE_PATH" \
-                -storetype JKS \
-                -storepass "$STORE_PASSWORD" \
-                -keypass "$KEY_PASSWORD" \
-                -alias "$KEY_ALIAS" > "$KEYSTORE_DIR/keytool.txt" 2>"$KEYSTORE_DIR/keytool.err"; then
-            echo "::error title=Keystore rejected::keytool could not read alias '$KEY_ALIAS'."
-            echo "Either STORE_PASSWORD/KEY_PASSWORD/KEY_ALIAS do not match the keystore in SIGNING_KEY."
-            sed -e 's/^/  /' "$KEYSTORE_DIR/keytool.err" | head -20
-            exit 1
-          fi
-
-          KEYSTORE_FP="$(awk -F': ' '/SHA256:/ {gsub(/:/,"",$2); print toupper($2); exit}' "$KEYSTORE_DIR/keytool.txt")"
-          if [[ -z "$KEYSTORE_FP" ]]; then
-            echo "::error::Could not read the SHA-256 certificate fingerprint from keytool output."
-            exit 1
-          fi
-
-          echo "Keystore verified. Alias '$KEY_ALIAS' present."
-          echo "Certificate SHA-256: $KEYSTORE_FP"
-          echo "keystore_path=$KEYSTORE_PATH"    >> "$GITHUB_OUTPUT"
-          echo "keystore_sha256=$KEYSTORE_FP"   >> "$GITHUB_OUTPUT"
+        run: bash scripts/ci_prepare_signing.sh
 
       - name: Analyze (errors only, infos non-fatal)
         shell: bash
