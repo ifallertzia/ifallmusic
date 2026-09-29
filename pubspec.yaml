@@ -1,7 +1,7 @@
 name: ifallmusic
 description: IfallMusic — stream beyond limits. A premium liquid-glass music app.
 publish_to: 'none'
-version: 2.5.0+15
+version: 2.5.0+16
 
 environment:
   sdk: '>=3.5.0 <4.0.0'
