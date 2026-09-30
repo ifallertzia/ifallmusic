@@ -9,7 +9,6 @@ import '../../core/services/settings_service.dart';
 import '../../core/theme/glass.dart';
 import '../../core/theme/saxify_accents.dart';
 import '../../core/theme/saxify_theme.dart';
-import '../widgets/neon.dart';
 import '../widgets/search_fab.dart';
 
 /// Studio equalizer with saved user presets.

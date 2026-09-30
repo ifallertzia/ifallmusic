@@ -115,6 +115,7 @@ class SongCard extends StatelessWidget {
 }
 
 /// Square, poster-first recommendation card used by the Home grid.
+/// Entire card is clickable — no overlay play button. Smaller thumbnail, cleaner look.
 class RecommendationSongCard extends StatelessWidget {
   const RecommendationSongCard({
     super.key,
@@ -138,6 +139,7 @@ class RecommendationSongCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(SaxifyTheme.radiusMd),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: <Widget>[
             AspectRatio(
               aspectRatio: 1,
@@ -151,25 +153,47 @@ class RecommendationSongCard extends StatelessWidget {
                     radius: SaxifyTheme.radiusMd,
                   ),
                   Positioned(
-                    top: 7,
-                    left: 7,
+                    top: 6,
+                    left: 6,
                     child: QualityBadge(quality: song.quality, compact: true),
                   ),
-                  Positioned(
-                    right: 8,
-                    bottom: 8,
-                    child: _PlayFab(accent: accent, active: isCurrent),
-                  ),
+                  // No play button overlay - entire card is clickable
+                  if (isCurrent)
+                    Positioned(
+                      right: 6,
+                      bottom: 6,
+                      child: Container(
+                        width: 20,
+                        height: 20,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: accent.gradient,
+                          boxShadow: <BoxShadow>[
+                            BoxShadow(
+                              color: accent.primary.withValues(alpha: 0.5),
+                              blurRadius: 6,
+                              offset: const Offset(0, 2),
+                              spreadRadius: -1,
+                            ),
+                          ],
+                        ),
+                        child: Icon(
+                          Icons.graphic_eq_rounded,
+                          size: 10,
+                          color: accent.onAccent,
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
-            const SizedBox(height: 7),
+            const SizedBox(height: 5),
             Text(
               song.title,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                fontSize: 13,
+                fontSize: 10.5,
                 height: 1.14,
                 fontWeight: FontWeight.w600,
                 color: isCurrent ? accent.primary : SaxifyColors.textPrimary,
@@ -181,7 +205,7 @@ class RecommendationSongCard extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
-                fontSize: 11,
+                fontSize: 9.5,
                 height: 1.1,
                 color: SaxifyColors.textMuted,
               ),

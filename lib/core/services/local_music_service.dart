@@ -49,6 +49,22 @@ class LocalMusicService extends ChangeNotifier {
   String? _lastError;
 
   List<Song> get songs => List<Song>.unmodifiable(_songs);
+
+  /// Lowercase search text per song, built once and reused. Searching used to
+  /// lowercase every title/artist/album on every keystroke, which is thousands
+  /// of string allocations per frame on a big library.
+  final Map<String, String> _haystacks = <String, String>{};
+
+  String _haystack(Song song) => _haystacks.putIfAbsent(
+    song.id,
+    () =>
+        '${song.title}\n${song.artist}\n${song.album ?? ''}'.toLowerCase(),
+  );
+
+  /// Last query and its rows, so a rebuild with the same text is free.
+  String _searchKey = '';
+  List<Song> _searchHits = <Song>[];
+
   bool get scanning => _scanning;
   String? get lastError => _lastError;
   bool get hasScanned => _prefs.containsKey(_cacheKey);
@@ -87,12 +103,22 @@ class LocalMusicService extends ChangeNotifier {
   List<Song> search(String query, {int limit = 8}) {
     final String q = query.trim().toLowerCase();
     if (q.isEmpty) return <Song>[];
-    final List<Song> matches = _songs.where((Song song) {
-      return song.title.toLowerCase().contains(q) ||
-          song.artist.toLowerCase().contains(q) ||
-          (song.album ?? '').toLowerCase().contains(q);
-    }).take(limit).toList();
-    return matches;
+    if (q != _searchKey) {
+      _searchKey = q;
+      _searchHits = _songs
+          .where((Song song) => _haystack(song).contains(q))
+          .take(limit)
+          .toList();
+    }
+    // Fresh list, same contract the old implementation gave callers.
+    return List<Song>.of(_searchHits);
+  }
+
+  /// Drops memoised search state after the on-device library changes.
+  void _invalidateSearch() {
+    _haystacks.clear();
+    _searchKey = '';
+    _searchHits = <Song>[];
   }
 
   void _loadCached() {
@@ -107,6 +133,7 @@ class LocalMusicService extends ChangeNotifier {
     } catch (_) {
       _songs.clear();
     }
+    _invalidateSearch();
   }
 
   Future<bool> ensurePermission(BuildContext context) async {
@@ -152,6 +179,7 @@ class LocalMusicService extends ChangeNotifier {
       _songs
         ..clear()
         ..addAll(files.map(_toSong));
+      _invalidateSearch();
       await _prefs.setString(
         _cacheKey,
         jsonEncode(_songs.map((Song song) => song.toJson()).toList()),

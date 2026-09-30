@@ -29,6 +29,28 @@ class YoutubeService {
   /// Exposed for [PlaybackService], which owns the stream-manifest logic.
   YoutubeExplode get client => _yt;
 
+  /// Recently served searches, newest last. Typing a query a second time —
+  /// or coming back to it from a Home rail — is then instant and costs no
+  /// network. Bounded so it can never grow with the session.
+  final Map<String, List<Song>> _searchCache = <String, List<Song>>{};
+  static const int _searchCacheLimit = 60;
+
+  List<Song>? _cachedSearch(String key) {
+    final List<Song>? hit = _searchCache.remove(key);
+    if (hit == null) return null;
+    // Re-insert to mark it most-recently used.
+    _searchCache[key] = hit;
+    return hit;
+  }
+
+  void _storeSearch(String key, List<Song> songs) {
+    if (songs.isEmpty) return;
+    _searchCache[key] = List<Song>.unmodifiable(songs);
+    while (_searchCache.length > _searchCacheLimit) {
+      _searchCache.remove(_searchCache.keys.first);
+    }
+  }
+
   // ------------------------------------------------------------------ search
   Future<List<Video>> search(String query, {int limit = 20}) async {
     final VideoSearchList results = await _yt.search.search(query);
@@ -46,6 +68,18 @@ class YoutubeService {
   }) async {
     final raw = YtMusicService.sanitize(query);
     if (raw.isEmpty || limit <= 0) return [];
+    final String cacheKey = '$raw|$limit|${subtitle ?? ''}';
+    final List<Song>? hit = _cachedSearch(cacheKey);
+    if (hit != null) {
+      // Replay the cached rows through the same callbacks a fresh search uses,
+      // so the UI paints immediately without a loading flash. Callers get a
+      // copy: the stored row itself stays immutable and shared.
+      if (cancelToken?.isCancelled != true) {
+        onPartial?.call(List<Song>.of(hit));
+      }
+      onMusicAvailability?.call(true);
+      return List<Song>.of(hit);
+    }
     List<Song> songs = [], all = [], fallback = [];
     var musicSucceeded = false;
     List<Song> merged() => mergeMusicResults(songs, all, fallback)
@@ -92,7 +126,9 @@ class YoutubeService {
     ]);
     if (cancelToken?.isCancelled != true)
       onMusicAvailability?.call(musicSucceeded);
-    return merged();
+    final List<Song> out = merged();
+    _storeSearch(cacheKey, out);
+    return out;
   }
 
   Future<List<Song>> musicSongs(String query, {int limit = 20}) async {
@@ -366,7 +402,11 @@ class YoutubeService {
     }
   }
 
+  /// Drops every cached search row (used when the listener clears cache).
+  void clearSearchCache() => _searchCache.clear();
+
   void close() {
+    _searchCache.clear();
     music.close();
     _yt.close();
   }

@@ -39,6 +39,27 @@ void main() {
     shell.dispose();
   });
 
+  test('Library deep links are consumed once, so Back returns to the list', () {
+    final shell = ShellController();
+    shell.goLiked();
+    expect(shell.libraryTab, LibraryTabs.liked);
+    final int nonce = shell.libraryNonce;
+
+    // The Library list opens the section as a pushed page and immediately
+    // clears the request, so a second visit starts from the list again.
+    shell.clearLibraryTab();
+    expect(shell.libraryTab, LibraryTabs.overview);
+    expect(shell.libraryNonce, greaterThan(nonce));
+
+    shell.goDownloads();
+    expect(shell.libraryTab, LibraryTabs.downloads);
+    shell.select(SaxifyTab.library);
+    expect(shell.libraryTab, LibraryTabs.overview);
+    expect(shell.back(), isTrue);
+    expect(shell.tab, SaxifyTab.home);
+    shell.dispose();
+  });
+
   test('download container uses honest extension and MIME', () {
     expect(
       audioContainer([0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70]).extension,

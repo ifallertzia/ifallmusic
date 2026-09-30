@@ -28,7 +28,6 @@ import '../brands/brands_page.dart';
 import '../shell/shell_controller.dart';
 import '../widgets/artwork.dart';
 import '../widgets/media_cards.dart';
-import '../widgets/neon.dart';
 import '../widgets/song_tile.dart';
 
 enum _SearchKind { songs, artists, albums, playlists }
@@ -227,6 +226,16 @@ class _SearchPageState extends State<SearchPage> {
         : <Song>[];
     final bool idle = _activeQuery.isEmpty && !_loading && _error == null;
 
+    // Rows are plain configuration objects. Handing them to a builder instead
+    // of an eager `children:` list means only the visible rows ever inflate,
+    // so a 60-result search opens without jank.
+    final List<Widget> rows = _resultRows(
+      library: library,
+      playback: playback,
+      localResults: localResults,
+      idle: idle,
+    );
+
     return AuroraBackdrop(
       intensity: 0.5,
       child: Scaffold(
@@ -348,124 +357,10 @@ class _SearchPageState extends State<SearchPage> {
                         actionLabel: 'Try again',
                         onAction: () => _runSearch(_activeQuery),
                       )
-                    : ListView(
+                    : ListView.builder(
                         padding: const EdgeInsets.only(bottom: 140),
-                        children: <Widget>[
-                          if (library.recentSearches.isNotEmpty && idle)
-                            _RecentSearches(
-                              queries: library.recentSearches.take(8).toList(),
-                              onTap: (String q) {
-                                _controller.text = q;
-                                _runSearch(q);
-                              },
-                              onRemove: library.removeSearch,
-                              onClear: library.clearSearchHistory,
-                            ),
-                          if (idle) const _ExploreMusic(),
-                          if (_loading) const LinearProgressIndicator(),
-                          if (!idle &&
-                              !_loading &&
-                              localResults.isEmpty &&
-                              _results.isEmpty &&
-                              _browseResults.isEmpty)
-                            const EmptyState(
-                              icon: Icons.search_off,
-                              title: 'No results',
-                              message:
-                                  'Check your connection or try another song.',
-                            ),
-                          if (!_musicAvailable)
-                            const Padding(
-                              padding: EdgeInsets.all(16),
-                              child: Text(
-                                'ifallertzia server unavailable — showing backup results',
-                                style: TextStyle(
-                                  color: Colors.grey,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ),
-                          if (localResults.isNotEmpty) ...<Widget>[
-                            const SectionHeader(
-                              title: 'On device',
-                              subtitle: 'Songs saved on this phone',
-                            ),
-                            for (int i = 0; i < localResults.length; i++)
-                              SongTile(
-                                song: localResults[i],
-                                showMenu: false,
-                                subtitle: 'On device · ${localResults[i].artist}',
-                                onTap: () => playback.playQueue(
-                                  localResults,
-                                  startIndex: i,
-                                ),
-                              ),
-                          ],
-                          for (final item in _browseResults)
-                            ListTile(
-                              leading: Artwork(url: item.artwork, size: 52),
-                              title: Text(item.title),
-                              subtitle: Text('ifallertzia server · ${item.kind}'),
-                              trailing: const Icon(Icons.chevron_right),
-                              onTap: () => Navigator.of(context).push(
-                                MaterialPageRoute<void>(
-                                  builder: (_) => MusicBrowseScreen(item: item),
-                                ),
-                              ),
-                            ),
-                          if (_results.isNotEmpty) ...<Widget>[
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-                              child: Row(
-                                children: <Widget>[
-                                  Expanded(
-                                    child: Text(
-                                      '${_results.length} results for "$_activeQuery"',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: GoogleFonts.spaceGrotesk(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w700,
-                                        color: SaxifyColors.textSecondary,
-                                      ),
-                                    ),
-                                  ),
-                                  TextButton.icon(
-                                    onPressed: () =>
-                                        playback.playRadio(_results.first),
-                                    icon: const Icon(
-                                      Icons.play_arrow_rounded,
-                                      size: 18,
-                                    ),
-                                    label: const Text(
-                                      'Start radio',
-                                      style: TextStyle(fontSize: 12),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            for (final section in [
-                              'ifallertzia server',
-                              'Videos',
-                              'More results',
-                            ])
-                              if (_section(section).isNotEmpty) ...[
-                                SectionHeader(
-                                  title: section,
-                                  subtitle: section == 'ifallertzia server'
-                                      ? 'Album-quality source audio'
-                                      : null,
-                                ),
-                                for (final song in _section(section))
-                                  SongTile(
-                                    song: song,
-                                    startRadio: true,
-                                    onTap: () => playback.playRadio(song),
-                                  ),
-                              ],
-                          ],
-                        ],
+                        itemCount: rows.length,
+                        itemBuilder: (BuildContext c, int i) => rows[i],
                       ),
               ),
             ],
@@ -474,6 +369,131 @@ class _SearchPageState extends State<SearchPage> {
       ),
     );
   }
+
+  /// Flat, ordered rows for the results list. Built once per frame and
+  /// consumed lazily by the ListView.builder above, so only the
+  /// visible rows ever inflate.
+  List<Widget> _resultRows({
+    required LibraryService library,
+    required PlaybackService playback,
+    required List<Song> localResults,
+    required bool idle,
+  }) => <Widget>[
+    if (library.recentSearches.isNotEmpty && idle)
+      _RecentSearches(
+        queries: library.recentSearches.take(8).toList(),
+        onTap: (String q) {
+          _controller.text = q;
+          _runSearch(q);
+        },
+        onRemove: library.removeSearch,
+        onClear: library.clearSearchHistory,
+      ),
+    if (idle) const _ExploreMusic(),
+    if (_loading) const LinearProgressIndicator(),
+    if (!idle &&
+        !_loading &&
+        localResults.isEmpty &&
+        _results.isEmpty &&
+        _browseResults.isEmpty)
+      const EmptyState(
+        icon: Icons.search_off,
+        title: 'No results',
+        message:
+            'Check your connection or try another song.',
+      ),
+    if (!_musicAvailable)
+      const Padding(
+        padding: EdgeInsets.all(16),
+        child: Text(
+          'ifallertzia server unavailable — showing backup results',
+          style: TextStyle(
+            color: Colors.grey,
+            fontSize: 12,
+          ),
+        ),
+      ),
+    if (localResults.isNotEmpty) ...<Widget>[
+      const SectionHeader(
+        title: 'On device',
+        subtitle: 'Songs saved on this phone',
+      ),
+      for (int i = 0; i < localResults.length; i++)
+        SongTile(
+          song: localResults[i],
+          showMenu: false,
+          subtitle: 'On device · ${localResults[i].artist}',
+          onTap: () => playback.playQueue(
+            localResults,
+            startIndex: i,
+          ),
+        ),
+    ],
+    for (final item in _browseResults)
+      ListTile(
+        leading: Artwork(url: item.artwork, size: 52),
+        title: Text(item.title),
+        subtitle: Text('ifallertzia server · ${item.kind}'),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => MusicBrowseScreen(item: item),
+          ),
+        ),
+      ),
+    if (_results.isNotEmpty) ...<Widget>[
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+        child: Row(
+          children: <Widget>[
+            Expanded(
+              child: Text(
+                '${_results.length} results for "$_activeQuery"',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.spaceGrotesk(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: SaxifyColors.textSecondary,
+                ),
+              ),
+            ),
+            TextButton.icon(
+              onPressed: () =>
+                  playback.playRadio(_results.first),
+              icon: const Icon(
+                Icons.play_arrow_rounded,
+                size: 18,
+              ),
+              label: const Text(
+                'Start radio',
+                style: TextStyle(fontSize: 12),
+              ),
+            ),
+          ],
+        ),
+      ),
+      for (final section in [
+        'ifallertzia server',
+        'Videos',
+        'More results',
+      ])
+        if (_section(section).isNotEmpty) ...[
+          SectionHeader(
+            title: section,
+            subtitle: section == 'ifallertzia server'
+                ? 'Album-quality source audio'
+                : null,
+          ),
+          for (final song in _section(section))
+            SongTile(
+              song: song,
+              startRadio: true,
+              onTap: () => playback.playRadio(song),
+            ),
+        ],
+    ],
+  ];
 
   List<Song> _section(String section) => _results
       .where(

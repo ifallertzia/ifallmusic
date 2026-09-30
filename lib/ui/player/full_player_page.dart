@@ -69,9 +69,10 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
           (_dismissDrag - notification.overscroll * 0.62).clamp(0.0, 220.0);
       if (next != _dismissDrag) setState(() => _dismissDrag = next);
     } else if (notification is ScrollUpdateNotification &&
-        notification.metrics.pixels > notification.metrics.minScrollExtent &&
-        _dismissDrag > 0) {
-      setState(() => _dismissDrag = 0);
+        notification.metrics.pixels > notification.metrics.minScrollExtent) {
+      // Reading down the page: release any half-finished dismiss drag and let
+      // the lyrics hint retire.
+      if (_dismissDrag > 0) setState(() => _dismissDrag = 0);
     } else if (notification is ScrollEndNotification && _dismissDrag > 0) {
       if (_dismissDrag >= 85) {
         Navigator.of(context).maybePop();
@@ -268,10 +269,15 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
                       final double availableHeight = constraints.biggest.height;
                       final double dismissProgress =
                           (_dismissDrag / 120).clamp(0.0, 1.0);
+                      // The sleeve slides sideways, shrinks and fades as the
+                      // player is dragged away, handing the stage to the mini
+                      // player underneath.
                       final double artworkSize = (availableHeight - 84)
                           .clamp(0.0, maxArtworkSize)
                           .toDouble() *
                           (1 - dismissProgress * 0.22);
+                      final double slide = dismissProgress *
+                          math.min(screenSize.width * 0.18, 90);
                       return Stack(
                         fit: StackFit.expand,
                         children: <Widget>[
@@ -296,35 +302,41 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
                                   bottom: 12,
                                 ),
                                 child: Transform.translate(
-                                  offset: Offset(0, 18 * dismissProgress),
-                                  child: SizedBox.square(
-                                    dimension: artworkSize,
-                                    child: DecoratedBox(
-                                      decoration: BoxDecoration(
-                                        borderRadius: BorderRadius.circular(
-                                          SaxifyTheme.radiusLg,
-                                        ),
-                                        boxShadow: <BoxShadow>[
-                                          BoxShadow(
-                                            color: accent.primary.withValues(
-                                              alpha: 0.22,
+                                  offset: Offset(slide, 18 * dismissProgress),
+                                  child: Transform.scale(
+                                    scale: 1 - dismissProgress * 0.16,
+                                    child: Opacity(
+                                      opacity: 1 - dismissProgress * 0.45,
+                                      child: SizedBox.square(
+                                        dimension: artworkSize,
+                                        child: DecoratedBox(
+                                          decoration: BoxDecoration(
+                                            borderRadius: BorderRadius.circular(
+                                              SaxifyTheme.radiusLg,
                                             ),
-                                            blurRadius: 34,
-                                            offset: const Offset(0, 13),
+                                            boxShadow: <BoxShadow>[
+                                              BoxShadow(
+                                                color: accent.primary.withValues(
+                                                  alpha: 0.22,
+                                                ),
+                                                blurRadius: 34,
+                                                offset: const Offset(0, 13),
+                                              ),
+                                            ],
                                           ),
-                                        ],
-                                      ),
-                                      child: ClipRRect(
-                                        borderRadius: BorderRadius.circular(
-                                          SaxifyTheme.radiusLg,
-                                        ),
-                                        child: Hero(
-                                          tag: 'player-artwork-${song.id}',
-                                          child: Artwork(
-                                            url: song.thumbnailUrl,
-                                            radius: SaxifyTheme.radiusLg,
-                                            width: artworkSize,
-                                            height: artworkSize,
+                                          child: ClipRRect(
+                                            borderRadius: BorderRadius.circular(
+                                              SaxifyTheme.radiusLg,
+                                            ),
+                                            child: Hero(
+                                              tag: 'player-artwork-${song.id}',
+                                              child: Artwork(
+                                                url: song.thumbnailUrl,
+                                                radius: SaxifyTheme.radiusLg,
+                                                width: artworkSize,
+                                                height: artworkSize,
+                                              ),
+                                            ),
                                           ),
                                         ),
                                       ),
@@ -573,18 +585,40 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
-                        Text(
-                          'Lyrics',
-                          style: SaxifyTheme.appleFont(
-                            size: 20,
-                            weight: FontWeight.w700,
-                            letterSpacing: -0.35,
-                          ),
+                        Row(
+                          children: <Widget>[
+                            Icon(
+                              Icons.lyrics_outlined,
+                              size: 19,
+                              color: accent.primary,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Lyrics',
+                              style: SaxifyTheme.appleFont(
+                                size: 20,
+                                weight: FontWeight.w700,
+                                letterSpacing: -0.35,
+                              ),
+                            ),
+                            const Spacer(),
+                            if (_lyricsRequested)
+                              TextButton.icon(
+                                onPressed: () => showLyricsPanel(context, song),
+                                icon: const Icon(Icons.open_in_full_rounded, size: 16),
+                                label: const Text('Full'),
+                              ),
+                          ],
                         ),
                         const SizedBox(height: 8),
                         if (_lyricsRequested)
                           SizedBox(
-                            height: 520,
+                            // Lyrics stay pinned to the bottom of the player and
+                            // scroll on their own, so long tracks never fight
+                            // the artwork above for gestures.
+                            height: (screenSize.height * 0.52)
+                                .clamp(300.0, 620.0)
+                                .toDouble(),
                             child: LyricsFinderScreen(
                               key: ValueKey<String>('lyrics-${song.id}'),
                               song: song,
@@ -592,18 +626,7 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
                             ),
                           )
                         else
-                          SizedBox(
-                            height: 92,
-                            child: Center(
-                              child: Text(
-                                'Scroll to find lyrics automatically',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: accent.primary,
-                                ),
-                              ),
-                            ),
-                          ),
+                          const _ScrollToLyricsHint(),
                       ],
                     ),
                   ),
@@ -614,6 +637,93 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// First-run affordance: a looping arrow that tells you the lyrics live just
+/// below, and that scrolling down opens them. The animation lives exactly as
+/// long as the hint is on screen.
+class _ScrollToLyricsHint extends StatefulWidget {
+  const _ScrollToLyricsHint();
+
+  @override
+  State<_ScrollToLyricsHint> createState() => _ScrollToLyricsHintState();
+}
+
+class _ScrollToLyricsHintState extends State<_ScrollToLyricsHint>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1150),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final SaxifyAccent accent = context.accent;
+    final Animation<double> bounce = CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeInOutSine,
+    );
+    return SizedBox(
+      height: 128,
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            AnimatedBuilder(
+              animation: bounce,
+              builder: (BuildContext context, Widget? child) {
+                final double wave = math.sin(bounce.value * math.pi);
+                return Transform.translate(
+                  offset: Offset(0, 10 * wave),
+                  child: Opacity(
+                    opacity: 0.55 + 0.45 * wave,
+                    child: child,
+                  ),
+                );
+              },
+              child: Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: accent.gradient,
+                  boxShadow: <BoxShadow>[
+                    BoxShadow(
+                      color: accent.primary.withValues(alpha: 0.45),
+                      blurRadius: 22,
+                      spreadRadius: -6,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: Icon(
+                  Icons.keyboard_arrow_down_rounded,
+                  size: 26,
+                  color: accent.onAccent,
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'Scroll to open lyrics',
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.2,
+                color: accent.primary,
+              ),
+            ),
+          ],
         ),
       ),
     );

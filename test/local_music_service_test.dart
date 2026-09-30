@@ -35,5 +35,8 @@ void main() {
     expect(restored.albums.single.title, 'Device Album');
     expect(restored.artists.single.name, 'Device Artist');
     expect(restored.search('phone').single.id, 'local:42');
+    expect(restored.search('device artist').single.id, 'local:42');
+    // The memoised path answers a repeated query with the same rows.
+    expect(restored.search('phone').single.id, 'local:42');
   });
 }

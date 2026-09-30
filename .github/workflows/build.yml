@@ -325,11 +325,39 @@ jobs:
             echo "--- gradle ---"
             awk '/\* What went wrong/,/^\* Try/' build.log 2>/dev/null | head -40
           } > errors.log || true
-          [[ -f test.log ]] && { echo "--- tests ---" >> errors.log; tr '\r' '\n' < test.log | tail -80 >> errors.log; }
+          if [[ -f test.log ]]; then
+            # CRLF-free copy of the test log (the expanded reporter emits \r).
+            tr '\r' '\n' < test.log > test-lines.log
+            # Failure blocks, wherever they sit in the log. Every test file runs
+            # in ONE `flutter test` invocation, so the first failing file can be
+            # hundreds of lines above the tail; tailing alone used to hide it.
+            {
+              echo "--- tests: failure blocks ---"
+              awk 'BEGIN { keep = 0 }
+                   /EXCEPTION CAUGHT|\[E\]|Failed assertion|overflowed|A RenderFlex|The relevant error-causing widget|Which:|Expected:|Actual:|framework error/ { keep = 30 }
+                   keep > 0 { print; keep-- }' test-lines.log | head -300
+              echo "--- tests: tail ---"
+              tail -40 test-lines.log
+            } >> errors.log
+          fi
           cat errors.log || true
-          DETAILS="$(head -c 20000 errors.log 2>/dev/null || echo 'no diagnostics')"
-          DETAILS="${DETAILS//%/%25}"; DETAILS="${DETAILS//$'\n'/%0A}"; DETAILS="${DETAILS//$'\r'/%0D}"
-          printf '::error title=Release build diagnostics::%s\n' "$DETAILS"
+
+          # GitHub drops everything after the first 4096 bytes of an annotation,
+          # so the diagnostics are published in chunks instead of one message
+          # that gets cut off mid-stack-trace.
+          emit_annotations() { # emit_annotations <title> <file>
+            local title="$1" file="$2" part n=0 body
+            [[ -s "$file" ]] || return 0
+            rm -f .diag.part.*
+            split -C 3000 -d -a 2 "$file" .diag.part. || true
+            for part in .diag.part.*; do
+              [[ -s "$part" ]] || continue
+              n=$((n + 1))
+              body="$(python3 -c 'import sys; d=open(sys.argv[1],"rb").read().decode("utf-8","replace"); sys.stdout.write(d.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))' "$part")"
+              printf '::error title=%s (%d)::%s\n' "$title" "$n" "$body"
+            done
+          }
+          emit_annotations "Release build diagnostics" errors.log
 
       - name: Upload diagnostics (failure)
         if: failure()
@@ -339,6 +367,7 @@ jobs:
           path: |
             analyze.log
             test.log
+            test-lines.log
             build.log
             apksigner.log
             keytool-apk.log

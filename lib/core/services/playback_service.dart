@@ -1045,9 +1045,7 @@ class PlaybackService extends ChangeNotifier {
     if (_isPlaying && !_isLoading && p.inSeconds >= 10)
       _consecutiveFailures = 0;
     final left = _duration - p;
-    if (!_isLoading &&
-        left > Duration.zero &&
-        left <= const Duration(seconds: 45))
+    if (!_isLoading && left > Duration.zero && left <= _prewarmWindow)
       _prewarmNext();
     // Persist a resume point every ~10 s instead of on every tick.
     final int second = p.inSeconds;
@@ -1176,6 +1174,10 @@ class PlaybackService extends ChangeNotifier {
       if (identical(_fillOperation, operation)) _fillOperation = null;
     });
   }
+
+  /// How early the next track's URL is resolved. Wider than the old 45s window
+  /// so a slow network still has time to finish the manifest lookup.
+  static const Duration _prewarmWindow = Duration(seconds: 90);
 
   void _prewarmNext() {
     if (!_settings.gapless || _stopped) return;

@@ -24,7 +24,6 @@ import '../brands/brands_page.dart';
 import '../settings/settings_page.dart';
 import '../shell/shell_controller.dart';
 import '../widgets/media_cards.dart';
-import '../widgets/neon.dart';
 import '../widgets/saxify_logo.dart';
 import '../widgets/song_tile.dart';
 
@@ -74,7 +73,7 @@ class _HomePageState extends State<HomePage> {
     final PlaybackService playback = context.read<PlaybackService>();
 
     // Put on-device signals first, then the personalised feed. The same
-    // de-duplicated list drives the poster grid and today's mix.
+    // de-duplicated list drives the poster grid.
     final List<Song> homePicks = _uniqueSongs(<Song>[
       ...recommendations.forYou,
       ...catalog.madeForYou,
@@ -82,13 +81,7 @@ class _HomePageState extends State<HomePage> {
       ...library.history.map((HistoryEntry entry) => entry.song),
       ...library.likedSongs,
       ...catalog.trending,
-    ], limit: 8);
-    final List<Song> todayMix = _uniqueSongs(<Song>[
-      ...homePicks,
-      ...catalog.trending,
-      ...catalog.recommended,
-      ...library.likedSongs,
-    ]);
+    ], limit: 16);
 
     return AuroraBackdrop(
       intensity: 0.18,
@@ -124,13 +117,13 @@ class _HomePageState extends State<HomePage> {
                   child: GridView.builder(
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
-                    itemCount: homePicks.length,
+                    itemCount: homePicks.length.clamp(0, 16),
                     gridDelegate:
                         const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
-                          crossAxisSpacing: 12,
-                          mainAxisSpacing: 13,
-                          childAspectRatio: 0.72,
+                          crossAxisCount: 4,
+                          crossAxisSpacing: 10,
+                          mainAxisSpacing: 10,
+                          childAspectRatio: 0.68,
                         ),
                     itemBuilder: (BuildContext c, int i) =>
                         RecommendationSongCard(
@@ -149,7 +142,7 @@ class _HomePageState extends State<HomePage> {
                   padding: const EdgeInsets.symmetric(horizontal: 18),
                   child: Text(
                     catalog.error == null
-                        ? 'Play or like a few songs and we’ll build your mix here.'
+                        ? 'Play or like a few songs and we\'ll build your mix here.'
                         : 'Your mix will appear as soon as the music feed is back.',
                     style: const TextStyle(
                       color: SaxifyColors.textMuted,
@@ -157,59 +150,6 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ),
                 ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
-                child: Row(
-                  children: <Widget>[
-                    Expanded(
-                      child: FilledButton.icon(
-                        style: FilledButton.styleFrom(
-                          minimumSize: const Size(0, 42),
-                          padding: const EdgeInsets.symmetric(horizontal: 10),
-                          textStyle: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        icon: const Icon(Icons.play_arrow_rounded, size: 19),
-                        label: const FittedBox(
-                          fit: BoxFit.scaleDown,
-                          child: Text("Play today's mix"),
-                        ),
-                        onPressed: () async {
-                          if (todayMix.isEmpty) {
-                            context.read<ShellController>().goSearch(
-                              'Hindi trending songs India',
-                            );
-                            return;
-                          }
-                          await playback.playQueue(todayMix);
-                        },
-                      ),
-                    ),
-                    const SizedBox(width: 9),
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(
-                          minimumSize: const Size(0, 42),
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
-                          textStyle: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        icon: const Icon(Icons.explore_outlined, size: 18),
-                        label: const FittedBox(
-                          fit: BoxFit.scaleDown,
-                          child: Text('Explore'),
-                        ),
-                        onPressed: () =>
-                            context.read<ShellController>().goSearch(),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
 
               if (catalog.error != null && homePicks.isEmpty && !catalog.loading)
                 EmptyState(
@@ -415,7 +355,6 @@ class _TopBar extends StatelessWidget {
   }
 }
 
-/// One short greeting, without a hero card, tagline or extra copy.
 class _Hero extends StatelessWidget {
   const _Hero({required this.name});
 
@@ -466,12 +405,12 @@ class _RecommendationLoadingGrid extends StatelessWidget {
       child: GridView.builder(
         shrinkWrap: true,
         physics: const NeverScrollableScrollPhysics(),
-        itemCount: 4,
+        itemCount: 16,
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2,
-          crossAxisSpacing: 12,
-          mainAxisSpacing: 13,
-          childAspectRatio: 0.72,
+          crossAxisCount: 4,
+          crossAxisSpacing: 10,
+          mainAxisSpacing: 10,
+          childAspectRatio: 0.68,
         ),
         itemBuilder: (BuildContext context, int index) => Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -620,20 +559,18 @@ class _BrandRow extends StatelessWidget {
   }
 }
 
-/// "What's new" — the modern update notice, matching the reference site exactly:
-/// a dated card that opens a clean, scrollable changelog sheet.
 class _WhatsNewCard extends StatelessWidget {
   const _WhatsNewCard();
 
-  static const String _version = 'Update 2.5.1';
+  static const String _version = 'Update 2.5.2';
   static const String _date = '30 Sept 2026';
   static const String _headline =
-      'A smoother player, safer library, and a fresh home';
+      'A smoother player, a one-screen library, and a fresh green look';
 
   static const List<String> _notes = <String>[
-    'Your library, downloads and settings now stay safe when repairing a startup issue.',
-    'Lyrics load automatically as you scroll to them, with both static and synced reading.',
-    'Discover music in a cleaner home grid, with a calmer dark look and tighter spacing.',
+    'Your library is one clean list now — open Liked, Downloads or Artists and Back returns you to the list.',
+    'Lyrics sit at the bottom of the player: scroll to open them, with a bouncing arrow showing the way.',
+    'A denser 4-up home grid, Spotify Green as the default look, and faster playback and search.',
   ];
 
   @override

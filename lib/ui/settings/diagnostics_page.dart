@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import '../../config/branding.dart';
 import '../../core/theme/glass.dart';
 import '../../core/theme/saxify_theme.dart';
-import '../widgets/neon.dart';
 
 /// App diagnostics — deliberately short and human readable.
 ///

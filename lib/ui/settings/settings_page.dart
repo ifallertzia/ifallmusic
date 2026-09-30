@@ -10,6 +10,7 @@ import '../../config/branding.dart';
 import '../../core/services/library_service.dart';
 import '../../core/services/playback_service.dart';
 import '../../core/services/settings_service.dart';
+import '../../core/services/youtube_service.dart';
 import '../../core/theme/saxify_accents.dart';
 import '../../core/theme/saxify_theme.dart';
 import '../../core/theme/theme_controller.dart';
@@ -249,6 +250,17 @@ class SettingsPage extends StatelessWidget {
                     onTap: () async {
                       await context.read<PlaybackService>().clearPlaybackCache();
                       if (context.mounted) _toast(context, 'Playback cache cleared');
+                    },
+                  ),
+                  _SettingTile(
+                    icon: Icons.search_off_rounded,
+                    title: 'Clear search memory',
+                    subtitle: 'Forgets remembered searches so they run again',
+                    onTap: () async {
+                      context.read<YoutubeService>().clearSearchCache();
+                      if (context.mounted) {
+                        _toast(context, 'Search memory cleared');
+                      }
                     },
                   ),
 
@@ -735,7 +747,7 @@ class _ThemePanelState extends State<_ThemePanel> {
                 subtitle: Text(
                   theme.accentAcrossApp
                       ? 'The selected colour styles buttons, controls and highlights'
-                      : 'Off by default · clean black look; only song-quality text changes colour',
+                      : 'Clean black look; only song-quality text changes colour',
                   style: const TextStyle(
                     fontSize: 12,
                     color: SaxifyColors.textMuted,

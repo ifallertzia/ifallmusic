@@ -145,17 +145,31 @@ jobs:
             awk '/\* What went wrong/,/^\* Try/' build.log 2>/dev/null | head -30
           } > errors.log || true
           if [[ -f test.log ]]; then
-            echo "--- tests ---" >> errors.log
-            tr '\r' '\n' < test.log | tail -100 >> errors.log
+            tr '\r' '\n' < test.log > test-lines.log
+            # Failure blocks, wherever they sit in the log. Every test file runs
+            # in ONE `flutter test` invocation, so the first failing file can be
+            # hundreds of lines above the tail; tailing alone used to hide it.
+            {
+              echo "--- tests: failure blocks ---"
+              awk 'BEGIN { keep = 0 }
+                   /EXCEPTION CAUGHT|\[E\]|Failed assertion|overflowed|A RenderFlex|The relevant error-causing widget|Which:|Expected:|Actual:|framework error/ { keep = 30 }
+                   keep > 0 { print; keep-- }' test-lines.log | head -300
+              echo "--- tests: tail ---"
+              tail -40 test-lines.log
+            } >> errors.log
           fi
           cat errors.log
-          # One multiline annotation: GitHub limits annotations per step, and
-          # per-line notices can hide the actual failing test behind pass lines.
-          DETAILS="$(head -c 24000 errors.log)"
-          DETAILS="${DETAILS//%/%25}"
-          DETAILS="${DETAILS//$'\n'/%0A}"
-          DETAILS="${DETAILS//$'\r'/%0D}"
-          printf '::error title=Build diagnostics::%s\n' "$DETAILS"
+          # GitHub truncates a single annotation at 4096 bytes, so publish the
+          # diagnostics in chunks instead of one cut-off message.
+          rm -f .diag.part.*
+          split -C 3000 -d -a 2 errors.log .diag.part. || true
+          n=0
+          for part in .diag.part.*; do
+            [[ -s "$part" ]] || continue
+            n=$((n + 1))
+            DETAILS="$(python3 -c 'import sys; d=open(sys.argv[1],"rb").read().decode("utf-8","replace"); sys.stdout.write(d.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))' "$part")"
+            printf '::error title=Build diagnostics (%d)::%s\n' "$n" "$DETAILS"
+          done
 
       # Keep every analyzer/test/build log available if a blocking step fails.
       - name: Upload build diagnostics (failure)
@@ -166,6 +180,7 @@ jobs:
           path: |
             analyze.log
             test.log
+            test-lines.log
             build.log
             appbundle.log
             errors.log
@@ -184,7 +199,7 @@ jobs:
             echo "**❌ Build failed on commit \`${GITHUB_SHA::7}\`**"
             echo ''
             echo '```text'
-            sed -n '1,120p' errors.log 2>/dev/null || echo "errors.log missing"
+            sed -n '1,200p' errors.log 2>/dev/null || echo "errors.log missing"
             echo '```'
             echo ''
             echo '```text'

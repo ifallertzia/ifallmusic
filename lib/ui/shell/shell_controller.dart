@@ -98,6 +98,16 @@ class ShellController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Library sections open as pushed pages now, so once a deep link has been
+  /// consumed the shell returns to the Library list instead of remembering a
+  /// stale selection.
+  void clearLibraryTab() {
+    if (_libraryTab == LibraryTabs.overview) return;
+    _libraryTab = LibraryTabs.overview;
+    _libraryNonce++;
+    notifyListeners();
+  }
+
   /// Library ▸ Downloads — the section the heart/download icon opens.
   void goDownloads() => goLibrary(LibraryTabs.downloads);
 

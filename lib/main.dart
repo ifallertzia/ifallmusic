@@ -112,6 +112,8 @@ Future<AppBoot> _initializeApp() async {
   await NotificationBootstrap.init();
 
   final SettingsService settings = SettingsService(prefs);
+  // One-shot: land on the Spotify Green default look.
+  await settings.applyGreenDefault();
   final LibraryService library = LibraryService(prefs);
   final LocalMusicService localMusic = LocalMusicService(prefs);
   final YoutubeService youtube = YoutubeService();

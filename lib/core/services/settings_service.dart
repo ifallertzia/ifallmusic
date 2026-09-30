@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../theme/saxify_accents.dart';
+
 
 /// Everything the Settings screen owns, persisted with shared_preferences.
 ///
@@ -44,6 +46,9 @@ class SettingsService extends ChangeNotifier {
   static const String kOfflineCacheSize = 'saxify.offline_cache_size.v1';
   static const String kPersistentQueue = 'saxify.persistent_queue.v1';
   static const String kSkipSilence = 'saxify.skip_silence.v1';
+  /// One-shot migration flag: moves an existing install onto the Spotify Green
+  /// default look (accent painted across the whole app).
+  static const String kGreenDefaultApplied = 'saxify.green_default.v1';
 
   // ---------------------------------------------------------------- account
   String get displayName => _prefs.getString(kDisplayName)?.trim() ?? '';
@@ -55,18 +60,36 @@ class SettingsService extends ChangeNotifier {
       _prefs.setString(kEmail, v).then((_) => notifyListeners());
 
   // ---------------------------------------------------------------- theme
-  String get accentId => _prefs.getString(kAccentId) ?? 'violet-pulse';
+  /// Spotify Green is the house look now — a fresh install (and any install
+  /// migrating onto this build) wears it everywhere.
+  static const String defaultAccentId = 'neon-green';
+
+  String get accentId => _prefs.getString(kAccentId) ?? defaultAccentId;
   Future<void> setAccentId(String v) =>
       _prefs.setString(kAccentId, v).then((_) => notifyListeners());
 
   /// When off, the app keeps its neutral black appearance while the small
-  /// song-quality label still follows the selected / rotating colour.
+  /// song-quality label still follows the selected / rotating colour. It is on
+  /// by default now, so the accent really is painted across the whole app.
   bool get accentAcrossApp =>
       _prefs.getBool(kAccentAcrossApp) ??
-      (_prefs.getString(kAccentId) == 'custom-mix');
+      (_prefs.getString(kAccentId) == SaxifyAccent.customAccentId ||
+          _prefs.getString(kAccentId) == null ||
+          _prefs.getString(kAccentId) == defaultAccentId);
   Future<void> setAccentAcrossApp(bool value) => _prefs
       .setBool(kAccentAcrossApp, value)
       .then((_) => notifyListeners());
+
+  /// Runs once per install: anyone arriving from an older build lands on the
+  /// Spotify Green default instead of keeping a stale palette pick.
+  Future<void> applyGreenDefault() async {
+    if (_prefs.getBool(kGreenDefaultApplied) ?? false) return;
+    await _prefs.setBool(kGreenDefaultApplied, true);
+    await _prefs.setString(kAccentId, defaultAccentId);
+    await _prefs.setBool(kAccentAcrossApp, true);
+    await _prefs.setBool(kAutoRotateTheme, false);
+    notifyListeners();
+  }
 
   int? get customAccentPrimary => _prefs.getInt(kCustomAccentPrimary);
   int? get customAccentSecondary => _prefs.getInt(kCustomAccentSecondary);
@@ -77,7 +100,9 @@ class SettingsService extends ChangeNotifier {
     notifyListeners();
   }
 
-  bool get autoRotateTheme => _prefs.getBool(kAutoRotateTheme) ?? true;
+  /// Rotation is opt-in now: the app stays on the Spotify Green default until
+  /// the listener asks for the palette to cycle on its own.
+  bool get autoRotateTheme => _prefs.getBool(kAutoRotateTheme) ?? false;
   Future<void> setAutoRotateTheme(bool v) =>
       _prefs.setBool(kAutoRotateTheme, v).then((_) => notifyListeners());
 
