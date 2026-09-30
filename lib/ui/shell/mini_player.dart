@@ -65,9 +65,36 @@ class MiniPlayer extends StatelessWidget {
             child: Material(
               color: Colors.transparent,
               child: InkWell(
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (BuildContext c) => const FullPlayerPage(),
+                onTap: () => Navigator.of(context).push<void>(
+                  PageRouteBuilder<void>(
+                    opaque: false,
+                    barrierDismissible: false,
+                    transitionDuration: const Duration(milliseconds: 360),
+                    reverseTransitionDuration: const Duration(milliseconds: 260),
+                    pageBuilder: (BuildContext routeContext, Animation<double> animation,
+                        Animation<double> secondaryAnimation) =>
+                        const FullPlayerPage(),
+                    transitionsBuilder: (
+                      BuildContext routeContext,
+                      Animation<double> animation,
+                      Animation<double> secondaryAnimation,
+                      Widget child,
+                    ) {
+                      final Animation<double> eased = CurvedAnimation(
+                        parent: animation,
+                        curve: Curves.easeOutCubic,
+                      );
+                      return FadeTransition(
+                        opacity: eased,
+                        child: SlideTransition(
+                          position: Tween<Offset>(
+                            begin: const Offset(0, 0.12),
+                            end: Offset.zero,
+                          ).animate(eased),
+                          child: child,
+                        ),
+                      );
+                    },
                   ),
                 ),
                 child: Column(

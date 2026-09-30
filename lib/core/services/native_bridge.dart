@@ -53,14 +53,16 @@ class NativeBridge {
     }
   }
 
-  static Future<void> clearLocalPrefs() async {
+  /// Repairs derived local caches after repeated failed launches without
+  /// touching FlutterSharedPreferences (the user's library and settings).
+  static Future<void> repairLocalCache() async {
     if (kIsWeb || !Platform.isAndroid) return;
     try {
       await _channel
-          .invokeMethod<void>('clearFlutterPrefs')
+          .invokeMethod<void>('repairLocalCache')
           .timeout(const Duration(seconds: 2));
     } catch (e) {
-      debugPrint('[IfallMusic][Boot] clearFlutterPrefs failed: $e');
+      debugPrint('[IfallMusic][Boot] repairLocalCache failed: $e');
     }
   }
 

@@ -7,6 +7,7 @@ import '../../core/services/playback_service.dart';
 import '../../core/theme/saxify_accents.dart';
 import '../../core/theme/saxify_theme.dart';
 import '../../core/utils/format.dart';
+import '../../widgets/quality_badge.dart';
 import 'artwork.dart';
 import 'song_download_button.dart';
 
@@ -107,6 +108,85 @@ class SongCard extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Square, poster-first recommendation card used by the Home grid.
+class RecommendationSongCard extends StatelessWidget {
+  const RecommendationSongCard({
+    super.key,
+    required this.song,
+    required this.onTap,
+  });
+
+  final Song song;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final PlaybackService playback = context.watch<PlaybackService>();
+    final bool isCurrent = playback.current?.id == song.id;
+    final SaxifyAccent accent = context.accent;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(SaxifyTheme.radiusMd),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            AspectRatio(
+              aspectRatio: 1,
+              child: Stack(
+                fit: StackFit.expand,
+                children: <Widget>[
+                  Artwork(
+                    url: song.thumbnailUrl,
+                    width: double.infinity,
+                    height: double.infinity,
+                    radius: SaxifyTheme.radiusMd,
+                  ),
+                  Positioned(
+                    top: 7,
+                    left: 7,
+                    child: QualityBadge(quality: song.quality, compact: true),
+                  ),
+                  Positioned(
+                    right: 8,
+                    bottom: 8,
+                    child: _PlayFab(accent: accent, active: isCurrent),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 7),
+            Text(
+              song.title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 13,
+                height: 1.14,
+                fontWeight: FontWeight.w600,
+                color: isCurrent ? accent.primary : SaxifyColors.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              song.artist,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 11,
+                height: 1.1,
+                color: SaxifyColors.textMuted,
+              ),
+            ),
+          ],
         ),
       ),
     );

@@ -35,12 +35,27 @@ class ThemeController extends ChangeNotifier {
 
   bool get usingCustom => _settings.accentId == SaxifyAccent.customAccentId;
 
-  SaxifyAccent get accent =>
+  /// Current custom or palette colour. It keeps rotating independently from
+  /// the rest of the UI when the listener prefers the neutral black look.
+  SaxifyAccent get paletteAccent =>
       usingCustom && _custom != null ? _custom! : SaxifyAccents.all[_index];
+
+  /// Accent used by the shared UI theme. The default is the restrained
+  /// graphite look; the user can opt into colour across the whole app.
+  SaxifyAccent get accent => _settings.accentAcrossApp
+      ? paletteAccent
+      : SaxifyAccents.graphite;
+
+  bool get accentAcrossApp => _settings.accentAcrossApp;
+
+  Future<void> setAccentAcrossApp(bool value) async {
+    await _settings.setAccentAcrossApp(value);
+    notifyListeners();
+  }
 
   /// The palette entry the swatch grid should mark as selected (null when the
   /// listener is on their own mix).
-  String? get selectedId => usingCustom ? null : accent.id;
+  String? get selectedId => usingCustom ? null : paletteAccent.id;
 
   int get index => _index;
   bool get autoRotate => _settings.autoRotateTheme;
@@ -73,6 +88,7 @@ class ThemeController extends ChangeNotifier {
     await _stopTimer();
     await _settings.setAccentId(SaxifyAccent.customAccentId);
     await _settings.setAutoRotateTheme(false);
+    await _settings.setAccentAcrossApp(true);
     notifyListeners();
   }
 
@@ -87,10 +103,11 @@ class ThemeController extends ChangeNotifier {
     await _settings.setAutoRotateTheme(value);
     if (value) {
       if (usingCustom) {
-        // Auto rotate only makes sense over the palette.
+        // An explicit opt-in to rotation returns to the last palette colour;
+        // the saved RGB mix remains stored and is not overwritten.
         _index = SaxifyAccents.all.length - 1;
       }
-      await _settings.setAccentId(accent.id);
+      await _settings.setAccentId(SaxifyAccents.all[_index].id);
       _startTimer();
     } else {
       await _stopTimer();
@@ -116,7 +133,7 @@ class ThemeController extends ChangeNotifier {
     }
     _index = (_index + 1) % SaxifyAccents.all.length;
     _lastSwitch = DateTime.now();
-    if (persist) await _settings.setAccentId(accent.id);
+    if (persist) await _settings.setAccentId(paletteAccent.id);
     notifyListeners();
   }
 

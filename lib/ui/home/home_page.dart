@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../config/branding.dart';
 import '../../core/models/album_card.dart';
 import '../../core/models/artist.dart';
 import '../../core/models/song.dart';
@@ -17,6 +16,7 @@ import '../../core/theme/saxify_theme.dart';
 import '../../core/utils/format.dart';
 import '../../data/labels.dart';
 import '../../screens/music_browse_screen.dart';
+import '../../services/yt_music_parser.dart';
 import '../../widgets/brand_logo.dart';
 import '../album/album_page.dart';
 import '../artist/artist_router.dart';
@@ -56,13 +56,42 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  List<Song> _uniqueSongs(Iterable<Song> songs, {int limit = 100}) {
+    final Set<String> seen = <String>{};
+    return songs
+        .where((Song song) => song.id.isNotEmpty && seen.add(song.id))
+        .take(limit)
+        .toList();
+  }
+
   @override
   Widget build(BuildContext context) {
     final HomeCatalog catalog = context.watch<HomeCatalog>();
     final SettingsService settings = context.watch<SettingsService>();
+    final LibraryService library = context.watch<LibraryService>();
+    final RecommendationService recommendations =
+        context.watch<RecommendationService>();
+    final PlaybackService playback = context.read<PlaybackService>();
+
+    // Put on-device signals first, then the personalised feed. The same
+    // de-duplicated list drives the poster grid and today's mix.
+    final List<Song> homePicks = _uniqueSongs(<Song>[
+      ...recommendations.forYou,
+      ...catalog.madeForYou,
+      ...catalog.recommended,
+      ...library.history.map((HistoryEntry entry) => entry.song),
+      ...library.likedSongs,
+      ...catalog.trending,
+    ], limit: 8);
+    final List<Song> todayMix = _uniqueSongs(<Song>[
+      ...homePicks,
+      ...catalog.trending,
+      ...catalog.recommended,
+      ...library.likedSongs,
+    ]);
 
     return AuroraBackdrop(
-      intensity: 0.9,
+      intensity: 0.18,
       child: SafeArea(
         top: true,
         bottom: false,
@@ -72,7 +101,7 @@ class _HomePageState extends State<HomePage> {
           onRefresh: () => catalog.load(force: true),
           child: ListView(
             physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.only(bottom: 200),
+            padding: const EdgeInsets.only(bottom: 190),
             children: <Widget>[
               _TopBar(
                 onSettings: () {
@@ -84,218 +113,228 @@ class _HomePageState extends State<HomePage> {
                 },
               ),
               _Hero(name: settings.displayName),
-              if (catalog.loading) ...<Widget>[
-                const SectionHeader(
-                  title: 'Made for you',
-                  subtitle: 'Picked from what you keep playing',
-                ),
-                const LoadingRail(itemCount: 3),
-              ] else ...<Widget>[
-                if (catalog.error != null && catalog.madeForYou.isEmpty)
-                  EmptyState(
-                    icon: Icons.wifi_off_rounded,
-                    title: 'Home feed unavailable',
-                    message: catalog.error,
-                    actionLabel: 'Retry',
-                    onAction: () => catalog.load(force: true),
-                  ),
-
-                // ------------------------------------------------ Made for you
-                if (catalog.madeForYou.isNotEmpty) ...<Widget>[
-                  SectionHeader(
-                    title: 'Made for you',
-                    subtitle: 'Picked from what you keep playing',
-                    actionLabel: 'Explore',
-                    onAction: () => context.read<ShellController>().goSearch(),
-                  ),
-                  HorizontalRail(
-                    height: 200,
-                    itemCount: catalog.madeForYou.length,
-                    builder: (BuildContext c, int i) {
-                      final Song song = catalog.madeForYou[i];
-                      return SongCard(
-                        song: song,
-                        onTap: () => context.read<PlaybackService>().playQueue(
-                          catalog.madeForYou,
-                          startIndex: i,
+              const SectionHeader(
+                title: 'Made for you',
+                subtitle: 'Picked from the songs and artists you play',
+                padding: EdgeInsets.fromLTRB(18, 12, 18, 8),
+              ),
+              if (homePicks.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: GridView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: homePicks.length,
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2,
+                          crossAxisSpacing: 12,
+                          mainAxisSpacing: 13,
+                          childAspectRatio: 0.72,
                         ),
-                      );
-                    },
-                  ),
-                ],
-
-                const SectionHeader(
-                  title: 'Playlists you may like',
-                  subtitle: 'ifallertzia server · based on your listening',
-                ),
-                if (catalog.playlistsForYou.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.all(20),
-                    child: Text(
-                      'Playlists will appear as your music feed refreshes.',
-                      style: TextStyle(color: Colors.grey),
-                    ),
-                  )
-                else
-                  HorizontalRail(
-                    height: 232,
-                    itemCount: catalog.playlistsForYou.length,
-                    builder: (c, i) {
-                      final item = catalog.playlistsForYou[i];
-                      return AlbumTile(
-                        coverUrl: item.artwork,
-                        title: item.title,
-                        artist: 'ifallertzia server playlist',
-                        onTap: () => Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) => MusicBrowseScreen(item: item),
+                    itemBuilder: (BuildContext c, int i) =>
+                        RecommendationSongCard(
+                          song: homePicks[i],
+                          onTap: () => playback.playQueue(
+                            homePicks,
+                            startIndex: i,
                           ),
                         ),
-                      );
-                    },
                   ),
-
-                // ------------------------------------------------ Trending now
-                if (catalog.trending.isNotEmpty) ...<Widget>[
-                  SectionHeader(
-                    title: 'Trending now',
-                    subtitle: 'Trending music discovery',
-                    actionLabel: 'Show all',
-                    onAction: () => context.read<ShellController>().goSearch(
-                      'Hindi top hit songs India 2026',
+                )
+              else if (catalog.loading)
+                const _RecommendationLoadingGrid()
+              else
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 18),
+                  child: Text(
+                    catalog.error == null
+                        ? 'Play or like a few songs and we’ll build your mix here.'
+                        : 'Your mix will appear as soon as the music feed is back.',
+                    style: const TextStyle(
+                      color: SaxifyColors.textMuted,
+                      fontSize: 12,
                     ),
                   ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: GlassPanel(
-                      padding: const EdgeInsets.symmetric(vertical: 6),
-                      child: Column(
-                        children: <Widget>[
-                          for (int i = 0; i < catalog.trending.length; i++)
-                            SongTile(
-                              song: catalog.trending[i],
-                              rank: i + 1,
-                              onTap: () => context
-                                  .read<PlaybackService>()
-                                  .playQueue(catalog.trending, startIndex: i),
-                            ),
-                        ],
+                ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+                child: Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size(0, 42),
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                          textStyle: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        icon: const Icon(Icons.play_arrow_rounded, size: 19),
+                        label: const FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text("Play today's mix"),
+                        ),
+                        onPressed: () async {
+                          if (todayMix.isEmpty) {
+                            context.read<ShellController>().goSearch(
+                              'Hindi trending songs India',
+                            );
+                            return;
+                          }
+                          await playback.playQueue(todayMix);
+                        },
                       ),
                     ),
-                  ),
-                ],
-
-                // ------------------------------------------------ New releases
-                SectionHeader(
-                  title: 'New releases',
-                  subtitle: 'Fresh albums & singles',
-                  actionLabel: 'Browse',
-                  onAction: () => context.read<ShellController>().goSearch(
-                    'latest Hindi Bollywood songs 2026',
-                  ),
-                ),
-                if (catalog.freshReleases.isNotEmpty)
-                  HorizontalRail(
-                    height: 232,
-                    itemCount: catalog.freshReleases.length,
-                    builder: (c, i) {
-                      final item = catalog.freshReleases[i];
-                      return AlbumTile(
-                        coverUrl: item.artwork,
-                        title: item.title,
-                        artist: 'ifallertzia server album',
-                        onTap: () => Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) => MusicBrowseScreen(item: item),
+                    const SizedBox(width: 9),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size(0, 42),
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          textStyle: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
                           ),
                         ),
-                      );
-                    },
-                  )
-                else
-                  HorizontalRail(
-                    height: 232,
-                    itemCount: HomeCatalog.newReleases.length,
-                    builder: (c, i) {
-                      final album = HomeCatalog.newReleases[i];
-                      return AlbumTile(
-                        coverUrl: album.coverUrl,
-                        title: album.title,
-                        artist: album.artist,
-                        onTap: () => _openAlbum(album),
-                      );
-                    },
-                  ),
-
-                // ------------------------------------------------ Brands
-                SectionHeader(
-                  title: 'Music brands',
-                  subtitle: 'Official label channels',
-                  actionLabel: 'All',
-                  onAction: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(builder: (_) => const BrandsPage()),
-                  ),
+                        icon: const Icon(Icons.explore_outlined, size: 18),
+                        label: const FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text('Explore'),
+                        ),
+                        onPressed: () =>
+                            context.read<ShellController>().goSearch(),
+                      ),
+                    ),
+                  ],
                 ),
-                const _BrandRow(),
+              ),
 
-                // ------------------------------------------------ Top artists
+              if (catalog.error != null && homePicks.isEmpty && !catalog.loading)
+                EmptyState(
+                  icon: Icons.wifi_off_rounded,
+                  title: 'Home feed unavailable',
+                  message: catalog.error,
+                  actionLabel: 'Retry',
+                  onAction: () => catalog.load(force: true),
+                ),
+
+              if (catalog.trending.isNotEmpty) ...<Widget>[
                 SectionHeader(
-                  title: 'Top artists',
-                  subtitle: 'Commanding the charts right now',
-                  actionLabel: 'Library',
-                  onAction: () => context.read<ShellController>().goLibrary(),
+                  title: 'Trending now',
+                  actionLabel: 'Show all',
+                  onAction: () => context.read<ShellController>().goSearch(
+                    'Hindi top hit songs India 2026',
+                  ),
                 ),
                 HorizontalRail(
-                  height: 186,
-                  itemCount: HomeCatalog.topArtists.length,
+                  height: 196,
+                  itemCount: catalog.trending.length,
+                  builder: (BuildContext c, int i) => SongCard(
+                    song: catalog.trending[i],
+                    width: 144,
+                    onTap: () => playback.playQueue(
+                      catalog.trending,
+                      startIndex: i,
+                    ),
+                  ),
+                ),
+              ],
+
+              if (catalog.playlistsForYou.isNotEmpty) ...<Widget>[
+                const SectionHeader(title: 'Playlists you may like'),
+                HorizontalRail(
+                  height: 216,
+                  itemCount: catalog.playlistsForYou.length,
                   builder: (BuildContext c, int i) {
-                    final ArtistRef artist = HomeCatalog.topArtists[i];
-                    return ArtistBubble(
-                      name: artist.name,
-                      imageUrl: catalog.photoFor(
-                        artist.name,
-                        fallback: artist.imageUrl,
-                      ),
-                      onTap: () => openArtistByName(
-                        context,
-                        name: artist.name,
-                        channelId: artist.channelId,
+                    final MusicBrowseItem item = catalog.playlistsForYou[i];
+                    return AlbumTile(
+                      coverUrl: item.artwork,
+                      title: item.title,
+                      artist: 'Picked for your listening',
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => MusicBrowseScreen(item: item),
+                        ),
                       ),
                     );
                   },
                 ),
-
-                // ------------------------------------------------ Recommended
-                const _SmartRails(),
-                if (catalog.recommended.isNotEmpty) ...<Widget>[
-                  const SectionHeader(
-                    title: 'Recommended for you',
-                    subtitle: 'Because of your recent listening',
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: GlassPanel(
-                      padding: const EdgeInsets.symmetric(vertical: 6),
-                      child: Column(
-                        children: <Widget>[
-                          for (int i = 0; i < catalog.recommended.length; i++)
-                            SongTile(
-                              song: catalog.recommended[i],
-                              subtitle: catalog.recommended[i].artist,
-                              onTap: () =>
-                                  context.read<PlaybackService>().playQueue(
-                                    catalog.recommended,
-                                    startIndex: i,
-                                  ),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
               ],
 
-              const SizedBox(height: 16),
+              SectionHeader(
+                title: 'New releases',
+                actionLabel: 'Browse',
+                onAction: () => context.read<ShellController>().goSearch(
+                  'latest Hindi Bollywood songs 2026',
+                ),
+              ),
+              HorizontalRail(
+                height: 218,
+                itemCount: catalog.freshReleases.isNotEmpty
+                    ? catalog.freshReleases.length
+                    : HomeCatalog.newReleases.length,
+                builder: (BuildContext c, int i) {
+                  if (catalog.freshReleases.isNotEmpty) {
+                    final MusicBrowseItem item = catalog.freshReleases[i];
+                    return AlbumTile(
+                      coverUrl: item.artwork,
+                      title: item.title,
+                      artist: 'Fresh album',
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => MusicBrowseScreen(item: item),
+                        ),
+                      ),
+                    );
+                  }
+                  final AlbumCard album = HomeCatalog.newReleases[i];
+                  return AlbumTile(
+                    coverUrl: album.coverUrl,
+                    title: album.title,
+                    artist: album.artist,
+                    onTap: () => _openAlbum(album),
+                  );
+                },
+              ),
+
+              SectionHeader(
+                title: 'Music brands',
+                actionLabel: 'All',
+                onAction: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(builder: (_) => const BrandsPage()),
+                ),
+              ),
+              const _BrandRow(),
+
+              SectionHeader(
+                title: 'Top artists',
+                actionLabel: 'Library',
+                onAction: () => context.read<ShellController>().goLibrary(),
+              ),
+              HorizontalRail(
+                height: 174,
+                itemCount: HomeCatalog.topArtists.length,
+                builder: (BuildContext c, int i) {
+                  final ArtistRef artist = HomeCatalog.topArtists[i];
+                  return ArtistBubble(
+                    name: artist.name,
+                    imageUrl: catalog.photoFor(
+                      artist.name,
+                      fallback: artist.imageUrl,
+                    ),
+                    onTap: () => openArtistByName(
+                      context,
+                      name: artist.name,
+                      channelId: artist.channelId,
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(height: 10),
+              const _SmartRails(),
+              const SizedBox(height: 10),
               const _WhatsNewCard(),
             ],
           ),
@@ -305,8 +344,8 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
-/// Frosted header: wordmark on the left, downloads + library + settings on the
-/// right. The download icon opens the Downloads section directly.
+/// Small, clean home header. The wordmark is deliberately compact so the
+/// recommendations and covers get the space that matters.
 class _TopBar extends StatelessWidget {
   const _TopBar({required this.onSettings});
 
@@ -314,9 +353,7 @@ class _TopBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final LibraryService library = context.watch<LibraryService>();
-    final MusicDownloadService downloads = context
-        .watch<MusicDownloadService>();
+    final MusicDownloadService downloads = context.watch<MusicDownloadService>();
     final int activeDownloads = downloads.jobs
         .where(
           (MusicDownloadJob job) =>
@@ -326,38 +363,51 @@ class _TopBar extends StatelessWidget {
         .length;
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 14, 12, 2),
+      padding: const EdgeInsets.fromLTRB(16, 5, 10, 0),
       child: Row(
         children: <Widget>[
           const Expanded(
             child: SaxifyWordmark(
-              logoSize: 34,
-              fontSize: 21,
-              showSubtitle: true,
+              logoSize: 25,
+              fontSize: 17,
+              showSubtitle: false,
             ),
           ),
-          GlassIconButton(
-            icon: Icons.favorite_border_rounded,
-            size: 42,
+          IconButton(
             tooltip: 'Liked songs',
-            badgeCount: library.likedSongs.length,
+            visualDensity: VisualDensity.compact,
             onPressed: () => context.read<ShellController>().goLiked(),
+            icon: const Icon(Icons.favorite_border_rounded, size: 21),
           ),
-          const SizedBox(width: 8),
-          GlassIconButton(
-            icon: Icons.download_rounded,
-            size: 42,
-            tooltip: 'Downloads',
-            badgeCount: activeDownloads,
-            active: activeDownloads > 0,
-            onPressed: () => context.read<ShellController>().goDownloads(),
+          Stack(
+            clipBehavior: Clip.none,
+            children: <Widget>[
+              IconButton(
+                tooltip: 'Downloads',
+                visualDensity: VisualDensity.compact,
+                onPressed: () => context.read<ShellController>().goDownloads(),
+                icon: const Icon(Icons.download_rounded, size: 21),
+              ),
+              if (activeDownloads > 0)
+                Positioned(
+                  top: 5,
+                  right: 5,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: context.accent.primary,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: SaxifyColors.background, width: 1.5),
+                    ),
+                    child: const SizedBox(width: 7, height: 7),
+                  ),
+                ),
+            ],
           ),
-          const SizedBox(width: 8),
-          GlassIconButton(
-            icon: Icons.settings_outlined,
-            size: 42,
+          IconButton(
             tooltip: 'Settings',
+            visualDensity: VisualDensity.compact,
             onPressed: onSettings,
+            icon: const Icon(Icons.settings_outlined, size: 21),
           ),
         ],
       ),
@@ -365,8 +415,7 @@ class _TopBar extends StatelessWidget {
   }
 }
 
-/// Hero card. Built as a flexible column so the two big buttons can never
-/// overflow — on a narrow phone they stack, on a wider one they sit side by side.
+/// One short greeting, without a hero card, tagline or extra copy.
 class _Hero extends StatelessWidget {
   const _Hero({required this.name});
 
@@ -374,142 +423,120 @@ class _Hero extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final SaxifyAccent accent = context.accent;
-    final HomeCatalog catalog = context.watch<HomeCatalog>();
-    final PlaybackService playback = context.read<PlaybackService>();
-
     return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 16, 18, 4),
-      child: GlassPanel(
-        glow: true,
-        padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
-        child: Column(
+      padding: const EdgeInsets.fromLTRB(18, 12, 18, 3),
+      child: Text.rich(
+        TextSpan(
+          children: <InlineSpan>[
+            TextSpan(
+              text: '${Fmt.greeting()}, ',
+              style: SaxifyTheme.appleFont(
+                size: 21,
+                weight: FontWeight.w500,
+                letterSpacing: -0.35,
+                color: SaxifyColors.textSecondary,
+              ),
+            ),
+            TextSpan(
+              text: name.trim().isEmpty ? 'User' : name.trim(),
+              style: SaxifyTheme.appleFont(
+                size: 21,
+                weight: FontWeight.w700,
+                letterSpacing: -0.4,
+                color: SaxifyColors.textPrimary,
+              ),
+            ),
+          ],
+        ),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+    );
+  }
+}
+
+class _RecommendationLoadingGrid extends StatelessWidget {
+  const _RecommendationLoadingGrid();
+
+  @override
+  Widget build(BuildContext context) {
+    const Color skeleton = Color(0xFF17171D);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: GridView.builder(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        itemCount: 4,
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 2,
+          crossAxisSpacing: 12,
+          mainAxisSpacing: 13,
+          childAspectRatio: 0.72,
+        ),
+        itemBuilder: (BuildContext context, int index) => Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Row(
-              children: <Widget>[
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 11,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(SaxifyTheme.radiusXl),
-                    color: accent.primary.withValues(alpha: 0.16),
-                    border: Border.all(
-                      color: accent.primary.withValues(alpha: 0.35),
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: <Widget>[
-                      Icon(
-                        Icons.auto_awesome_rounded,
-                        size: 13,
-                        color: accent.primary,
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        IfallBranding.tagline.toUpperCase(),
-                        style: TextStyle(
-                          fontSize: 10,
-                          letterSpacing: 1.3,
-                          fontWeight: FontWeight.w800,
-                          color: accent.primary,
+            AspectRatio(
+              aspectRatio: 1,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(SaxifyTheme.radiusMd),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: <Widget>[
+                    const DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: <Color>[skeleton, Color(0xFF0C0C10)],
                         ),
                       ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            RichText(
-              text: TextSpan(
-                style: SaxifyTheme.appleFont(
-                  size: 27,
-                  height: 1.18,
-                  weight: FontWeight.w800,
-                  letterSpacing: -0.9,
-                  color: SaxifyColors.textPrimary,
-                ),
-                children: <InlineSpan>[
-                  TextSpan(text: '${Fmt.greeting()}, '),
-                  TextSpan(
-                    text: '$name. ',
-                    style: TextStyle(color: accent.primary),
-                  ),
-                  const TextSpan(
-                    text: '\nYour universe of sound awaits.',
-                    style: TextStyle(
-                      fontSize: 18,
-                      height: 1.3,
-                      fontWeight: FontWeight.w600,
-                      color: SaxifyColors.textSecondary,
                     ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 12),
-            const Text(
-              'Instant search, offline downloads, a real-time studio equalizer and '
-              'buttery background playback — all in one app.',
-              style: TextStyle(
-                fontSize: 12.5,
-                height: 1.55,
-                color: SaxifyColors.textMuted,
-              ),
-            ),
-            const SizedBox(height: 18),
-            LayoutBuilder(
-              builder: (BuildContext context, BoxConstraints constraints) {
-                final bool stack = constraints.maxWidth < 420;
-                final Widget mix = GlassButton(
-                  label: "Play today's mix",
-                  icon: Icons.play_arrow_rounded,
-                  expand: true,
-                  onPressed: () async {
-                    await catalog.load();
-                    if (!context.mounted) return;
-                    final List<Song> mix = <Song>[
-                      ...catalog.madeForYou,
-                      ...catalog.trending,
-                      ...catalog.recommended,
-                    ];
-                    if (mix.isEmpty) {
-                      context.read<ShellController>().goSearch(
-                        'Hindi trending songs India',
-                      );
-                      return;
-                    }
-                    await playback.playQueue(mix, startIndex: 0);
-                  },
-                );
-                final Widget explore = GlassButton(
-                  label: 'Explore music',
-                  icon: Icons.explore_rounded,
-                  filled: false,
-                  expand: true,
-                  onPressed: () => context.read<ShellController>().goSearch(),
-                );
-                if (stack) {
-                  return Column(
-                    children: <Widget>[
-                      mix,
-                      const SizedBox(height: 10),
-                      explore,
-                    ],
-                  );
-                }
-                return Row(
-                  children: <Widget>[
-                    Expanded(child: mix),
-                    const SizedBox(width: 10),
-                    Expanded(child: explore),
+                    Positioned(
+                      top: 9,
+                      left: 9,
+                      child: Container(
+                        width: 58,
+                        height: 17,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      bottom: 9,
+                      right: 9,
+                      child: Container(
+                        width: 35,
+                        height: 35,
+                        decoration: const BoxDecoration(
+                          color: Color(0xFF24242B),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
                   ],
-                );
-              },
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Container(
+              width: 110,
+              height: 12,
+              decoration: BoxDecoration(
+                color: skeleton,
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Container(
+              width: 72,
+              height: 9,
+              decoration: BoxDecoration(
+                color: skeleton,
+                borderRadius: BorderRadius.circular(7),
+              ),
             ),
           ],
         ),
@@ -525,41 +552,24 @@ class _SmartRails extends StatelessWidget {
   Widget build(BuildContext context) {
     final RecommendationService reco = context.watch<RecommendationService>();
     final PlaybackService playback = context.read<PlaybackService>();
-    if (reco.forYou.isEmpty && reco.becauseYouSearched.isEmpty) {
+    if (reco.becauseQuery == null || reco.becauseYouSearched.isEmpty) {
       return const SizedBox.shrink();
     }
     return Column(
       children: <Widget>[
-        if (reco.forYou.isNotEmpty) ...<Widget>[
-          const SectionHeader(
-            title: 'On repeat',
-            subtitle: 'On-device mix from what you play and search',
-          ),
-          HorizontalRail(
-            height: 200,
-            itemCount: reco.forYou.length,
-            builder: (BuildContext c, int i) {
-              final Song song = reco.forYou[i];
-              return SongCard(
-                song: song,
-                onTap: () => playback.playQueue(reco.forYou, startIndex: i),
-              );
-            },
-          ),
-        ],
-        if (reco.becauseQuery != null &&
-            reco.becauseYouSearched.isNotEmpty) ...<Widget>[
-          SectionHeader(
-            title: 'Because you searched ${reco.becauseQuery}',
-            subtitle: 'Boosted after 2 searches in 3 days',
-          ),
-          for (int i = 0; i < reco.becauseYouSearched.length; i++)
-            SongTile(
-              song: reco.becauseYouSearched[i],
-              onTap: () =>
-                  playback.playQueue(reco.becauseYouSearched, startIndex: i),
+        SectionHeader(
+          title: 'Because you searched ${reco.becauseQuery}',
+          padding: const EdgeInsets.fromLTRB(18, 12, 18, 6),
+        ),
+        for (int i = 0; i < reco.becauseYouSearched.length; i++)
+          SongTile(
+            dense: true,
+            song: reco.becauseYouSearched[i],
+            onTap: () => playback.playQueue(
+              reco.becauseYouSearched,
+              startIndex: i,
             ),
-        ],
+          ),
       ],
     );
   }
@@ -615,15 +625,15 @@ class _BrandRow extends StatelessWidget {
 class _WhatsNewCard extends StatelessWidget {
   const _WhatsNewCard();
 
-  static const String _version = 'Update 2.3.6';
-  static const String _date = '28 Sept 2026';
+  static const String _version = 'Update 2.5.1';
+  static const String _date = '30 Sept 2026';
   static const String _headline =
-      'Library fixed, playback resolver back in sync';
+      'A smoother player, safer library, and a fresh home';
 
   static const List<String> _notes = <String>[
-    'Fixed the blank Library screen — a missing tab counter crashed the page before it could render.',
-    'Stream resolver re-synced with YouTube\'s current player clients, so songs play again.',
-    'Tighter timeouts and smarter URL checks: failures surface faster and the queue moves on sooner.',
+    'Your library, downloads and settings now stay safe when repairing a startup issue.',
+    'Lyrics load automatically as you scroll to them, with both static and synced reading.',
+    'Discover music in a cleaner home grid, with a calmer dark look and tighter spacing.',
   ];
 
   @override

@@ -101,7 +101,10 @@ class SaxifyTheme {
     );
   }
 
-  static ThemeData build(SaxifyAccent accent) {
+  static ThemeData build(
+    SaxifyAccent accent, {
+    SaxifyAccent? qualityAccent,
+  }) {
     final TextTheme base = GoogleFonts.interTextTheme(
       ThemeData(brightness: Brightness.dark).textTheme,
     );
@@ -126,9 +129,9 @@ class SaxifyTheme {
               base.titleMedium?.copyWith(fontWeight: FontWeight.w600, letterSpacing: -0.2),
           titleSmall:
               base.titleSmall?.copyWith(fontWeight: FontWeight.w600, letterSpacing: -0.1),
-          bodyLarge: base.bodyLarge?.copyWith(height: 1.45),
-          bodyMedium: base.bodyMedium?.copyWith(height: 1.45),
-          bodySmall: base.bodySmall?.copyWith(height: 1.4),
+          bodyLarge: base.bodyLarge?.copyWith(height: 1.4),
+          bodyMedium: base.bodyMedium?.copyWith(height: 1.38),
+          bodySmall: base.bodySmall?.copyWith(height: 1.32),
           labelLarge: base.labelLarge?.copyWith(fontWeight: FontWeight.w600, letterSpacing: 0.1),
           labelMedium: base.labelMedium?.copyWith(fontWeight: FontWeight.w600, letterSpacing: 0.2),
         )
@@ -362,7 +365,9 @@ class SaxifyTheme {
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radiusXl)),
         ),
       ),
-      extensions: <ThemeExtension<dynamic>>[SaxifyAccentExtension(accent)],
+      extensions: <ThemeExtension<dynamic>>[
+        SaxifyAccentExtension(accent, qualityAccent: qualityAccent),
+      ],
     );
   }
 }

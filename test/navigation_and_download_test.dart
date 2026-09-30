@@ -26,6 +26,19 @@ void main() {
     expect(shell.back(), isFalse);
     shell.dispose();
   });
+  test('Library opens Your Space instead of preselecting Liked', () {
+    final shell = ShellController();
+    expect(shell.libraryTab, LibraryTabs.overview);
+    shell.goLiked();
+    expect(shell.libraryTab, LibraryTabs.liked);
+    shell.select(SaxifyTab.library);
+    expect(shell.libraryTab, LibraryTabs.overview);
+    shell.goHome();
+    shell.select(SaxifyTab.library);
+    expect(shell.libraryTab, LibraryTabs.overview);
+    shell.dispose();
+  });
+
   test('download container uses honest extension and MIME', () {
     expect(
       audioContainer([0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70]).extension,

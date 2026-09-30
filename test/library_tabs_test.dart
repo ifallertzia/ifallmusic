@@ -65,14 +65,13 @@ void main() {
       onDeviceCount: 5,
     );
 
-    // One entry per tab: Liked · Playlists · Songs · Artists · On device ·
-    // Downloads · History · Lyrics Finder. A shorter list used to throw
-    // RangeError during build and blank the whole Library page.
+    // One entry per tab: Your Space · Liked · Playlists · Songs · Artists ·
+    // On device · Downloads · History · Lyrics Finder.
     expect(counts, hasLength(libraryTabCount));
-    expect(libraryTabCount, 8);
+    expect(libraryTabCount, 9);
     expect(
       counts,
-      <int>[1, 1, 2, 1, 5, 1, 1, 0],
+      <int>[0, 1, 1, 2, 1, 5, 1, 1, 0],
       reason: 'counts must stay aligned with the tab order',
     );
 

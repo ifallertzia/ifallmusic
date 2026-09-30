@@ -20,6 +20,7 @@ import '../../core/theme/saxify_accents.dart';
 import '../../core/theme/saxify_theme.dart';
 import '../../data/labels.dart';
 import '../../screens/music_browse_screen.dart';
+import '../../widgets/brand_logo.dart';
 import '../../services/yt_music_parser.dart';
 import '../../services/yt_music_service.dart';
 import '../album/album_page.dart';
@@ -541,12 +542,13 @@ class _RecentSearches extends StatelessWidget {
             ],
           ),
           Wrap(
-            spacing: 8,
-            runSpacing: 8,
+            spacing: 6,
+            runSpacing: 6,
             children: <Widget>[
               for (final String q in queries)
                 InputChip(
-                  label: Text(q, style: const TextStyle(fontSize: 12)),
+                  visualDensity: VisualDensity.compact,
+                  label: Text(q, style: const TextStyle(fontSize: 11.5)),
                   onPressed: () => onTap(q),
                   onDeleted: () => onRemove(q),
                 ),
@@ -613,20 +615,39 @@ class _ExploreMusic extends StatelessWidget {
         ),
         const SectionHeader(title: 'Music brands'),
         SizedBox(
-          height: 50,
+          height: 94,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 20),
+            padding: const EdgeInsets.symmetric(horizontal: 18),
             itemCount: MusicBrands.all.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 8),
+            separatorBuilder: (_, __) => const SizedBox(width: 10),
             itemBuilder: (BuildContext context, int i) {
-              final brand = MusicBrands.all[i];
-              return MoodChip(
-                label: brand.name,
-                icon: Icons.album_outlined,
+              final MusicBrand brand = MusicBrands.all[i];
+              return InkWell(
+                borderRadius: BorderRadius.circular(12),
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute<void>(
                     builder: (_) => BrandChannelPage(brand: brand),
+                  ),
+                ),
+                child: SizedBox(
+                  width: 78,
+                  child: Column(
+                    children: <Widget>[
+                      BrandLogo(brand: brand, size: 48),
+                      const SizedBox(height: 5),
+                      Text(
+                        brand.name,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: 10.5,
+                          height: 1.1,
+                          color: SaxifyColors.textSecondary,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               );

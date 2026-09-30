@@ -446,7 +446,7 @@ class SectionHeader extends StatelessWidget {
     this.subtitle,
     this.actionLabel,
     this.onAction,
-    this.padding = const EdgeInsets.fromLTRB(20, 28, 16, 14),
+    this.padding = const EdgeInsets.fromLTRB(18, 20, 16, 10),
     this.icon,
   });
 

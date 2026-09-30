@@ -640,7 +640,7 @@ class _ThemePanelState extends State<_ThemePanel> {
   @override
   Widget build(BuildContext context) {
     final ThemeController theme = context.watch<ThemeController>();
-    final SaxifyAccent accent = context.accent;
+    final SaxifyAccent accent = theme.paletteAccent;
 
     return Column(
       children: <Widget>[
@@ -665,7 +665,7 @@ class _ThemePanelState extends State<_ThemePanel> {
                         ),
                         const SizedBox(height: 3),
                         Text(
-                          'Paints colour across the whole black app · ${accent.label}',
+                          '${accent.label} · Choose where colour appears',
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
@@ -726,16 +726,34 @@ class _ThemePanelState extends State<_ThemePanel> {
               const SizedBox(height: 6),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
+                value: theme.accentAcrossApp,
+                onChanged: theme.setAccentAcrossApp,
+                title: const Text(
+                  'Use colour across the app',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                ),
+                subtitle: Text(
+                  theme.accentAcrossApp
+                      ? 'The selected colour styles buttons, controls and highlights'
+                      : 'Off by default · clean black look; only song-quality text changes colour',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: SaxifyColors.textMuted,
+                  ),
+                ),
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
                 value: theme.autoRotate,
                 onChanged: theme.setAutoRotate,
                 title: const Text(
-                  'Auto-rotate theme',
+                  'Auto-rotate colour',
                   style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
                 ),
                 subtitle: Text(
                   theme.autoRotate
-                      ? 'Switching every ${theme.rotateInterval.inMinutes > 0 ? '${theme.rotateInterval.inMinutes} min' : '${theme.rotateInterval.inSeconds}s'} · next in ${theme.secondsUntilNextSwitch()}s'
-                      : 'Pick a colour above and it stays',
+                      ? 'Changes every ${theme.rotateInterval.inMinutes > 0 ? '${theme.rotateInterval.inMinutes} min' : '${theme.rotateInterval.inSeconds}s'} · next in ${theme.secondsUntilNextSwitch()}s'
+                      : 'Choose a colour above to keep it fixed',
                   style: const TextStyle(
                     fontSize: 12,
                     color: SaxifyColors.textMuted,
@@ -851,8 +869,8 @@ class _AccentMixerState extends State<_AccentMixer> {
   void initState() {
     super.initState();
     final ThemeController theme = context.read<ThemeController>();
-    _primary = theme.accent.primary;
-    _deep = theme.accent.secondary;
+    _primary = theme.paletteAccent.primary;
+    _deep = theme.paletteAccent.secondary;
   }
 
   void _randomise() {

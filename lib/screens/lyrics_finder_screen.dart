@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 
 import '../core/models/song.dart';
 import '../core/services/playback_service.dart';
+import '../core/theme/saxify_accents.dart';
 import '../services/lyrics_clock.dart';
 import '../services/lyrics_service.dart';
 import '../widgets/copy_lyrics_button.dart';
@@ -72,6 +73,7 @@ class _LyricsFinderScreenState extends State<LyricsFinderScreen>
       _bound = widget.song;
       _live = _playback.current?.id == widget.song!.id;
       _fill(widget.song!);
+      _loading = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _find(bound: widget.song);
       });
@@ -197,88 +199,89 @@ class _LyricsFinderScreenState extends State<LyricsFinderScreen>
               icon: const Icon(Icons.close),
             ),
           ),
-        ConstrainedBox(
-          constraints: BoxConstraints(
-            maxHeight: MediaQuery.viewInsetsOf(context).bottom > 0 ? 150 : 260,
-          ),
-          child: SingleChildScrollView(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: ExpansionTile(
-                key: ValueKey(widget.panel),
-                initiallyExpanded: !widget.panel,
-                title: Text(
-                  widget.panel
-                      ? 'Wrong match or missing lyrics?'
-                      : 'Search by song and singer',
+        if (!widget.embedded)
+          ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.viewInsetsOf(context).bottom > 0 ? 150 : 260,
+            ),
+            child: SingleChildScrollView(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: ExpansionTile(
+                  key: ValueKey(widget.panel),
+                  initiallyExpanded: !widget.panel,
+                  title: Text(
+                    widget.panel
+                        ? 'Wrong match or missing lyrics?'
+                        : 'Search by song and singer',
+                  ),
+                  subtitle: widget.panel
+                      ? const Text('Search by song and singer')
+                      : null,
+                  children: [
+                    TextField(
+                      controller: _title,
+                      decoration: const InputDecoration(
+                        labelText: 'Song title (required)',
+                      ),
+                      onSubmitted: (_) {
+                        _live = widget.panel && _playback.current != null;
+                        _find(
+                          bound: widget.panel ? _playback.current : null,
+                          refresh: true,
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _artist,
+                      decoration: const InputDecoration(
+                        labelText: 'Singer (optional)',
+                      ),
+                    ),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      children: [
+                        FilledButton(
+                          onPressed: _loading
+                              ? null
+                              : () {
+                                  _live = widget.panel &&
+                                      _playback.current != null;
+                                  _find(
+                                    bound: widget.panel
+                                        ? _playback.current
+                                        : null,
+                                    refresh: true,
+                                  );
+                                },
+                          child: const Text('Find lyrics'),
+                        ),
+                        TextButton(
+                          onPressed: () {
+                            final song = _playback.current;
+                            if (song != null) {
+                              _live = true;
+                              _fill(song);
+                              _find(bound: song);
+                            } else {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Play a song first'),
+                                ),
+                              );
+                            }
+                          },
+                          child: const Text('Use the playing song'),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
-                subtitle: widget.panel
-                    ? const Text('Search by song and singer')
-                    : null,
-                children: [
-                  TextField(
-                    controller: _title,
-                    decoration: const InputDecoration(
-                      labelText: 'Song title (required)',
-                    ),
-                    onSubmitted: (_) {
-                      _live = widget.panel && _playback.current != null;
-                      _find(
-                        bound: widget.panel ? _playback.current : null,
-                        refresh: true,
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _artist,
-                    decoration: const InputDecoration(
-                      labelText: 'Singer (optional)',
-                    ),
-                  ),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 6,
-                    children: [
-                      FilledButton(
-                        onPressed: _loading
-                            ? null
-                            : () {
-                                _live =
-                                    widget.panel && _playback.current != null;
-                                _find(
-                                  bound: widget.panel
-                                      ? _playback.current
-                                      : null,
-                                  refresh: true,
-                                );
-                              },
-                        child: const Text('Find lyrics'),
-                      ),
-                      TextButton(
-                        onPressed: () {
-                          final song = _playback.current;
-                          if (song != null) {
-                            _live = true;
-                            _fill(song);
-                            _find(bound: song);
-                          } else {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Play a song first'),
-                              ),
-                            );
-                          }
-                        },
-                        child: const Text('Use the playing song'),
-                      ),
-                    ],
-                  ),
-                ],
               ),
             ),
           ),
-        ),
         if (found)
           Padding(
             padding: const EdgeInsets.only(top: 8),
@@ -345,7 +348,9 @@ class _LyricsFinderScreenState extends State<LyricsFinderScreen>
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
-                          _result == null
+                          widget.embedded
+                              ? 'iska nhi mila sori🥲'
+                              : _result == null
                               ? 'Find lyrics, then read or copy them here.'
                               : r.instrumental
                               ? 'Instrumental track — no lyrics'
@@ -353,8 +358,17 @@ class _LyricsFinderScreenState extends State<LyricsFinderScreen>
                               ? 'Lyrics services are temporarily unavailable. Please retry.'
                               : 'Lyrics not found',
                           textAlign: TextAlign.center,
+                          style: widget.embedded
+                              ? TextStyle(
+                                  color: context.accent.primary,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                )
+                              : null,
                         ),
-                        if (_result != null && !r.instrumental)
+                        if (!widget.embedded &&
+                            _result != null &&
+                            !r.instrumental)
                           TextButton(
                             onPressed: () =>
                                 _find(bound: _bound, refresh: true),
@@ -408,7 +422,6 @@ class _LyricsFinderScreenState extends State<LyricsFinderScreen>
               ],
             ),
           ),
-        SizedBox(height: widget.embedded ? 145 : 0),
       ],
     );
     return widget.panel

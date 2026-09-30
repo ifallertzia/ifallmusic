@@ -298,30 +298,51 @@ class SaxifyAccents {
 /// can paint themselves without an extra provider lookup.
 @immutable
 class SaxifyAccentExtension extends ThemeExtension<SaxifyAccentExtension> {
-  const SaxifyAccentExtension(this.accent);
+  const SaxifyAccentExtension(this.accent, {SaxifyAccent? qualityAccent})
+    : qualityAccent = qualityAccent ?? accent;
 
+  /// Accent used by the app-wide theme (neutral graphite by default).
   final SaxifyAccent accent;
 
-  @override
-  SaxifyAccentExtension copyWith({SaxifyAccent? accent}) =>
-      SaxifyAccentExtension(accent ?? this.accent);
+  /// Current palette/custom colour reserved for song-quality text when the
+  /// listener has not enabled coloured UI throughout the app.
+  final SaxifyAccent qualityAccent;
 
   @override
-  SaxifyAccentExtension lerp(covariant ThemeExtension<SaxifyAccentExtension>? other, double t) {
+  SaxifyAccentExtension copyWith({
+    SaxifyAccent? accent,
+    SaxifyAccent? qualityAccent,
+  }) => SaxifyAccentExtension(
+    accent ?? this.accent,
+    qualityAccent: qualityAccent ?? this.qualityAccent,
+  );
+
+  @override
+  SaxifyAccentExtension lerp(
+    covariant ThemeExtension<SaxifyAccentExtension>? other,
+    double t,
+  ) {
     if (other is! SaxifyAccentExtension) return this;
-    final SaxifyAccent blended = SaxifyAccent(
-      id: t < 0.5 ? accent.id : other.accent.id,
-      label: t < 0.5 ? accent.label : other.accent.label,
-      primary: Color.lerp(accent.primary, other.accent.primary, t) ?? accent.primary,
-      secondary: Color.lerp(accent.secondary, other.accent.secondary, t) ?? accent.secondary,
-      tint: Color.lerp(accent.tint, other.accent.tint, t) ?? accent.tint,
+    SaxifyAccent blend(SaxifyAccent from, SaxifyAccent to) => SaxifyAccent(
+      id: t < 0.5 ? from.id : to.id,
+      label: t < 0.5 ? from.label : to.label,
+      primary: Color.lerp(from.primary, to.primary, t) ?? from.primary,
+      secondary: Color.lerp(from.secondary, to.secondary, t) ?? from.secondary,
+      tint: Color.lerp(from.tint, to.tint, t) ?? from.tint,
+      isCustom: t < 0.5 ? from.isCustom : to.isCustom,
     );
-    return SaxifyAccentExtension(blended);
+    return SaxifyAccentExtension(
+      blend(accent, other.accent),
+      qualityAccent: blend(qualityAccent, other.qualityAccent),
+    );
   }
 }
 
-/// Convenience accessor used across the UI.
+/// Convenience accessors used across the UI.
 extension SaxifyAccentX on BuildContext {
   SaxifyAccent get accent =>
       Theme.of(this).extension<SaxifyAccentExtension>()?.accent ?? SaxifyAccents.violetPulse;
+
+  SaxifyAccent get qualityAccent =>
+      Theme.of(this).extension<SaxifyAccentExtension>()?.qualityAccent ?? accent;
 }

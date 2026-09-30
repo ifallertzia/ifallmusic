@@ -41,8 +41,15 @@ class SaxifyBridge(private val activity: Activity) {
                     SaxifyBoot.markSuccess(activity)
                     result.success(null)
                 }
+                "repairLocalCache" -> {
+                    repairLocalCache(activity)
+                    result.success(null)
+                }
+                // Keep the old method name safe for an older Dart layer: this
+                // repair must never clear FlutterSharedPreferences, which hold
+                // the user's likes, playlists, downloads and settings.
                 "clearFlutterPrefs" -> {
-                    clearLocal(activity)
+                    repairLocalCache(activity)
                     result.success(null)
                 }
                 "saveToDownloads" -> io(result) {
@@ -495,11 +502,10 @@ class SaxifyBridge(private val activity: Activity) {
     }
 
     companion object {
-        fun clearLocal(context: Context) {
-            context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-                .edit()
-                .clear()
-                .apply()
+        fun repairLocalCache(context: Context) {
+            // Do not clear FlutterSharedPreferences here: that file contains
+            // the listener's durable library and preferences. Safe mode only
+            // needs the crash counter and derived recommendation cache reset.
             SaxifyBoot.reset(context)
             // listOfNotNull: getDatabasePath() is nullable, and a List<File?> would
             // make exists()/delete() illegal calls.

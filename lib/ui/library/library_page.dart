@@ -24,20 +24,20 @@ import '../widgets/song_tile.dart';
 import 'playlist_detail_page.dart';
 
 /// Number of tabs shown by the library tab bar. Regression guard:
-/// [buildLibraryTabCounts] must return exactly this many entries or the
-/// tab bar crashes mid-build and the whole page renders blank.
+/// [buildLibraryTabCounts] must return exactly this many entries.
 @visibleForTesting
 int get libraryTabCount => _LibraryTabSpec.all.length;
 
 /// Per-tab pill counters, in `_LibraryTabSpec.all` order:
-/// Liked · Playlists · Songs · Artists · On device · Downloads · History ·
-/// Lyrics Finder.
+/// Your Space · Liked · Playlists · Songs · Artists · On device · Downloads ·
+/// History · Lyrics Finder.
 @visibleForTesting
 List<int> buildLibraryTabCounts({
   required LibraryService library,
   required MusicDownloadService downloads,
   required int onDeviceCount,
 }) => <int>[
+  0, // Your Space is an overview, not a counted collection.
   library.likedSongs.length,
   library.playlists.length,
   library.songs.length,
@@ -48,11 +48,8 @@ List<int> buildLibraryTabCounts({
   0, // Lyrics Finder does not show a count.
 ];
 
-/// Your Library.
-///
-/// Clicking Library no longer dumps you straight into Liked Songs: the screen
-/// opens with **big, colourful tabs in front of you** —
-/// `Liked · Playlists · Songs · Artists · Downloads · History`.
+/// Your saved music. Opening Library lands on Your Space, not an already
+/// selected Liked Songs tab; individual collections open only when requested.
 class LibraryPage extends StatefulWidget {
   const LibraryPage({super.key});
 
@@ -125,6 +122,7 @@ class _LibraryPageState extends State<LibraryPage>
               child: TabBarView(
                 controller: _tabs,
                 children: <Widget>[
+                  _YourSpaceTab(onOpenTab: (int index) => _tabs.animateTo(index)),
                   const _LikedTab(),
                   const _PlaylistsTab(),
                   const _SongsTab(),
@@ -168,6 +166,11 @@ class _LibraryTabSpec {
 
   static const List<_LibraryTabSpec> all = <_LibraryTabSpec>[
     _LibraryTabSpec(
+      label: 'Your Space',
+      icon: Icons.grid_view_rounded,
+      color: Color(0xFF94A3B8),
+    ),
+    _LibraryTabSpec(
       label: 'Liked',
       icon: Icons.favorite_rounded,
       color: Color(0xFFF43F5E),
@@ -210,6 +213,94 @@ class _LibraryTabSpec {
   ];
 }
 
+
+class _YourSpaceTab extends StatelessWidget {
+  const _YourSpaceTab({required this.onOpenTab});
+
+  final ValueChanged<int> onOpenTab;
+
+  @override
+  Widget build(BuildContext context) {
+    final LibraryService library = context.watch<LibraryService>();
+    final MusicDownloadService downloads = context.watch<MusicDownloadService>();
+    final LocalMusicService local = context.watch<LocalMusicService>();
+    final List<({String title, String detail, IconData icon, int tab})> sections =
+        <({String title, String detail, IconData icon, int tab})>[
+          (
+            title: 'Liked songs',
+            detail: '${library.likedSongs.length} songs',
+            icon: Icons.favorite_border_rounded,
+            tab: LibraryTabs.liked,
+          ),
+          (
+            title: 'Playlists',
+            detail: '${library.playlists.length} playlists',
+            icon: Icons.queue_music_rounded,
+            tab: LibraryTabs.playlists,
+          ),
+          (
+            title: 'Your songs',
+            detail: '${library.songs.length} saved songs',
+            icon: Icons.music_note_rounded,
+            tab: LibraryTabs.songs,
+          ),
+          (
+            title: 'Downloads',
+            detail: '${downloads.downloaded.length} offline songs',
+            icon: Icons.download_rounded,
+            tab: LibraryTabs.downloads,
+          ),
+          (
+            title: 'On this device',
+            detail: '${local.songs.length} songs',
+            icon: Icons.phone_android_rounded,
+            tab: LibraryTabs.onDevice,
+          ),
+          (
+            title: 'Recently played',
+            detail: '${library.history.length} songs',
+            icon: Icons.history_rounded,
+            tab: LibraryTabs.history,
+          ),
+          (
+            title: 'Artists',
+            detail: '${library.artists.length} followed',
+            icon: Icons.mic_none_rounded,
+            tab: LibraryTabs.artists,
+          ),
+        ];
+
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(16, 7, 16, 170),
+      itemCount: sections.length + 1,
+      separatorBuilder: (_, __) => const Divider(height: 1, indent: 50),
+      itemBuilder: (BuildContext context, int index) {
+        if (index == 0) {
+          return const Padding(
+            padding: EdgeInsets.fromLTRB(2, 7, 2, 8),
+            child: Text(
+              'Your music, ready when you are.',
+              style: TextStyle(fontSize: 12, color: SaxifyColors.textMuted),
+            ),
+          );
+        }
+        final section = sections[index - 1];
+        return ListTile(
+          dense: true,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 2, vertical: 1),
+          leading: Icon(section.icon, color: SaxifyColors.textSecondary),
+          title: Text(section.title, style: const TextStyle(fontSize: 14)),
+          subtitle: Text(
+            section.detail,
+            style: const TextStyle(fontSize: 11.5, color: SaxifyColors.textMuted),
+          ),
+          trailing: const Icon(Icons.chevron_right_rounded, size: 19),
+          onTap: () => onOpenTab(section.tab),
+        );
+      },
+    );
+  }
+}
 
 class _OnDeviceTab extends StatelessWidget {
   const _OnDeviceTab();
@@ -403,7 +494,7 @@ class _LibraryHeader extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
                 Text(
-                  'Your Library',
+                  'Your Space',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: SaxifyTheme.appleFont(
@@ -438,7 +529,7 @@ class _LibraryHeader extends StatelessWidget {
   }
 }
 
-/// The big colourful tab strip — scrollable, glassy, with live counters.
+/// Compact, horizontally scrollable library tabs with live counters.
 class _LibraryTabBar extends StatelessWidget {
   const _LibraryTabBar({
     required this.controller,
@@ -464,35 +555,42 @@ class _LibraryTabBar extends StatelessWidget {
 
     return AnimatedBuilder(
       animation: controller,
-      builder: (context, _) => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        child: LayoutBuilder(
-          builder: (context, constraints) => Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (int i = 0; i < _LibraryTabSpec.all.length; i++)
-                SizedBox(
-                  width: (constraints.maxWidth - 8) / 2,
-                  child: _TabPill(
-                    spec: _LibraryTabSpec.all[i],
-                    count: i < counts.length ? counts[i] : 0,
-                    selected: controller.index == i,
-                    onTap: () {
-                      if (i == LibraryTabs.lyrics) {
-                        Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) => const LyricsFinderScreen(),
-                          ),
-                        );
-                      } else {
-                        controller.animateTo(i);
-                      }
-                    },
-                  ),
-                ),
-            ],
-          ),
+      builder: (context, _) => SizedBox(
+        height: 48,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.fromLTRB(16, 3, 16, 3),
+          itemCount: _LibraryTabSpec.all.length,
+          separatorBuilder: (_, __) => const SizedBox(width: 7),
+          itemBuilder: (context, i) {
+            final _LibraryTabSpec spec = _LibraryTabSpec.all[i];
+            final double width = switch (spec.label) {
+              'Your Space' => 136,
+              'Playlists' => 128,
+              'On device' => 130,
+              'Lyrics Finder' => 144,
+              _ => 116,
+            };
+            return SizedBox(
+              width: width,
+              child: _TabPill(
+                spec: spec,
+                count: i < counts.length ? counts[i] : 0,
+                selected: controller.index == i,
+                onTap: () {
+                  if (i == LibraryTabs.lyrics) {
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const LyricsFinderScreen(),
+                      ),
+                    );
+                  } else {
+                    controller.animateTo(i);
+                  }
+                },
+              ),
+            );
+          },
         ),
       ),
     );

@@ -18,6 +18,7 @@ class SettingsService extends ChangeNotifier {
   static const String kDisplayName = 'saxify.display_name';
   static const String kEmail = 'saxify.email';
   static const String kAccentId = 'saxify.accent_id';
+  static const String kAccentAcrossApp = 'saxify.accent_across_app';
   static const String kAutoRotateTheme = 'saxify.auto_rotate_theme';
   static const String kRotateSeconds = 'saxify.rotate_seconds';
   static const String kQualityWifi = 'saxify.quality_wifi';
@@ -57,6 +58,15 @@ class SettingsService extends ChangeNotifier {
   String get accentId => _prefs.getString(kAccentId) ?? 'violet-pulse';
   Future<void> setAccentId(String v) =>
       _prefs.setString(kAccentId, v).then((_) => notifyListeners());
+
+  /// When off, the app keeps its neutral black appearance while the small
+  /// song-quality label still follows the selected / rotating colour.
+  bool get accentAcrossApp =>
+      _prefs.getBool(kAccentAcrossApp) ??
+      (_prefs.getString(kAccentId) == 'custom-mix');
+  Future<void> setAccentAcrossApp(bool value) => _prefs
+      .setBool(kAccentAcrossApp, value)
+      .then((_) => notifyListeners());
 
   int? get customAccentPrimary => _prefs.getInt(kCustomAccentPrimary);
   int? get customAccentSecondary => _prefs.getInt(kCustomAccentSecondary);

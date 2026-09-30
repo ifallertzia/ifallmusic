@@ -12,14 +12,15 @@ enum SaxifyTab { home, search, library, settings }
 class LibraryTabs {
   const LibraryTabs._();
 
-  static const int liked = 0;
-  static const int playlists = 1;
-  static const int songs = 2;
-  static const int artists = 3;
-  static const int onDevice = 4;
-  static const int downloads = 5;
-  static const int history = 6;
-  static const int lyrics = 7;
+  static const int overview = 0;
+  static const int liked = 1;
+  static const int playlists = 2;
+  static const int songs = 3;
+  static const int artists = 4;
+  static const int onDevice = 5;
+  static const int downloads = 6;
+  static const int history = 7;
+  static const int lyrics = 8;
 }
 
 /// Coordinates the shell: which tab is showing and what the search box should
@@ -47,7 +48,7 @@ class ShellController extends ChangeNotifier {
 
   String? _pendingQuery;
   int _queryNonce = 0;
-  int _libraryTab = LibraryTabs.liked;
+  int _libraryTab = LibraryTabs.overview;
   int _libraryNonce = 0;
 
   SaxifyTab get tab => _tab;
@@ -56,14 +57,25 @@ class ShellController extends ChangeNotifier {
   String? get pendingQuery => _pendingQuery;
   int get queryNonce => _queryNonce;
 
-  /// Which Library tab should be open (Library ▸ Liked by default — never
-  /// surprising, never confusing).
+  /// Which Library tab should be open (Your Space overview by default).
   int get libraryTab => _libraryTab;
   int get libraryNonce => _libraryNonce;
 
   void select(SaxifyTab tab) {
-    if (_tab == tab) return;
+    if (_tab == tab) {
+      if (tab == SaxifyTab.library &&
+          _libraryTab != LibraryTabs.overview) {
+        _libraryTab = LibraryTabs.overview;
+        _libraryNonce++;
+        notifyListeners();
+      }
+      return;
+    }
     _visit(tab);
+    if (tab == SaxifyTab.library) {
+      _libraryTab = LibraryTabs.overview;
+      _libraryNonce++;
+    }
     notifyListeners();
   }
 
@@ -81,10 +93,8 @@ class ShellController extends ChangeNotifier {
 
   void goLibrary([int? tab]) {
     _visit(SaxifyTab.library);
-    if (tab != null) {
-      _libraryTab = tab;
-      _libraryNonce++;
-    }
+    _libraryTab = tab ?? LibraryTabs.overview;
+    _libraryNonce++;
     notifyListeners();
   }
 

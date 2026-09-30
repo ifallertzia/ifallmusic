@@ -358,8 +358,14 @@ class _IfallRoot extends StatelessWidget {
       title: IfallBranding.appName,
       debugShowCheckedModeBanner: false,
       themeMode: ThemeMode.dark,
-      theme: SaxifyTheme.build(theme.accent),
-      darkTheme: SaxifyTheme.build(theme.accent),
+      theme: SaxifyTheme.build(
+        theme.accent,
+        qualityAccent: theme.paletteAccent,
+      ),
+      darkTheme: SaxifyTheme.build(
+        theme.accent,
+        qualityAccent: theme.paletteAccent,
+      ),
       builder: (BuildContext context, Widget? child) {
         // Apple-like restraint on huge system font scales: the layout keeps its
         // rhythm and text stays readable instead of overflowing.
@@ -404,7 +410,7 @@ class IfallRecoveryApp extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 const Text(
-                  'Reset the local cache and try again. Your liked songs and playlists stay on this device.',
+                  'Repair the local cache and try again. Your library, settings and downloads stay on this device.',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 13,
@@ -414,11 +420,11 @@ class IfallRecoveryApp extends StatelessWidget {
                 ),
                 const SizedBox(height: 22),
                 GlassButton(
-                  label: 'Reset and retry',
+                  label: 'Repair cache & retry',
                   icon: Icons.refresh_rounded,
                   expand: true,
                   onPressed: () async {
-                    await NativeBridge.clearLocalPrefs();
+                    await NativeBridge.repairLocalCache();
                     try {
                       final AppBoot boot = await _initializeApp().timeout(
                         const Duration(seconds: 20),

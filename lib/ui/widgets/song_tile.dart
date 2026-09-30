@@ -74,7 +74,7 @@ class SongTile extends StatelessWidget {
         child: Padding(
           padding: EdgeInsets.symmetric(
             horizontal: dense ? 10 : 12,
-            vertical: dense ? 6 : 9,
+            vertical: dense ? 5 : 7,
           ),
           child: Row(
             children: <Widget>[
@@ -139,7 +139,7 @@ class SongTile extends StatelessWidget {
                             : SaxifyColors.textPrimary,
                       ),
                     ),
-                    const SizedBox(height: 3),
+                    const SizedBox(height: 2),
                     if (isDownloading)
                       Row(
                         children: <Widget>[
