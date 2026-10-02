@@ -158,5 +158,5 @@ class ArtistService {
     return null;
   }
 
-  String fallbackAsset() => IfallBranding.logoAsset;
+  String fallbackAsset() => IfallBranding.splashAsset;
 }

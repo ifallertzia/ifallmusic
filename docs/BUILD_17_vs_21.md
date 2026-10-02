@@ -29,7 +29,7 @@ Commits between the two tags (4):
   audio_service, youtube_explode_dart, provider, dio, sqflite, workmanager … sab same
   versions. Dart SDK constraint `>=3.5.0 <4.0.0` same.
 - **Android config** — `android/app/build.gradle.kts` byte-identical:
-  `applicationId = "com.saxify.app"`, `minSdk`/`targetSdk` flutter defaults,
+  `applicationId = "com.ifallmusic.app"`, `minSdk`/`targetSdk` flutter defaults,
   `versionCode/versionName` pubspec se. Release signing config wahi (isliye 17 ke upar
   21 direct install hota hai, "app not installed" nahi aata).
   Sirf `SaxifyBridge.kt` badla (native cache-repair, niche dekho).

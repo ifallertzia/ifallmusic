@@ -73,15 +73,15 @@ class _Fallback extends StatelessWidget {
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              colors: <Color>[Color(0xFF221C36), Color(0xFF141121)],
+              colors: <Color>[Color(0xFF1E1A2E), Color(0xFF0D0B14)],
             ),
           ),
         ),
         Image.asset(
-          IfallBranding.logoAsset,
-          fit: BoxFit.contain,
+          IfallBranding.splashAsset,
+          fit: BoxFit.cover,
           errorBuilder: (BuildContext context, Object error, StackTrace? stack) =>
-              Icon(icon, color: SaxifyColors.textFaint, size: radius * 1.6),
+              Icon(icon, color: Colors.white.withValues(alpha: 0.9), size: radius * 1.6),
         ),
       ],
     );

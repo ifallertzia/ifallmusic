@@ -24,7 +24,7 @@ class NotificationBootstrap {
       handler = await AudioService.init<MediaNotificationHandler>(
         builder: MediaNotificationHandler.new,
         config: const AudioServiceConfig(
-          androidNotificationChannelId: 'com.saxify.app.playback.v2',
+          androidNotificationChannelId: 'com.ifallmusic.app.playback.v2',
           androidNotificationChannelName: 'IfallMusic playback',
           androidNotificationChannelDescription:
               'Playback, queue and favourite controls',

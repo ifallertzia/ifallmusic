@@ -1,4 +1,4 @@
-package com.saxify.app
+package com.ifallmusic.app
 
 import android.content.Context
 import android.os.Build
@@ -32,7 +32,7 @@ class MainActivity : AudioServiceActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         val bridge = SaxifyBridge(this)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.saxify.app/bridge")
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.ifallmusic.app/bridge")
             .setMethodCallHandler { call, result -> bridge.handle(call, result) }
     }
 }

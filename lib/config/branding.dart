@@ -8,7 +8,7 @@ class IfallBranding {
 
   static const double logoWidth = 512;
   static const double logoHeight = 512;
-  static const String logoFormat = 'PNG (from supplied JPG artwork)';
+  static const String logoFormat = 'PNG (from I Fall Music Cartoon Logo.png)';
   static const String logoAsset = 'assets/images/saxify_logo.png';
   static const String splashAsset = 'assets/images/saxify_splash.png';
   static const double splashLogoSize = 300;
@@ -38,5 +38,5 @@ class IfallBranding {
   static const String websiteUrl = 'https://sidify.vercel.app';
   static const String latestDownloadMessage =
       'Check here for the latest app download link: sidify.vercel.app';
-  static const String packageName = 'com.saxify.app';
+  static const String packageName = 'com.ifallmusic.app';
 }

@@ -1,4 +1,4 @@
-package com.saxify.app
+package com.ifallmusic.app
 
 import android.app.Activity
 import android.content.ClipData
@@ -55,7 +55,7 @@ class SaxifyBridge(private val activity: Activity) {
                 "saveToDownloads" -> io(result) {
                     saveToDownloads(
                         call.argument<String>("sourcePath") ?: "",
-                        call.argument<String>("displayName") ?: "track_saxify.mp3",
+                        call.argument<String>("displayName") ?: "track_ifallmusic.mp3",
                         call.argument<String>("mime") ?: "audio/mpeg",
                     )
                 }
@@ -169,10 +169,10 @@ class SaxifyBridge(private val activity: Activity) {
     private fun saveLegacy(src: File, displayName: String): Map<String, Any?> {
         val dir = File(
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-            "Saxify",
+            "IfallMusic",
         )
         if (!dir.exists() && !dir.mkdirs()) {
-            throw IllegalStateException("Could not create Download/Saxify")
+            throw IllegalStateException("Could not create Download/IfallMusic")
         }
         val dest = uniqueFile(dir, displayName)
         src.copyTo(dest, overwrite = true)
@@ -202,7 +202,7 @@ class SaxifyBridge(private val activity: Activity) {
             @Suppress("DEPRECATION")
             val dir = File(
                 Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-                "Saxify",
+                "IfallMusic",
             )
             if (!dir.exists()) return emptyList()
             return dir.listFiles()?.map { file ->
@@ -227,8 +227,8 @@ class SaxifyBridge(private val activity: Activity) {
         activity.contentResolver.query(
             collection,
             projection,
-            "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?",
-            arrayOf("%Saxify%"),
+            "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ? OR ${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?",
+            arrayOf("%IfallMusic%", "%Saxify%"),
             "${MediaStore.MediaColumns.DATE_MODIFIED} DESC",
         )?.use { cursor ->
             val nameIdx = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)

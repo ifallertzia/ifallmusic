@@ -1,8 +1,8 @@
 # MASTER PROMPT — Saxify v2.1.0 (post-merge completion)
 
 ## Repo & context
-- Repo: `ifallertzia/Saxify-v1` — Flutter app `com.saxify.app`.
-- PR #1 (Hindi-first search, mood grid, download button, onboarding, report-Gmail, YT unblock, release notes, UpdateService→`ifallertzia/Saxify-v1`, version 2.1.0+4) **already merged from another session — DO NOT redo it.** First `git pull` and read current `main`.
+- Repo: `ifallertzia/ifallmusic` — Flutter app `com.ifallmusic.app`.
+- PR #1 (Hindi-first search, mood grid, download button, onboarding, report-Gmail, YT unblock, release notes, UpdateService→`ifallertzia/ifallmusic`, version 2.1.0+4) **already merged from another session — DO NOT redo it.** First `git pull` and read current `main`.
 - Tumhara kaam: **saari bachi hui incomplete cheezein + naye requirements complete karna.**
 
 ## Hard rules
@@ -10,7 +10,7 @@
 2. **Playlist sync / cloud code (Generate code, paste-import, Render playlist backend) — BILKUL chhod do.** Ye baad me alag se karwaunga. Ab koi playlist-backend ka kaam mat karna.
 3. **Downloader ke liye KOI backend (Render/wagaira) mat use karo.** Download app ke andar hi honi chahiye.
 4. Player architecture apna waisa hi rehne do — bas jo bola hai wo add karna (EQ/sound panel), replace mat karo.
-5. Version **`2.1.0`** (`+4` ya aage bump) rakho; releases **isi repo `ifallertzia/Saxify-v1`** se link hon (UpdateService + release config dono me).
+5. Version **`2.1.0`** (`+4` ya aage bump) rakho; releases **isi repo `ifallertzia/ifallmusic`** se link hon (UpdateService + release config dono me).
 
 ---
 
@@ -110,5 +110,5 @@
 - [ ] Sound button → bottom sound+EQ liquid-glass panel.
 - [ ] Apple font + glassy buttons + no overflow; Theme me Silver samet solid colours; “Save”→“Exclusive”; boot-log gone.
 - [ ] Gmail me `+` nahi; Sony channel fix; Osho/long search OK.
-- [ ] Version `2.1.0`, UpdateService/release → `ifallertzia/Saxify-v1`.
+- [ ] Version `2.1.0`, UpdateService/release → `ifallertzia/ifallmusic`.
 - [ ] **Playlist sync untouched. CI ki fikr nahi — sirf code, push, merge.**

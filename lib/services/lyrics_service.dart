@@ -118,7 +118,7 @@ class LyricsService {
                         headers: {
                           'Accept': 'application/json',
                           'User-Agent':
-                              'IfallMusic/${IfallBranding.versionLabel} (https://github.com/ifallertzia/Saxify-v1)',
+                              'IfallMusic/${IfallBranding.versionLabel} (https://github.com/ifallertzia/ifallmusic)',
                         },
                       ),
                     )

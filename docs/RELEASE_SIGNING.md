@@ -7,7 +7,7 @@ and released. It exists to stop the
 
 error for good. That error has exactly one cause: **the new APK is signed with a
 different certificate than the one already installed.** Package ID
-(`com.saxify.app`) and version code do not matter when the certificate differs.
+(`com.ifallmusic.app`) and version code do not matter when the certificate differs.
 
 The fix is to sign every release with the *same* key, forever.
 
@@ -25,12 +25,12 @@ sign/verify round-trip against its own certificate):
 | Keystore type | JKS (magic `0xFEEDFEED`, format version 2) |
 | Alias | `upload` |
 | Key algorithm | RSA, 2048-bit |
-| Validity | 10,000 days — 2026-09-28 → **2054-02-14** |
+| Validity | 10,000 days — 2026-10-02 → **2054-02-17** |
 | Signature | `sha256WithRSAEncryption` |
 | Distinguished name | `CN=Ifallertzia, OU=IfallMusic Release Signing, O=IfallMusic, L=Mumbai, ST=Maharashtra, C=IN` |
-| Certificate SHA-256 | `B0:E3:1E:E8:63:46:49:BD:D8:26:63:42:35:F4:AB:4D:A9:21:96:8E:88:E9:CD:80:11:06:C7:E6:DB:6A:2A:1D` |
-| Certificate SHA-1 | `C6:A2:35:E8:4C:2A:1A:DF:1E:9B:58:10:0E:9E:0F:1B:1D:11:1D:1E` |
-| Keystore SHA-256 | `5819db7ee06a18c56dd432c2333c89cf9fd0715ec224c7845db952334b3093c7` (2294 bytes) |
+| Certificate SHA-256 | `55:0A:94:D9:9F:33:34:A2:71:1B:09:AF:9F:80:18:26:F5:C4:B5:C9:87:7D:0F:71:5C:54:3A:B2:03:87:BA:11` |
+| Certificate SHA-1 | `20:69:98:7A:57:4B:22:06:41:04:A5:5E:6F:E6:D1:83:29:A2:FA:7F` |
+| Keystore SHA-256 | `5602548528bd545e929211b4331b8147a40f506a755bf9ae93f3490b7976d2a2` (2298 bytes) |
 
 These values were re-pinned on 2026-09-29 to the key that is actually held in the
 `SIGNING_KEY` secret (`scripts/ci_prepare_signing.sh` carries the same constants).
@@ -272,7 +272,7 @@ bash scripts/bump_build_number.sh --check    # print, change nothing
 
 `lib/core/services/update_service.dart`:
 
-- `GET https://api.github.com/repos/ifallertzia/Saxify-v1/releases/latest`
+- `GET https://api.github.com/repos/ifallertzia/ifallmusic/releases/latest`
 - Prefers the `latest.json` asset for an exact `version` + `build` comparison;
   falls back to the release tag (`v2.4.0` → `2.4.0`) when it is absent.
 - `UpdateService.isNewerBuild()` compares semantic version first, build number

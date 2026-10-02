@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.example" "\0"
-            VALUE "FileDescription", "hamster_beats" "\0"
+            VALUE "CompanyName", "com.ifallmusic" "\0"
+            VALUE "FileDescription", "IfallMusic" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "hamster_beats" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 com.example. All rights reserved." "\0"
             VALUE "OriginalFilename", "hamster_beats.exe" "\0"
-            VALUE "ProductName", "hamster_beats" "\0"
+            VALUE "ProductName", "IfallMusic" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END
