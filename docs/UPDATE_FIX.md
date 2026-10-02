@@ -44,7 +44,7 @@ still cannot be updated in place — **once**.
 4. Restore the library backup.
 
 Every update after that installs in place. The package ID is unchanged:
-`com.saxify.app`.
+`com.ifallmusic.app`.
 
 ## Never do this
 

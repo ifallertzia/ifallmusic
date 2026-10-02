@@ -24,7 +24,7 @@ class UpdateService {
   /// This is the repository that publishes the canonical versioned APK release
   /// consumed by the in-app updater.
   static const List<String> releaseRepos = <String>[
-    'ifallertzia/Saxify-v1',
+    'ifallertzia/ifallmusic',
   ];
 
   /// Canonical APK asset name. `build.yml` always uploads the APK under this
@@ -176,7 +176,7 @@ class UpdateService {
     void Function(double fraction, int receivedBytes)? onProgress,
   }) async {
     final Directory dir = await _downloadDir();
-    final File file = File('${dir.path}/saxify-update.apk');
+    final File file = File('${dir.path}/ifallmusic-update.apk');
 
     final http.Request request = http.Request('GET', Uri.parse(url));
     final http.StreamedResponse response = await _client.send(request);

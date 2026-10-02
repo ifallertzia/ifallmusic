@@ -124,7 +124,7 @@ if (releaseSigningConfiguredButIncomplete) {
 }
 
 android {
-    namespace = "com.saxify.app"
+    namespace = "com.ifallmusic.app"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -158,7 +158,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.saxify.app"
+        applicationId = "com.ifallmusic.app"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         // Version code/name come from pubspec.yaml (`version: x.y.z+build`).

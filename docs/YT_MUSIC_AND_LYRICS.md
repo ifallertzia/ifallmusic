@@ -112,7 +112,7 @@ track change while following playback. Retry bypasses cache.
 - The old just_audio_background single-source wrapper is removed. An app-owned
   audio_service handler publishes the actual queue and connects previous, play,
   pause, next, seek, like and stop to PlaybackService. New notification channel:
-  `com.saxify.app.playback.v2`. Audio session uses music configuration. Removing
+  `com.ifallmusic.app.playback.v2`. Audio session uses music configuration. Removing
   the task invokes stop and cancels notification/media state; pending stream loads
   and autoplay cannot restart the stopped task. Like feedback uses themed floating
   snackbars; existing download/queue/playlist feedback is preserved.

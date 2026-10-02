@@ -9,7 +9,7 @@ import 'package:flutter/services.dart';
 class NativeBridge {
   NativeBridge._();
 
-  static const MethodChannel _channel = MethodChannel('com.saxify.app/bridge');
+  static const MethodChannel _channel = MethodChannel('com.ifallmusic.app/bridge');
 
   static Future<void> backgroundApp() async {
     if (!kIsWeb && Platform.isAndroid) {

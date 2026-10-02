@@ -1,7 +1,7 @@
 # IfallMusic
 
 IfallMusic — *Stream beyond limits.* A premium, liquid-glass music player built with
-Flutter, from `ifallertzia/Saxify-v1`. Version **2.6.0 (build 22)**.
+Flutter, from `ifallertzia/ifallmusic`. Version **2.6.0 (build 25)**.
 
 ## Features
 
@@ -127,7 +127,7 @@ bash scripts/bump_build_number.sh 2.5.0      # 2.4.0+13 -> 2.5.0+14
 ```
 
 **Updater.** `lib/core/services/update_service.dart` checks the latest release from
-`ifallertzia/Saxify-v1`, prefers the `latest.json` asset so it can compare the build
+`ifallertzia/ifallmusic`, prefers the `latest.json` asset so it can compare the build
 number as well as the version, downloads `app-release.apk` with progress and hands it
 to the system installer. It runs silently on app start and on demand from Settings.
 

@@ -48,11 +48,11 @@ set -uo pipefail
 # published release — every release up to v2.3.6 was debug-signed because the
 # signing secrets did not exist yet — so pinning the available key costs
 # nothing and stops this check from warning on every release.
-EXPECTED_KEYSTORE_SHA256="5819db7ee06a18c56dd432c2333c89cf9fd0715ec224c7845db952334b3093c7"
-EXPECTED_KEYSTORE_BYTES=2294
-EXPECTED_BASE64_SHA256="8c4bb5c24576efdb0f8f34e9087a160d2838cdd02e0bcf2f939ccdfff3818c4d"
-EXPECTED_BASE64_CHARS=3060
-EXPECTED_CERT_SHA256="B0E31EE8634649BDD826634235F4AB4DA921968E88E9CD801106C7E6DB6A2A1D"
+EXPECTED_KEYSTORE_SHA256="5602548528bd545e929211b4331b8147a40f506a755bf9ae93f3490b7976d2a2"
+EXPECTED_KEYSTORE_BYTES=2298
+EXPECTED_BASE64_SHA256="c181198a30051d1607a151f786e0c15fb90943bd3fc6c0085d2f952a20dd0100"
+EXPECTED_BASE64_CHARS=3064
+EXPECTED_CERT_SHA256="550A94D99F3334A2711B09AF9F801826F5C4B5C9877D0F715C543AB20387BA11"
 
 # Advisory by default: a mismatch warns loudly (annotation + job summary +
 # the exact constants needed to re-pin) but does not block the build, because
