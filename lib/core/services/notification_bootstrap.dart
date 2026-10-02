@@ -28,7 +28,10 @@ class NotificationBootstrap {
           androidNotificationChannelName: 'IfallMusic playback',
           androidNotificationChannelDescription:
               'Playback, queue and favourite controls',
-          androidNotificationOngoing: false,
+          // Ongoing: a swipe on the notification must not kill playback when
+          // the screen is off — that is exactly how a long track "stops on
+          // its own".
+          androidNotificationOngoing: true,
           androidStopForegroundOnPause: false,
           androidNotificationIcon: 'drawable/ic_notification_music',
         ),
@@ -41,6 +44,23 @@ class NotificationBootstrap {
       debugPrint('[IfallMusic][Notify] init skipped: $e');
       active = false;
       return false;
+    }
+  }
+
+  /// Phones with aggressive battery optimisation (Xiaomi, Realme, Oppo,
+  /// Samsung) kill a long background track after a few minutes. Asking once
+  /// moves IfallMusic onto the unrestricted list; OEMs that ignore the
+  /// request fall back to the guide sheet in Settings.
+  static bool _batteryAsked = false;
+
+  static Future<void> requestBatteryExemption() async {
+    if (_batteryAsked || kIsWeb || !Platform.isAndroid) return;
+    _batteryAsked = true;
+    try {
+      if (await Permission.ignoreBatteryOptimizations.isGranted) return;
+      await Permission.ignoreBatteryOptimizations.request();
+    } catch (e) {
+      debugPrint('[IfallMusic][Battery] request skipped: $e');
     }
   }
 

@@ -291,9 +291,10 @@ class _GlassNavBarState extends State<_GlassNavBar> {
                 onHorizontalDragStart: _onDragStart,
                 onHorizontalDragUpdate: _onDragUpdate,
                 onHorizontalDragEnd: _onDragEnd,
-                child: Stack(
-                  children: <Widget>[
-                    // ---- the sliding pill --------------------------------
+                child: SizedBox.expand(
+                  child: Stack(
+                    children: <Widget>[
+                      // ---- the sliding pill ------------------------------
                     AnimatedPositioned(
                       duration: _dragging
                           ? Duration.zero
@@ -337,7 +338,8 @@ class _GlassNavBarState extends State<_GlassNavBar> {
                           ),
                       ],
                     ),
-                  ],
+                    ],
+                  ),
                 ),
               );
             },

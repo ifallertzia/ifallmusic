@@ -185,13 +185,23 @@ List<Song> mergeMusicResults(
   List<Song> youtube,
 ) {
   final seen = <String>{};
-  return [
-    ...songs.where((s) => s.quality == QualityTier.high),
-    ...all.where((s) => s.quality == QualityTier.high),
-    ...songs.where((s) => s.quality != QualityTier.high),
-    ...all.where((s) => s.quality != QualityTier.high),
-    ...youtube,
-  ].where((s) => seen.add(s.id)).toList();
+  final List<Song> out = <Song>[];
+
+  void add(Iterable<Song> source) {
+    for (final Song s in source) {
+      if (seen.add(s.id)) out.add(s);
+    }
+  }
+
+  // YouTube-Music order: the real songs first, best sources ahead of weaker
+  // ones. Everything else (albums, artists, videos) only follows once the
+  // songs filter is exhausted, and the raw video fallback comes last.
+  add(songs.where((Song s) => s.quality == QualityTier.high));
+  add(songs.where((Song s) => s.quality != QualityTier.high));
+  add(all.where((Song s) => s.quality == QualityTier.high));
+  add(all.where((Song s) => s.quality != QualityTier.high));
+  add(youtube);
+  return out;
 }
 
 MusicSearchResult parseMusicRadio(Map<String, dynamic> root) {

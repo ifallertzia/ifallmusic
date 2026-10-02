@@ -914,6 +914,7 @@ class PlaybackService extends ChangeNotifier {
           unawaited(_fillRadio(song, _session));
         unawaited(_recordStarted(song, generation));
         unawaited(NotificationBootstrap.requestOnFirstPlay());
+        unawaited(NotificationBootstrap.requestBatteryExemption());
         return;
       } catch (error, stack) {
         if (!_epoch.current(generation) || _stopped) return;

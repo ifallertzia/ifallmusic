@@ -1,22 +1,26 @@
 # IfallMusic
 
 IfallMusic — *Stream beyond limits.* A premium, liquid-glass music player built with
-Flutter, from `ifallertzia/Saxify-v1`. Version **2.5.0**.
+Flutter, from `ifallertzia/Saxify-v1`. Version **2.6.0 (build 22)**.
 
 ## Features
 
-- **Home** — a black-canvas dashboard: *Made for you*, big colourful **Mood & genres**
+- **Home** — a coloured, YouTube-Music-like canvas: *Made for you*, **Mood & genres**
   buttons, trending chart, new releases, music brands, top artists with real faces,
-  smart rails and *Recommended for you*.
+  smart rails and *Recommended for you*. Nothing is boxed in: the content sits on
+  the page itself.
 - **Search** — song-focused results biased toward Hindi and Indian music, plus
   one-tap mood/genre stations and music-brand channels.
 - **Player** — the existing playback engine, with a persistent mini-player, full
   player, queue, gapless pre-load, auto-next, sleep timer, speed control and
-  background media-session initialisation. The **Sound** sheet adds volume plus the
+  background media-session initialisation. The page scrolls and the lyrics live at
+  the bottom with a Static / Synced switch. The **Sound** sheet adds volume plus the
   full equalizer and 8D templates in one place.
-- **Library** — tap Library and the tabs come to *you*: **Liked · Playlists · Songs ·
-  Artists · Downloads · History**, each a big colourful button with a live counter.
-  Liked Songs only opens when you ask for it.
+- **Library** — a neutral **Your Space** list: Liked · Playlists · Songs · Artists ·
+  On device · Downloads · History, each a row with a live counter that opens its own
+  page. Liked Songs only opens when you ask for it.
+- **Navigation** — a floating bar whose selection is a sliding pill: tap a tab or
+  drag the pill sideways. Scroll down and the bar shrinks to icons.
 - **Downloads** — tap the download icon on any song and it saves to this phone
   (`Download/IfallMusic` where the platform allows it, plus a private offline copy).
   Progress is shown everywhere a download is running — song rows, the Downloads tab
