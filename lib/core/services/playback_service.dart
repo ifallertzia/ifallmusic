@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:audio_service/audio_service.dart';
+import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:path_provider/path_provider.dart';
@@ -280,6 +281,7 @@ class PlaybackService extends ChangeNotifier {
     _isLoading = false;
     _isPlaying = false;
     await _player.stop();
+    await _releaseAudioFocus();
     notifyListeners();
   }
 
@@ -915,6 +917,7 @@ class PlaybackService extends ChangeNotifier {
         unawaited(_recordStarted(song, generation));
         unawaited(NotificationBootstrap.requestOnFirstPlay());
         unawaited(NotificationBootstrap.requestBatteryExemption());
+        unawaited(_activateAudioFocus());
         return;
       } catch (error, stack) {
         if (!_epoch.current(generation) || _stopped) return;
@@ -1205,6 +1208,27 @@ class PlaybackService extends ChangeNotifier {
         _warming.remove(song.id);
       }
     }();
+  }
+
+  /// Asks Android for audio focus before the first frame of sound plays.
+  ///
+  /// Without it the session is configured but never activated, so the system
+  /// is free to duck or drop our audio when anything else makes a sound —
+  /// which is one way a long track "stops" on its own.
+  static Future<void> _activateAudioFocus() async {
+    try {
+      final AudioSession session = await AudioSession.instance;
+      await session.setActive(true);
+    } catch (_) {
+      // Focus is a nicety here: playback must never fail because of it.
+    }
+  }
+
+  static Future<void> _releaseAudioFocus() async {
+    try {
+      final AudioSession session = await AudioSession.instance;
+      await session.setActive(false);
+    } catch (_) {}
   }
 
   @override

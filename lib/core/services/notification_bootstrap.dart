@@ -28,10 +28,12 @@ class NotificationBootstrap {
           androidNotificationChannelName: 'IfallMusic playback',
           androidNotificationChannelDescription:
               'Playback, queue and favourite controls',
-          // Ongoing: a swipe on the notification must not kill playback when
-          // the screen is off — that is exactly how a long track "stops on
-          // its own".
-          androidNotificationOngoing: true,
+          // Keeping the foreground service alive on pause (false) already
+          // forces an ongoing notification, so a stray swipe cannot kill a
+          // long track. `androidNotificationOngoing: true` is rejected by
+          // audio_service unless stopForegroundOnPause is also true, and
+          // would only restate what the foreground service does anyway.
+          androidNotificationOngoing: false,
           androidStopForegroundOnPause: false,
           androidNotificationIcon: 'drawable/ic_notification_music',
         ),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
@@ -332,7 +333,6 @@ class _GlassNavBarState extends State<_GlassNavBar> {
                               label: _items[i].$3,
                               selected: widget.index == i,
                               compact: compact,
-                              accent: accent,
                               onTap: () => widget.onSelect(i),
                             ),
                           ),
@@ -357,7 +357,6 @@ class _NavItem extends StatelessWidget {
     required this.label,
     required this.selected,
     required this.compact,
-    required this.accent,
     required this.onTap,
   });
 
@@ -366,7 +365,6 @@ class _NavItem extends StatelessWidget {
   final String label;
   final bool selected;
   final bool compact;
-  final SaxifyAccent accent;
   final VoidCallback onTap;
 
   @override

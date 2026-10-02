@@ -1021,17 +1021,14 @@ class _ChipButton extends StatelessWidget {
     required this.label,
     required this.icon,
     required this.onTap,
-    this.active = false,
   });
 
   final String label;
   final IconData icon;
   final VoidCallback onTap;
-  final bool active;
 
   @override
   Widget build(BuildContext context) {
-    final SaxifyAccent accent = context.accent;
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -1041,13 +1038,9 @@ class _ChipButton extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(SaxifyTheme.radiusXl),
-            color: active
-                ? accent.primary.withValues(alpha: 0.18)
-                : Colors.white.withValues(alpha: 0.06),
+            color: Colors.white.withValues(alpha: 0.06),
             border: Border.all(
-              color: active
-                  ? accent.primary.withValues(alpha: 0.6)
-                  : Colors.white.withValues(alpha: 0.10),
+              color: Colors.white.withValues(alpha: 0.10),
             ),
           ),
           child: Row(
@@ -1056,15 +1049,15 @@ class _ChipButton extends StatelessWidget {
               Icon(
                 icon,
                 size: 14,
-                color: active ? accent.primary : SaxifyColors.textMuted,
+                color: SaxifyColors.textMuted,
               ),
               const SizedBox(width: 6),
               Text(
                 label,
-                style: TextStyle(
+                style: const TextStyle(
                   fontSize: 11.5,
                   fontWeight: FontWeight.w700,
-                  color: active ? accent.primary : SaxifyColors.textSecondary,
+                  color: SaxifyColors.textSecondary,
                 ),
               ),
             ],
