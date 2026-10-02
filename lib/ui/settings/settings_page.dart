@@ -39,7 +39,7 @@ class SettingsPage extends StatelessWidget {
     final LibraryService library = context.watch<LibraryService>();
 
     return AuroraBackdrop(
-      intensity: 0.45,
+      intensity: 0.7,
       child: Scaffold(
         backgroundColor: Colors.transparent,
         body: CustomScrollView(

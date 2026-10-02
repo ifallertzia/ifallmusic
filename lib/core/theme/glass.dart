@@ -46,8 +46,8 @@ class AuroraBackdrop extends StatelessWidget {
                     center: const Alignment(-0.4, -0.6),
                     radius: 0.9,
                     colors: <Color>[
-                      accent.primary.withValues(alpha: 0.22 * intensity),
-                      accent.primary.withValues(alpha: 0.06 * intensity),
+                      accent.primary.withValues(alpha: 0.30 * intensity),
+                      accent.primary.withValues(alpha: 0.09 * intensity),
                       Colors.transparent,
                     ],
                   ),
@@ -67,9 +67,30 @@ class AuroraBackdrop extends StatelessWidget {
                     center: const Alignment(0.5, 0.7),
                     radius: 0.95,
                     colors: <Color>[
-                      accent.secondary.withValues(alpha: 0.18 * intensity),
+                      accent.secondary.withValues(alpha: 0.26 * intensity),
                       Colors.transparent,
                     ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          // A diagonal wash in the accent's own colours, so every screen
+          // reads as coloured glass rather than flat black. Kept gentle: the
+          // content still owns the contrast.
+          Positioned.fill(
+            child: IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: <Color>[
+                      accent.primary.withValues(alpha: 0.13 * intensity),
+                      accent.tint.withValues(alpha: 0.07 * intensity),
+                      accent.secondary.withValues(alpha: 0.15 * intensity),
+                    ],
+                    stops: const <double>[0, 0.5, 1],
                   ),
                 ),
               ),
@@ -98,6 +119,7 @@ class GlassPanel extends StatelessWidget {
     this.borderColor,
     this.strength = 1,
     this.clip = true,
+    this.flat = false,
   });
 
   final Widget child;
@@ -112,10 +134,31 @@ class GlassPanel extends StatelessWidget {
   final double strength;
   final bool clip;
 
+  /// When true the panel paints nothing: no fill, no blur, no border, no
+  /// shadow. Used where content should read as part of the page (Home) instead
+  /// of sitting inside a card.
+  final bool flat;
+
   @override
   Widget build(BuildContext context) {
     final SaxifyAccent accent = context.accent;
     final BorderRadius br = BorderRadius.circular(radius);
+
+    // Seamless mode: just the content, laid out on the page itself.
+    if (flat) {
+      final Widget plain = Padding(padding: padding, child: child);
+      if (onTap == null) return plain;
+      return Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: br,
+          splashColor: accent.primary.withValues(alpha: 0.08),
+          highlightColor: accent.primary.withValues(alpha: 0.04),
+          child: plain,
+        ),
+      );
+    }
 
     final BoxDecoration decoration = BoxDecoration(
       borderRadius: br,

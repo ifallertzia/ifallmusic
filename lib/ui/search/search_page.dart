@@ -237,7 +237,7 @@ class _SearchPageState extends State<SearchPage> {
     );
 
     return AuroraBackdrop(
-      intensity: 0.5,
+      intensity: 0.75,
       child: Scaffold(
         backgroundColor: Colors.transparent,
         body: SafeArea(

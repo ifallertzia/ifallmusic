@@ -26,10 +26,10 @@ class IfallBranding {
   static const String contactEmail = 'dastaanenajdik@gmail.com';
   /// Kept in step with pubspec.yaml by `scripts/sync_version.sh`, which CI runs
   /// on every version bump. Do not edit these three by hand.
-  static const String versionLabel = '2.5.2';
-  static const String buildLabel = '21';
+  static const String versionLabel = '2.6.0';
+  static const String buildLabel = '22';
   static const String tagline = 'Stream beyond limits';
-  static const String userAgent = 'IfallMusic/2.5.2 (Flutter)';
+  static const String userAgent = 'IfallMusic/2.6.0 (Flutter)';
 
   /// `versionLabel (build buildLabel)` — the string that tells releases apart.
   /// The build number is what Android compares when deciding whether an APK is

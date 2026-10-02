@@ -324,8 +324,49 @@ class SettingsService extends ChangeNotifier {
   Future<void> setSpatialReverb(double v) =>
       _prefs.setDouble(kSpatialReverb, v).then((_) => notifyListeners());
 
+  /// Every key this service owns.
+  ///
+  /// A settings reset used to call `prefs.clear()`. That file is shared with
+  /// the library, the playlists, the history and the downloads — all stored
+  /// under the same `saxify.` prefix — so one "reset" tap wiped an entire
+  /// collection. Only the keys listed here are ever removed.
+  static const List<String> ownedKeys = <String>[
+    'saxify.accent_across_app',
+    'saxify.accent_id',
+    'saxify.auto_playlist_sync',
+    'saxify.auto_rotate_theme',
+    'saxify.autoplay',
+    'saxify.custom_accent_primary',
+    'saxify.custom_accent_secondary',
+    'saxify.display_name',
+    'saxify.email',
+    'saxify.equalizer_custom_presets.v1',
+    'saxify.equalizer_profile.v1',
+    'saxify.explicit_filter',
+    'saxify.gapless',
+    'saxify.green_default.v1',
+    'saxify.last_playlist_code',
+    'saxify.last_positions',
+    'saxify.max_download_history',
+    'saxify.offline_cache_size.v1',
+    'saxify.persistent_queue.v1',
+    'saxify.playback_speed',
+    'saxify.quality_mobile',
+    'saxify.quality_wifi',
+    'saxify.remember_position',
+    'saxify.rotate_seconds',
+    'saxify.skip_silence.v1',
+    'saxify.spatial_depth',
+    'saxify.spatial_preset',
+    'saxify.spatial_reverb',
+    'saxify.spatial_speed',
+    'saxify.stream_resolver_mode.v1',
+  ];
+
   Future<void> resetAll() async {
-    await _prefs.clear();
+    for (final String key in ownedKeys) {
+      await _prefs.remove(key);
+    }
     notifyListeners();
   }
 }
