@@ -240,7 +240,7 @@ jobs:
     if: >
       github.event_name == 'push' &&
       github.ref == 'refs/heads/main' &&
-      github.repository == 'ifallertzia/Saxify-v1' &&
+      github.repository == 'ifallertzia/ifallmusic' &&
       !contains(github.event.head_commit.message, '[skip ci]')
     needs: build
     runs-on: ubuntu-latest
@@ -323,7 +323,7 @@ jobs:
     if: >-
       github.event_name == 'push' &&
       github.ref == 'refs/heads/main' &&
-      github.repository == 'ifallertzia/Saxify-v1' &&
+      github.repository == 'ifallertzia/ifallmusic' &&
       !contains(github.event.head_commit.message, '[skip ci]')
     permissions:
       contents: write
