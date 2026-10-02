@@ -1,29 +1,21 @@
-# IfallMusic 2.5.1 (build 18)
+# IfallMusic 2.5.0 (build 15)
 
 ## What's new
 
-- Lyrics now live at the bottom of the full player and load automatically when
-  you scroll to them. Both static and synced lyrics remain available; if lyrics
-  cannot be found, the player shows `iska nhi mila sori🥲` in the current UI accent.
-- The full player now scrolls vertically: artwork smoothly shrinks as you move
-  through playback controls, and pulling down at the top returns to the screen
-  underneath.
-- Startup cache repair no longer clears saved app preferences, protecting your
-  likes, playlists, library and settings.
-- Library opens on a neutral **Your Space** overview instead of selecting Liked
-  songs.
-- Home recommendations are presented as a compact, listening-based artwork grid,
-  with **Play today's mix** and **Explore** below it. Search brand strips now use
-  their logos.
-- The default look is a calmer dark theme, with tighter spacing and an optional
-  app-wide accent that leaves custom RGB colors intact.
+- Some known bugs fixed.
+- Playlist button added at the bottom of the player — add the song that is
+  playing to a playlist, or start a new one, without leaving the player.
+- The sleep timer now sits in the top bar of the player, next to the lyrics
+  button.
+- Settings tidied up: streaming quality options removed, small gaps added
+  between rows, and Contact / Report / Feedback moved into its own section at
+  the bottom.
 
 ## How to update
 
-Download `app-release.apk` below and install it over your current app. The Android
-application id and release-signing configuration are unchanged; the build number
-has increased so Android can install this as an update. Your saved library and
-playlists remain in place.
+Download `app-release.apk` below and install it over your current app. It is
+signed with the same release key as before, so it installs in place — your
+library, playlists and downloads stay exactly as they are.
 
 # IfallMusic 2.3.6
 

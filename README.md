@@ -1,22 +1,22 @@
 # IfallMusic
 
 IfallMusic — *Stream beyond limits.* A premium, liquid-glass music player built with
-Flutter, from `ifallertzia/Saxify-v1`. Version **2.5.1**.
+Flutter, from `ifallertzia/Saxify-v1`. Version **2.5.0**.
 
 ## Features
 
-- **Home** — a compact greeting and a listening-based artwork grid, followed by
-  one-tap mix playback and Explore; trending music, new releases, music brands and
-  top artists remain close at hand.
+- **Home** — a black-canvas dashboard: *Made for you*, big colourful **Mood & genres**
+  buttons, trending chart, new releases, music brands, top artists with real faces,
+  smart rails and *Recommended for you*.
 - **Search** — song-focused results biased toward Hindi and Indian music, plus
   one-tap mood/genre stations and music-brand channels.
 - **Player** — the existing playback engine, with a persistent mini-player, full
   player, queue, gapless pre-load, auto-next, sleep timer, speed control and
-  background media-session initialisation. Lyrics load automatically at the bottom
-  of the full player, in static or synced mode. The **Sound** sheet adds volume plus
-  the full equalizer and 8D templates in one place.
-- **Library** — a neutral **Your Space** landing with shortcuts into Liked, Playlists,
-  Songs, Artists, Downloads and History. Liked Songs only opens when you ask for it.
+  background media-session initialisation. The **Sound** sheet adds volume plus the
+  full equalizer and 8D templates in one place.
+- **Library** — tap Library and the tabs come to *you*: **Liked · Playlists · Songs ·
+  Artists · Downloads · History**, each a big colourful button with a live counter.
+  Liked Songs only opens when you ask for it.
 - **Downloads** — tap the download icon on any song and it saves to this phone
   (`Download/IfallMusic` where the platform allows it, plus a private offline copy).
   Progress is shown everywhere a download is running — song rows, the Downloads tab
@@ -24,9 +24,8 @@ Flutter, from `ifallertzia/Saxify-v1`. Version **2.5.1**.
 - **Equalizer & 8D spatial audio** — the real Android session equalizer (bands,
   presets) plus seven 8D templates (Orbit, Swift, Cinematic, Dreamy, Focus, Club) with
   orbit-speed, depth and reverb controls and a live orbit meter.
-- **Appearance & Themes** — a calm dark default, 18 deep accents including
-  **Silver**, plus a fully custom RGB mixer you can optionally paint across the app,
-  and an auto-rotating theme with a
+- **Appearance & Themes** — 18 deep accents including **Silver**, plus a fully custom
+  RGB mixer you can paint across the whole app, and an auto-rotating theme with a
   1 / 2 / 2.5 / 3 / 5-minute cadence.
 - **Profile & Settings** — first-launch display name, playback quality, gapless,
   autoplay, resume positions, storage, background-playback guide, diagnostics,

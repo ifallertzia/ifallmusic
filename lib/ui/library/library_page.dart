@@ -173,7 +173,7 @@ class _LibraryPageState extends State<LibraryPage> {
     ];
 
     return AuroraBackdrop(
-      intensity: 0.55,
+      intensity: 0.75,
       child: SafeArea(
         bottom: false,
         child: Column(
@@ -335,7 +335,7 @@ class LibrarySectionPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AuroraBackdrop(
-      intensity: 0.55,
+      intensity: 0.75,
       // A section is pushed onto the APP navigator, which sits outside the
       // shell's Scaffold, so nothing above it supplies a Material. Every
       // Material widget in here (BackButton's InkWell, SongTile, the glass

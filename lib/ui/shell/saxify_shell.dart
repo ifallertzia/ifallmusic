@@ -36,6 +36,18 @@ class _SaxifyShellState extends State<SaxifyShell> {
       .read<RecommendationService>();
   bool _dbToastShown = false;
 
+  /// The nav bar shrinks while the page is being scrolled down and comes back
+  /// as soon as the listener scrolls up again.
+  bool _navCompact = false;
+
+  bool _onScroll(UserScrollNotification notification) {
+    final bool compact = notification.direction == ScrollDirection.reverse;
+    if (compact == _navCompact) return false;
+    if (!mounted) return false;
+    setState(() => _navCompact = compact);
+    return false;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -136,17 +148,19 @@ class _SaxifyShellState extends State<SaxifyShell> {
       child: Scaffold(
         backgroundColor: SaxifyColors.background,
         extendBody: true,
-        body: Stack(
-          children: <Widget>[
-            IndexedStack(
-              index: _shell.tab.index,
-              children: const <Widget>[
-                HomePage(),
-                SearchPage(),
-                LibraryPage(),
-                SettingsPage(),
-              ],
-            ),
+        body: NotificationListener<UserScrollNotification>(
+          onNotification: _onScroll,
+          child: Stack(
+            children: <Widget>[
+              IndexedStack(
+                index: _shell.tab.index,
+                children: const <Widget>[
+                  HomePage(),
+                  SearchPage(),
+                  LibraryPage(),
+                  SettingsPage(),
+                ],
+              ),
             // Now playing + navigation float above the content as one glass unit.
             Align(
               alignment: Alignment.bottomCenter,
@@ -157,6 +171,7 @@ class _SaxifyShellState extends State<SaxifyShell> {
                   const MiniPlayer(),
                   _GlassNavBar(
                     index: _shell.tab.index,
+                    compact: _navCompact,
                     onSelect: (int i) => _shell.select(SaxifyTab.values[i]),
                   ),
                 ],
@@ -165,17 +180,33 @@ class _SaxifyShellState extends State<SaxifyShell> {
           ],
         ),
       ),
+    ),
     );
   }
 }
 
-/// Floating, frosted tab bar — Apple style: rounded, translucent, blurred.
-class _GlassNavBar extends StatelessWidget {
-  const _GlassNavBar({required this.index, required this.onSelect});
+/// Floating, frosted tab bar.
+///
+/// The selection is a sliding pill: it animates to the tab you tap and it can
+/// also be dragged — grab it and slide it sideways and the section follows,
+/// Instagram style. Scrolling a page down shrinks the whole bar (icons only);
+/// scrolling back up brings the labels back.
+class _GlassNavBar extends StatefulWidget {
+  const _GlassNavBar({
+    required this.index,
+    required this.onSelect,
+    required this.compact,
+  });
 
   final int index;
   final ValueChanged<int> onSelect;
+  final bool compact;
 
+  @override
+  State<_GlassNavBar> createState() => _GlassNavBarState();
+}
+
+class _GlassNavBarState extends State<_GlassNavBar> {
   static const List<(IconData, IconData, String)> _items =
       <(IconData, IconData, String)>[
         (Icons.home_outlined, Icons.home_rounded, 'Home'),
@@ -184,10 +215,41 @@ class _GlassNavBar extends StatelessWidget {
         (Icons.settings_outlined, Icons.settings_rounded, 'Settings'),
       ];
 
+  /// Horizontal drag offset of the pill, in pixels.
+  double _drag = 0;
+  bool _dragging = false;
+  double _slotWidth = 0;
+
+  void _onDragStart(DragStartDetails details) {
+    _dragging = true;
+    setState(() {});
+  }
+
+  void _onDragUpdate(DragUpdateDetails details) {
+    if (_slotWidth <= 0) return;
+    final double max = (_items.length - 1 - widget.index) * _slotWidth;
+    final double min = -widget.index * _slotWidth;
+    setState(() {
+      _drag = (_drag + details.delta.dx).clamp(min, max);
+    });
+  }
+
+  void _onDragEnd(DragEndDetails details) {
+    _dragging = false;
+    if (_slotWidth > 0) {
+      final int moved = (_drag / _slotWidth).round();
+      final int target = (widget.index + moved).clamp(0, _items.length - 1);
+      if (target != widget.index) widget.onSelect(target);
+    }
+    setState(() => _drag = 0);
+  }
+
   @override
   Widget build(BuildContext context) {
     final SaxifyAccent accent = context.accent;
     final double bottomInset = MediaQuery.paddingOf(context).bottom;
+    final bool compact = widget.compact;
+
     return Padding(
       padding: EdgeInsets.fromLTRB(
         12,
@@ -195,42 +257,90 @@ class _GlassNavBar extends StatelessWidget {
         12,
         bottomInset > 0 ? bottomInset * 0.5 + 6 : 10,
       ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(SaxifyTheme.radiusLg),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 240),
+        curve: Curves.easeOutCubic,
+        height: compact ? 46 : 66,
+        padding: EdgeInsets.symmetric(horizontal: 6, vertical: compact ? 5 : 7),
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          color: const Color(0xFF07070A).withValues(alpha: 0.72),
+          borderRadius: BorderRadius.circular(SaxifyTheme.radiusLg),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+          boxShadow: <BoxShadow>[
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.6),
+              blurRadius: 30,
+              spreadRadius: -12,
+              offset: const Offset(0, 14),
+            ),
+          ],
+        ),
         child: BackdropFilter(
           filter: GlassBlur.thickFilter,
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: const Color(0xFF07070A).withValues(alpha: 0.72),
-              borderRadius: BorderRadius.circular(SaxifyTheme.radiusLg),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
-              boxShadow: <BoxShadow>[
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.6),
-                  blurRadius: 30,
-                  spreadRadius: -12,
-                  offset: const Offset(0, 14),
-                ),
-              ],
-            ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 7),
-              child: Row(
-                children: <Widget>[
-                  for (int i = 0; i < _items.length; i++)
-                    Expanded(
-                      child: _NavItem(
-                        outlined: _items[i].$1,
-                        filled: _items[i].$2,
-                        label: _items[i].$3,
-                        selected: index == i,
-                        accent: accent,
-                        onTap: () => onSelect(i),
+          child: LayoutBuilder(
+            builder: (BuildContext context, BoxConstraints c) {
+              final double slot = c.maxWidth / _items.length;
+              _slotWidth = slot;
+              final double pillWidth = slot * 0.84;
+              final double left =
+                  widget.index * slot + (slot - pillWidth) / 2 + _drag;
+
+              return GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onHorizontalDragStart: _onDragStart,
+                onHorizontalDragUpdate: _onDragUpdate,
+                onHorizontalDragEnd: _onDragEnd,
+                child: Stack(
+                  children: <Widget>[
+                    // ---- the sliding pill --------------------------------
+                    AnimatedPositioned(
+                      duration: _dragging
+                          ? Duration.zero
+                          : const Duration(milliseconds: 260),
+                      curve: Curves.easeOutCubic,
+                      left: left,
+                      top: 0,
+                      bottom: 0,
+                      width: pillWidth,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(
+                            SaxifyTheme.radiusMd,
+                          ),
+                          gradient: LinearGradient(
+                            colors: <Color>[
+                              accent.primary.withValues(alpha: 0.30),
+                              accent.secondary.withValues(alpha: 0.18),
+                            ],
+                          ),
+                          border: Border.all(
+                            color: accent.primary.withValues(alpha: 0.45),
+                          ),
+                        ),
                       ),
                     ),
-                ],
-              ),
-            ),
+                    // ---- icons + labels -----------------------------------
+                    Row(
+                      children: <Widget>[
+                        for (int i = 0; i < _items.length; i++)
+                          Expanded(
+                            child: _NavItem(
+                              outlined: _items[i].$1,
+                              filled: _items[i].$2,
+                              label: _items[i].$3,
+                              selected: widget.index == i,
+                              compact: compact,
+                              accent: accent,
+                              onTap: () => widget.onSelect(i),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              );
+            },
           ),
         ),
       ),
@@ -244,6 +354,7 @@ class _NavItem extends StatelessWidget {
     required this.filled,
     required this.label,
     required this.selected,
+    required this.compact,
     required this.accent,
     required this.onTap,
   });
@@ -252,6 +363,7 @@ class _NavItem extends StatelessWidget {
   final IconData filled;
   final String label;
   final bool selected;
+  final bool compact;
   final SaxifyAccent accent;
   final VoidCallback onTap;
 
@@ -262,44 +374,39 @@ class _NavItem extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(SaxifyTheme.radiusMd),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 220),
-          curve: Curves.easeOutCubic,
-          padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 4),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(SaxifyTheme.radiusMd),
-            color: selected
-                ? accent.primary.withValues(alpha: 0.16)
-                : Colors.transparent,
-            border: Border.all(
-              color: selected
-                  ? accent.primary.withValues(alpha: 0.35)
-                  : Colors.transparent,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Icon(
+              selected ? filled : outlined,
+              size: compact ? 21 : 23,
+              color: selected ? Colors.white : SaxifyColors.textMuted,
             ),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              Icon(
-                selected ? filled : outlined,
-                size: 23,
-                color: selected ? accent.primary : SaxifyColors.textMuted,
-              ),
-              const SizedBox(height: 3),
-              FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  style: TextStyle(
-                    fontSize: 10.5,
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                    color: selected ? accent.primary : SaxifyColors.textMuted,
+            // The label retires when the bar shrinks, so the icon always
+            // stays centred instead of being pushed upwards.
+            AnimatedSize(
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOutCubic,
+              child: SizedBox(
+                height: compact ? 0 : 16,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: selected
+                          ? FontWeight.w700
+                          : FontWeight.w500,
+                      color: selected ? Colors.white : SaxifyColors.textMuted,
+                    ),
                   ),
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

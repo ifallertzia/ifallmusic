@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 
 import '../core/models/song.dart';
-import '../core/theme/saxify_accents.dart';
 
-/// A compact source-quality label. In the default neutral theme only the text
-/// follows the user's rotating/custom colour; the rest of the app stays black
-/// and understated unless they enable the full accent theme in Settings.
+/// A tiny premium mark for album-master sources.
+///
+/// Ordinary sources render nothing at all — no "Normal quality" label — so the
+/// rows keep their rhythm. The badge is a small gold plate: micro "HD"
+/// lettering pressed into the background with a premium crest on top. It is
+/// deliberately small enough to sit next to a title without competing with it.
 class QualityBadge extends StatelessWidget {
   const QualityBadge({
     super.key,
@@ -16,31 +18,70 @@ class QualityBadge extends StatelessWidget {
   final QualityTier quality;
   final bool compact;
 
+  static const Color _goldTop = Color(0xFFFFF0BE);
+  static const Color _goldMid = Color(0xFFE3B04B);
+  static const Color _goldBottom = Color(0xFFA9761A);
+
   @override
   Widget build(BuildContext context) {
-    final bool high = quality == QualityTier.high;
-    final Color textColor = high ? context.qualityAccent.primary : Colors.white70;
+    if (quality != QualityTier.high) return const SizedBox.shrink();
+
+    final double width = compact ? 19 : 22;
+    final double height = compact ? 12.5 : 14.5;
+    const Color ink = Color(0xFF3B2606);
+
     return Tooltip(
-      message: high
-          ? 'Album-master source, not a bitrate or lossless guarantee'
-          : 'Audio from a video upload',
+      message: 'Premium · album-master source',
       child: Container(
-        padding: EdgeInsets.symmetric(
-          horizontal: compact ? 5 : 6,
-          vertical: compact ? 2 : 3,
-        ),
+        width: width,
+        height: height,
         decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: .62),
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(4.5),
+          gradient: const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: <Color>[_goldTop, _goldMid, _goldBottom],
+          ),
+          boxShadow: <BoxShadow>[
+            BoxShadow(
+              color: const Color(0xFFE3B04B).withValues(alpha: 0.35),
+              blurRadius: 6,
+              offset: const Offset(0, 1.5),
+            ),
+          ],
         ),
-        child: Text(
-          high ? 'High quality music' : 'Normal quality',
-          maxLines: 1,
-          style: TextStyle(
-            color: textColor,
-            fontSize: compact ? 7.5 : 9,
-            fontWeight: FontWeight.w600,
-            height: 1.05,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(4.5),
+          child: Stack(
+            alignment: Alignment.center,
+            children: <Widget>[
+              // Pressed-in micro lettering: HD HD HD across the plate.
+              Positioned.fill(
+                child: FittedBox(
+                  fit: BoxFit.fill,
+                  child: Opacity(
+                    opacity: 0.30,
+                    child: Text(
+                      'HD HD',
+                      style: TextStyle(
+                        fontSize: 6,
+                        height: 1,
+                        letterSpacing: 0.4,
+                        fontWeight: FontWeight.w800,
+                        color: ink.withValues(alpha: 0.9),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              Center(
+                child: Icon(
+                  Icons.workspace_premium_rounded,
+                  size: compact ? 8.5 : 10,
+                  color: ink.withValues(alpha: 0.92),
+                ),
+              ),
+            ],
           ),
         ),
       ),

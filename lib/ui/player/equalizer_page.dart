@@ -204,7 +204,7 @@ class _EqualizerPageState extends State<EqualizerPage> {
   Widget build(BuildContext context) {
     final SettingsService settings = context.read<SettingsService>();
     return AuroraBackdrop(
-      intensity: 0.5,
+      intensity: 0.7,
       child: Scaffold(
         backgroundColor: Colors.transparent,
         appBar: AppBar(

@@ -16,7 +16,7 @@ class DiagnosticsPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AuroraBackdrop(
-      intensity: 0.4,
+      intensity: 0.65,
       child: Scaffold(
         backgroundColor: Colors.transparent,
         appBar: AppBar(title: const Text('Diagnostics')),
