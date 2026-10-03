@@ -27,7 +27,7 @@ class IfallBranding {
   /// Kept in step with pubspec.yaml by `scripts/sync_version.sh`, which CI runs
   /// on every version bump. Do not edit these three by hand.
   static const String versionLabel = '2.7.0';
-  static const String buildLabel = '27';
+  static const String buildLabel = '28';
   static const String tagline = 'Stream beyond limits';
   static const String userAgent = 'IfallMusic/2.7.0 (Flutter)';
 
