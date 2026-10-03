@@ -78,8 +78,7 @@ class PlaylistDetailPage extends StatelessWidget {
                           width: 112,
                           height: 112,
                           decoration: BoxDecoration(
-                            borderRadius:
-                                BorderRadius.circular(SaxifyTheme.radiusMd),
+                            borderRadius: BorderRadius.circular(8),
                             gradient: songs.isEmpty ? accent.gradient : null,
                             boxShadow: <BoxShadow>[
                               BoxShadow(
@@ -94,8 +93,7 @@ class PlaylistDetailPage extends StatelessWidget {
                               ? const Icon(Icons.queue_music_rounded,
                                   size: 40, color: Colors.black87)
                               : ClipRRect(
-                                  borderRadius: BorderRadius.circular(
-                                      SaxifyTheme.radiusMd),
+                                  borderRadius: BorderRadius.circular(8),
                                   child: Artwork(
                                     url: playlist.artwork,
                                     size: 112,

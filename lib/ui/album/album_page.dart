@@ -86,7 +86,7 @@ class _AlbumPageState extends State<AlbumPage> {
                           children: <Widget>[
                             Container(
                               decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(14),
+                                borderRadius: BorderRadius.circular(8),
                                 boxShadow: <BoxShadow>[
                                   BoxShadow(
                                     color: accent.primary.withValues(alpha: 0.30),

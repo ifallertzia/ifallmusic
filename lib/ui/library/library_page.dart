@@ -1440,7 +1440,7 @@ class _CollectionHeader extends StatelessWidget {
                 width: 108,
                 height: 108,
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(SaxifyTheme.radiusMd),
+                  borderRadius: BorderRadius.circular(8),
                   gradient: accent.gradient,
                   boxShadow: <BoxShadow>[
                     BoxShadow(
@@ -1454,9 +1454,7 @@ class _CollectionHeader extends StatelessWidget {
                 child: coverUrl.isEmpty
                     ? Icon(icon, size: 40, color: accent.onAccent)
                     : ClipRRect(
-                        borderRadius: BorderRadius.circular(
-                          SaxifyTheme.radiusMd,
-                        ),
+                        borderRadius: BorderRadius.circular(8),
                         child: Stack(
                           fit: StackFit.expand,
                           children: <Widget>[
