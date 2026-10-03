@@ -1,13 +1,20 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../../config/branding.dart';
 import '../../core/services/artwork_cache.dart';
-import '../../core/theme/saxify_theme.dart';
 
 /// Network artwork that reuses one [ImageProvider] everywhere.
 ///
 /// A route push used to rebuild [Image.network] and flash white. The shared
 /// provider plus the IfallMusic logo fallback keeps the sleeve visible.
+///
+/// Shape policy: every thumbnail in the app renders as a sharp, premium
+/// square with at most [maxThumbRadius] (≈8 px) corner rounding — never
+/// pill-shaped or heavily rounded. Callers may still pass `radius: 0` for
+/// full-bleed covers; anything larger is clamped so the whole app stays
+/// consistent without touching every call site. Sizes are never altered.
 class Artwork extends StatelessWidget {
   const Artwork({
     super.key,
@@ -15,10 +22,13 @@ class Artwork extends StatelessWidget {
     this.size,
     this.width,
     this.height,
-    this.radius = SaxifyTheme.radiusSm,
+    this.radius = maxThumbRadius,
     this.fit = BoxFit.cover,
     this.fallbackIcon = Icons.music_note_rounded,
   });
+
+  /// The app-wide corner radius cap for artwork thumbnails.
+  static const double maxThumbRadius = 8;
 
   final String url;
   final double? size;
@@ -32,10 +42,21 @@ class Artwork extends StatelessWidget {
   Widget build(BuildContext context) {
     final double w = width ?? size ?? 56;
     final double h = height ?? size ?? 56;
-    final Widget placeholder = _Fallback(radius: radius, icon: fallbackIcon);
+    // Fully circular artwork (radius >= half the side) is an avatar — brand
+    // logos / artist bubbles — and keeps its shape. Everything else is a
+    // thumbnail and gets the sharp, premium square treatment.
+    final double minSide = math.min(w, h);
+    final bool circular = minSide.isFinite && radius >= minSide / 2;
+    final double r = radius <= 0
+        ? 0
+        : (circular ? radius : math.min(radius, maxThumbRadius));
+    final double iconSize = (w.isFinite && h.isFinite)
+        ? math.max(16.0, math.min(w, h) * 0.4)
+        : 48.0;
+    final Widget placeholder = _Fallback(iconSize: iconSize, icon: fallbackIcon);
 
     return ClipRRect(
-      borderRadius: BorderRadius.circular(radius),
+      borderRadius: BorderRadius.circular(r),
       child: SizedBox(
         width: w,
         height: h,
@@ -58,9 +79,9 @@ class Artwork extends StatelessWidget {
 }
 
 class _Fallback extends StatelessWidget {
-  const _Fallback({required this.radius, required this.icon});
+  const _Fallback({required this.iconSize, required this.icon});
 
-  final double radius;
+  final double iconSize;
   final IconData icon;
 
   @override
@@ -81,7 +102,7 @@ class _Fallback extends StatelessWidget {
           IfallBranding.splashAsset,
           fit: BoxFit.cover,
           errorBuilder: (BuildContext context, Object error, StackTrace? stack) =>
-              Icon(icon, color: Colors.white.withValues(alpha: 0.9), size: radius * 1.6),
+              Icon(icon, color: Colors.white.withValues(alpha: 0.9), size: iconSize),
         ),
       ],
     );

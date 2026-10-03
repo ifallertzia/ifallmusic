@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -37,12 +39,19 @@ class _SaxifyShellState extends State<SaxifyShell> {
       .read<RecommendationService>();
   bool _dbToastShown = false;
 
-  /// The nav bar shrinks while the page is being scrolled down and comes back
-  /// as soon as the listener scrolls up again.
+  /// The nav bar and mini player shrink when the page is scrolled down and
+  /// STAY compact while the listener remains down the page. The slightest
+  /// upward scroll brings them back to full size. Idle (scroll stop) keeps
+  /// whatever state we are in instead of popping back.
   bool _navCompact = false;
 
   bool _onScroll(UserScrollNotification notification) {
-    final bool compact = notification.direction == ScrollDirection.reverse;
+    // Horizontal rails (carousels) must not toggle the dock.
+    if (notification.metrics.axis != Axis.vertical) return false;
+    final ScrollDirection direction = notification.direction;
+    // Finger lifted / scroll settled: keep the current state.
+    if (direction == ScrollDirection.idle) return false;
+    final bool compact = direction == ScrollDirection.reverse;
     if (compact == _navCompact) return false;
     if (!mounted) return false;
     setState(() => _navCompact = compact);
@@ -169,7 +178,7 @@ class _SaxifyShellState extends State<SaxifyShell> {
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
                   const _NextArtworkPrecache(),
-                  const MiniPlayer(),
+                  MiniPlayer(compact: _navCompact),
                   _GlassNavBar(
                     index: _shell.tab.index,
                     compact: _navCompact,
@@ -251,6 +260,13 @@ class _GlassNavBarState extends State<_GlassNavBar> {
     final double bottomInset = MediaQuery.paddingOf(context).bottom;
     final bool compact = widget.compact;
 
+    // Full width inside the 12px side padding; compact mode pulls the bar in
+    // to an icons-only pill so the whole box (not just its height) shrinks.
+    final double fullWidth =
+        math.max(0.0, MediaQuery.sizeOf(context).width - 24);
+    final double barWidth =
+        compact ? math.min(fullWidth, 256.0) : fullWidth;
+
     return Padding(
       padding: EdgeInsets.fromLTRB(
         12,
@@ -261,6 +277,7 @@ class _GlassNavBarState extends State<_GlassNavBar> {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 240),
         curve: Curves.easeOutCubic,
+        width: barWidth,
         height: compact ? 46 : 66,
         padding: EdgeInsets.symmetric(horizontal: 6, vertical: compact ? 5 : 7),
         clipBehavior: Clip.antiAlias,

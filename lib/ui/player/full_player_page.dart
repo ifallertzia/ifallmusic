@@ -1,7 +1,9 @@
 import 'dart:math' as math;
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:provider/provider.dart';
@@ -25,8 +27,17 @@ import '../widgets/song_menu.dart';
 import '../widgets/song_download_button.dart';
 import '../widgets/song_tile.dart';
 import 'equalizer_page.dart';
+import 'player_palette.dart';
 
 /// The full-screen player.
+///
+/// Layout, top to bottom: lightweight header, square artwork (the visual
+/// focus), song info, seek bar, transport controls and a bottom-anchored
+/// utility row (Equalizer | Add to Playlist | Speed | Queue). Lyrics live in
+/// their own pull-up sheet at the very bottom, and the whole player can be
+/// dragged downwards to collapse back into the mini player — revealing the
+/// real Home screen underneath (the route below is kept alive because this
+/// page is pushed as a non-opaque route).
 class FullPlayerPage extends StatefulWidget {
   const FullPlayerPage({super.key});
 
@@ -34,43 +45,132 @@ class FullPlayerPage extends StatefulWidget {
   State<FullPlayerPage> createState() => _FullPlayerPageState();
 }
 
-class _FullPlayerPageState extends State<FullPlayerPage> {
+class _FullPlayerPageState extends State<FullPlayerPage>
+    with SingleTickerProviderStateMixin {
+  // ---- seek bar drag ------------------------------------------------------
   bool _dragging = false;
   double _dragValue = 0;
-  double _dismissDrag = 0;
 
-  final ScrollController _playerScrollController = ScrollController();
-  final GlobalKey _lyricsSectionKey = GlobalKey();
-  bool _lyricsRequested = false;
+  // ---- swipe-down collapse ------------------------------------------------
+  double _dismissDrag = 0;
+  double _snapFrom = 0;
+  late final AnimationController _snapBack = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 280),
+  );
+
+  // ---- lyrics sheet -------------------------------------------------------
+  final DraggableScrollableController _lyricsCtrl =
+      DraggableScrollableController();
+  final ValueNotifier<double> _lyricsExtent = ValueNotifier<double>(0);
+  double _lyricsMinExtent = 0.08;
+  static const double _lyricsMaxExtent = 0.88;
+
+  // ---- dynamic artwork palette -------------------------------------------
+  String? _paletteUrl;
+  PlayerPalette _palette = PlayerPalette.fallback;
 
   @override
   void initState() {
     super.initState();
-    _playerScrollController.addListener(_maybeStartLyricsSearch);
-    // The section can already be on screen on a tall device.
-    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeStartLyricsSearch());
+    _snapBack.addListener(_onSnapBackTick);
+    _lyricsCtrl.addListener(_onLyricsExtentChanged);
   }
 
   @override
   void dispose() {
-    _playerScrollController
-      ..removeListener(_maybeStartLyricsSearch)
+    _snapBack
+      ..removeListener(_onSnapBackTick)
       ..dispose();
+    _lyricsCtrl
+      ..removeListener(_onLyricsExtentChanged)
+      ..dispose();
+    _lyricsExtent.dispose();
     super.dispose();
   }
 
-  /// Starts the lyrics lookup only once the section is (nearly) visible:
-  /// opening the player must not fire a network request on its own.
-  void _maybeStartLyricsSearch() {
-    if (!mounted || _lyricsRequested) return;
-    final BuildContext? sectionContext = _lyricsSectionKey.currentContext;
-    if (sectionContext == null) return;
-    final Object? object = sectionContext.findRenderObject();
-    if (object is! RenderBox || !object.attached) return;
-    final double screenHeight = MediaQuery.of(context).size.height;
-    final double top = object.localToGlobal(Offset.zero).dy;
-    if (top < screenHeight * 0.92) setState(() => _lyricsRequested = true);
+  void _onSnapBackTick() {
+    if (!mounted) return;
+    setState(() {
+      _dismissDrag =
+          _snapFrom * (1 - Curves.easeOutCubic.transform(_snapBack.value));
+    });
   }
+
+  void _onLyricsExtentChanged() {
+    if (!_lyricsCtrl.isAttached) return;
+    final double size = _lyricsCtrl.size;
+    // The controller can notify during layout; defer the notification in that
+    // case so dependent widgets never call setState mid-build.
+    final SchedulerPhase phase = SchedulerBinding.instance.schedulerPhase;
+    if (phase == SchedulerPhase.persistentCallbacks ||
+        phase == SchedulerPhase.midFrameMicrotasks) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _lyricsExtent.value = size;
+      });
+    } else {
+      _lyricsExtent.value = size;
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Dynamic backdrop palette
+  // -------------------------------------------------------------------------
+
+  /// Keeps [_palette] in sync with the sleeve of the current song. Cached
+  /// palettes apply instantly; new sleeves are analysed off the hot path and
+  /// the backdrop cross-fades once the colours are ready.
+  void _syncPalette(Song song) {
+    final String url = song.thumbnailUrl;
+    if (url == _paletteUrl) return;
+    _paletteUrl = url;
+    final PlayerPalette? hit = PlayerPaletteService.cached(url);
+    if (hit != null) {
+      _palette = hit;
+      return;
+    }
+    PlayerPaletteService.extract(url).then((PlayerPalette palette) {
+      if (!mounted || _paletteUrl != url) return;
+      setState(() => _palette = palette);
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // Swipe-down collapse
+  // -------------------------------------------------------------------------
+
+  void _onDismissStart(DragStartDetails details) => _snapBack.stop();
+
+  void _onDismissUpdate(DragUpdateDetails details) {
+    final double max = MediaQuery.sizeOf(context).height * 0.7;
+    setState(
+      () => _dismissDrag = (_dismissDrag + details.delta.dy).clamp(0.0, max),
+    );
+  }
+
+  void _onDismissEnd(DragEndDetails details) {
+    final double height = MediaQuery.sizeOf(context).height;
+    final double velocity = details.primaryVelocity ?? 0;
+    final bool shouldClose = _dismissDrag > height * 0.22 ||
+        (_dismissDrag > 60 && velocity > 650);
+    if (shouldClose) {
+      // Playback continues untouched — only the route goes away, revealing
+      // the Home shell (and its mini player) that is still alive below.
+      Navigator.of(context).maybePop();
+      return;
+    }
+    _springBack();
+  }
+
+  void _springBack() {
+    if (_dismissDrag <= 0) return;
+    _snapFrom = _dismissDrag;
+    _snapBack.forward(from: 0);
+  }
+
+  // -------------------------------------------------------------------------
+  // Sheets (existing functionality, unchanged wiring)
+  // -------------------------------------------------------------------------
 
   Future<void> _showQueueSheet() {
     return showModalBottomSheet<void>(
@@ -122,6 +222,19 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
     );
   }
 
+  void _toggleLyricsSheet() {
+    if (!_lyricsCtrl.isAttached) return;
+    final bool expanded = _lyricsCtrl.size > _lyricsMinExtent + 0.05;
+    _lyricsCtrl.animateTo(
+      expanded ? _lyricsMinExtent : _lyricsMaxExtent,
+      duration: const Duration(milliseconds: 420),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Build
+  // -------------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
@@ -160,442 +273,597 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
       );
     }
 
+    _syncPalette(song);
+
     final bool liked = library.isLiked(song.id);
     final Duration total = playback.duration == Duration.zero
         ? (song.duration ?? Duration.zero)
         : playback.duration;
 
+    final Size screen = MediaQuery.sizeOf(context);
+    final EdgeInsets insets = MediaQuery.paddingOf(context);
+
+    // Collapsed "Lyrics" bar height, expressed as a sheet fraction.
+    final double peekPx = 56 + insets.bottom;
+    _lyricsMinExtent = screen.height > 0
+        ? (peekPx / screen.height).clamp(0.055, 0.18)
+        : 0.08;
+
+    // 0 → fully expanded, 1 → dragged far enough to collapse.
+    final double dismissP = screen.height > 0
+        ? (_dismissDrag / (screen.height * 0.42)).clamp(0.0, 1.0)
+        : 0.0;
+
     return Scaffold(
-      backgroundColor: SaxifyColors.background,
-      body: GestureDetector(
-        onVerticalDragStart: (_) => _dismissDrag = 0,
-        onVerticalDragUpdate: (details) => setState(
-          () => _dismissDrag = (_dismissDrag + details.delta.dy).clamp(0, 400),
-        ),
-        onVerticalDragEnd: (details) {
-          if (_dismissDrag > 110 ||
-              (_dismissDrag > 25 && (details.primaryVelocity ?? 0) > 700)) {
-            Navigator.of(context).maybePop();
-          }
-          setState(() => _dismissDrag = 0);
-        },
-        onVerticalDragCancel: () => setState(() => _dismissDrag = 0),
-        child: Transform.translate(
-          offset: Offset(0, _dismissDrag),
+      // Transparent so the Home shell below the (non-opaque) route shows
+      // through while the player is being dragged down.
+      backgroundColor: Colors.transparent,
+      body: Transform.translate(
+        offset: Offset(0, _dismissDrag),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(30 * dismissP),
           child: Stack(
+            fit: StackFit.expand,
             children: <Widget>[
-              // Ambient backdrop.
-              Positioned.fill(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: <Color>[
-                        accent.primary.withValues(alpha: 0.30),
-                        accent.secondary.withValues(alpha: 0.10),
-                        SaxifyColors.background,
-                        SaxifyColors.background,
+              // ---- dynamic, artwork-driven backdrop ----------------------
+              Opacity(
+                opacity: (1 - dismissP * 1.05).clamp(0.0, 1.0),
+                child: _PlayerBackdrop(palette: _palette),
+              ),
+
+              // ---- main content (drag down anywhere here to collapse) ----
+              GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onVerticalDragStart: _onDismissStart,
+                onVerticalDragUpdate: _onDismissUpdate,
+                onVerticalDragEnd: _onDismissEnd,
+                onVerticalDragCancel: _springBack,
+                child: Opacity(
+                  opacity: (1 - dismissP * 0.35).clamp(0.0, 1.0),
+                  child: SafeArea(
+                    bottom: false,
+                    child: Column(
+                      children: <Widget>[
+                        _buildTopBar(playback, song),
+                        Expanded(
+                          child: Column(
+                            children: <Widget>[
+                              // ---- artwork: the visual focus -------------
+                              Expanded(
+                                child: Padding(
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 10),
+                                  child: Center(
+                                    child: _buildArtwork(song, dismissP),
+                                  ),
+                                ),
+                              ),
+                              _buildTitleRow(song, library, liked, accent),
+                              _buildSeekBar(playback, total),
+                              _buildTransport(playback),
+                              const SizedBox(height: 10),
+                              _buildUtilityRow(playback, library, song),
+                              // Room for the collapsed lyrics bar + system
+                              // navigation / gesture inset.
+                              SizedBox(height: peekPx + 12),
+                            ],
+                          ),
+                        ),
                       ],
-                      stops: const <double>[0, 0.28, 0.62, 1],
                     ),
                   ),
                 ),
               ),
-              Positioned.fill(
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
-                  child: const SizedBox.shrink(),
+
+              // ---- lyrics: a dedicated pull-up experience ----------------
+              _LyricsSheet(
+                song: song,
+                controller: _lyricsCtrl,
+                extentListenable: _lyricsExtent,
+                minExtent: _lyricsMinExtent,
+                maxExtent: _lyricsMaxExtent,
+                palette: _palette,
+                onHeaderTap: _toggleLyricsSheet,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ---- top bar -------------------------------------------------------------
+
+  Widget _buildTopBar(PlaybackService playback, Song song) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(6, 2, 6, 0),
+      child: Row(
+        children: <Widget>[
+          IconButton(
+            tooltip: 'Minimize',
+            icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 30),
+            onPressed: () => Navigator.of(context).maybePop(),
+          ),
+          Expanded(
+            child: Column(
+              children: <Widget>[
+                const Text(
+                  'NOW PLAYING',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 10,
+                    letterSpacing: 1.8,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'From your queue',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: Colors.white.withValues(alpha: 0.6),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (playback.lastError != null)
+            IconButton(
+              tooltip: 'Mail this error to ifallertzia so he can fix the bug',
+              icon: const Icon(Icons.bug_report_outlined),
+              onPressed: () async {
+                final bool opened = await PlaybackErrorReporter.compose(
+                  playback.lastError!,
+                );
+                if (!opened) {
+                  showAppNotice(
+                    'No email app available. Use MAIL ERROR on the failure message to copy the report.',
+                  );
+                }
+              },
+            ),
+          IconButton(
+            tooltip: 'Lyrics',
+            icon: const Icon(Icons.lyrics_outlined),
+            onPressed: _toggleLyricsSheet,
+          ),
+          IconButton(
+            tooltip: 'Sleep Timer',
+            icon: const Icon(Icons.bedtime_rounded),
+            onPressed: () => _showSleepSheet(playback),
+          ),
+          IconButton(
+            tooltip: 'More',
+            icon: const Icon(Icons.more_horiz_rounded),
+            onPressed: () => showSongSheet(context, song),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ---- artwork --------------------------------------------------------------
+
+  Widget _buildArtwork(Song song, double dismissP) {
+    return ValueListenableBuilder<double>(
+      valueListenable: _lyricsExtent,
+      builder: (BuildContext context, double extent, Widget? _) {
+        // Shrink the sleeve as the lyrics sheet rises and as the player is
+        // dragged down towards the mini player.
+        final double lyricsRange = 0.60 - _lyricsMinExtent;
+        final double lyricsP = lyricsRange <= 0
+            ? 0
+            : ((extent - _lyricsMinExtent) / lyricsRange).clamp(0.0, 1.0);
+        final double scale = (1 - 0.34 * lyricsP) * (1 - 0.18 * dismissP);
+
+        return LayoutBuilder(
+          builder: (BuildContext context, BoxConstraints c) {
+            double side = math.min(
+              c.maxWidth.isFinite ? c.maxWidth - 56 : 320.0,
+              c.maxHeight.isFinite ? c.maxHeight - 12 : 320.0,
+            );
+            side = side.clamp(0.0, 420.0) * scale;
+            if (side <= 10) return const SizedBox.shrink();
+
+            return Container(
+              width: side,
+              height: side,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(8),
+                boxShadow: <BoxShadow>[
+                  BoxShadow(
+                    color: _palette.glow.withValues(alpha: 0.35),
+                    blurRadius: 80,
+                    spreadRadius: -18,
+                    offset: const Offset(0, 26),
+                  ),
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.55),
+                    blurRadius: 40,
+                    spreadRadius: -8,
+                    offset: const Offset(0, 18),
+                  ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Hero(
+                  tag: 'player-artwork-${song.id}',
+                  child: Artwork(
+                    url: song.thumbnailUrl,
+                    radius: 8,
+                    size: double.infinity,
+                  ),
                 ),
               ),
-              SafeArea(
-                child: Column(
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // ---- song information ------------------------------------------------------
+
+  Widget _buildTitleRow(
+    Song song,
+    LibraryService library,
+    bool liked,
+    SaxifyAccent accent,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 6, 12, 0),
+      child: Row(
+        children: <Widget>[
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Text(
+                  song.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.spaceGrotesk(
+                    fontSize: 21,
+                    fontWeight: FontWeight.w700,
+                    height: 1.15,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  song.artist,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 13.5,
+                    color: SaxifyColors.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 6),
+          SongDownloadButton(song: song, size: 40),
+          IconButton(
+            iconSize: 24,
+            tooltip: liked ? 'Remove from Liked' : 'Like',
+            icon: Icon(
+              liked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+              color: liked ? accent.primary : SaxifyColors.textMuted,
+            ),
+            onPressed: () => library.toggleLike(song),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ---- seek bar ----------------------------------------------------------------
+
+  Widget _buildSeekBar(PlaybackService playback, Duration total) {
+    return StreamBuilder<Duration>(
+      stream: playback.positionStream,
+      initialData: playback.position,
+      builder: (BuildContext context, AsyncSnapshot<Duration> snap) {
+        final Duration position = snap.data ?? Duration.zero;
+        final double fraction = total.inMilliseconds == 0
+            ? 0
+            : (position.inMilliseconds / total.inMilliseconds).clamp(0.0, 1.0);
+        final double value = _dragging ? _dragValue : fraction;
+
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+          child: Column(
+            children: <Widget>[
+              SliderTheme(
+                data: SliderTheme.of(context).copyWith(
+                  trackHeight: 3.4,
+                  activeTrackColor: Colors.white,
+                  inactiveTrackColor: Colors.white.withValues(alpha: 0.22),
+                  thumbColor: Colors.white,
+                  thumbShape: const RoundSliderThumbShape(
+                    enabledThumbRadius: 6,
+                    pressedElevation: 3,
+                  ),
+                  overlayShape: const RoundSliderOverlayShape(
+                    overlayRadius: 15,
+                  ),
+                  overlayColor: Colors.white.withValues(alpha: 0.12),
+                ),
+                child: Slider(
+                  value: value,
+                  onChanged: (double v) => setState(() {
+                    _dragging = true;
+                    _dragValue = v;
+                  }),
+                  onChangeEnd: (double v) async {
+                    setState(() => _dragging = false);
+                    await playback.seekFraction(v);
+                  },
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: <Widget>[
-                    // ---- top bar -------------------------------------------------
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(6, 4, 6, 0),
-                      child: Row(
-                        children: <Widget>[
-                          IconButton(
-                            icon: const Icon(
-                              Icons.keyboard_arrow_down_rounded,
-                              size: 30,
-                            ),
-                            onPressed: () => Navigator.of(context).maybePop(),
-                          ),
-                          Expanded(
-                            child: Column(
-                              children: <Widget>[
-                                Text(
-                                  'NOW PLAYING',
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    letterSpacing: 1.8,
-                                    fontWeight: FontWeight.w700,
-                                    color: accent.primary,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  'From your queue',
-                                  style: TextStyle(
-                                    fontSize: 11.5,
-                                    color: accent.primary.withValues(
-                                      alpha: 0.75,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          if (playback.lastError != null)
-                            IconButton(
-                              tooltip:
-                                  'Mail this error to ifallertzia so he can fix the bug',
-                              icon: const Icon(Icons.bug_report_outlined),
-                              onPressed: () async {
-                                final opened =
-                                    await PlaybackErrorReporter.compose(
-                                      playback.lastError!,
-                                    );
-                                if (!opened)
-                                  showAppNotice(
-                                    'No email app available. Use MAIL ERROR on the failure message to copy the report.',
-                                  );
-                              },
-                            ),
-                          IconButton(
-                            tooltip: 'Lyrics',
-                            icon: const Icon(Icons.lyrics_outlined),
-                            onPressed: () => showLyricsPanel(context, song),
-                          ),
-                          // ---- Sleep Timer (Top Right) ----
-                          IconButton(
-                            tooltip: 'Sleep Timer',
-                            icon: const Icon(Icons.bedtime_rounded),
-                            onPressed: () => _showSleepSheet(playback),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.more_horiz_rounded),
-                            onPressed: () => showSongSheet(context, song),
-                          ),
+                    Text(
+                      Fmt.clock(
+                        _dragging
+                            ? Duration(
+                                milliseconds:
+                                    (total.inMilliseconds * _dragValue)
+                                        .round(),
+                              )
+                            : position,
+                      ),
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        color: SaxifyColors.textMuted,
+                        fontFeatures: <FontFeature>[
+                          FontFeature.tabularFigures(),
                         ],
                       ),
                     ),
-
-                    // ---- artwork + controls + lyrics (one scroll) --------------
-                    Expanded(
-                      child: LayoutBuilder(
-                        builder: (BuildContext layoutContext, BoxConstraints c) {
-                          final double art = math.min(
-                            c.maxWidth - 68,
-                            c.maxHeight * 0.44,
-                          );
-                          return SingleChildScrollView(
-                            controller: _playerScrollController,
-                            padding: EdgeInsets.only(
-                              bottom: MediaQuery.paddingOf(context).bottom + 28,
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisSize: MainAxisSize.min,
-                              children: <Widget>[
-                                // ---- artwork ---------------------------------
-                                Center(
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 34,
-                                    ),
-                                    child: SizedBox(
-                                      height: art,
-                                      width: art,
-                                      child: Container(
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(
-                                  SaxifyTheme.radiusLg,
-                                ),
-                                boxShadow: <BoxShadow>[
-                                  BoxShadow(
-                                    color: accent.primary.withValues(
-                                      alpha: 0.35,
-                                    ),
-                                    blurRadius: 60,
-                                    offset: const Offset(0, 24),
-                                    spreadRadius: -14,
-                                  ),
-                                  BoxShadow(
-                                    color: Colors.black.withValues(alpha: 0.6),
-                                    blurRadius: 40,
-                                    offset: const Offset(0, 18),
-                                  ),
-                                ],
-                              ),
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(
-                                  SaxifyTheme.radiusLg,
-                                ),
-                                child: Hero(
-                                  tag: 'player-artwork-${song.id}',
-                                  child: Artwork(
-                                    url: song.thumbnailUrl,
-                                    radius: SaxifyTheme.radiusLg,
-                                    size: double.infinity,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
+                    if (playback.isLoading)
+                      const SizedBox(
+                        width: 11,
+                        height: 11,
+                        child: CircularProgressIndicator(strokeWidth: 1.6),
+                      )
+                    else
+                      Text(
+                        '-${Fmt.clock(total - position)}',
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          color: SaxifyColors.textMuted,
+                          fontFeatures: <FontFeature>[
+                            FontFeature.tabularFigures(),
+                          ],
                         ),
                       ),
-
-                    // ---- title row ----------------------------------------------
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(26, 22, 14, 0),
-                      child: Row(
-                        children: <Widget>[
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisSize: MainAxisSize.min,
-                              children: <Widget>[
-                                Text(
-                                  song.title,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: GoogleFonts.spaceGrotesk(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.w700,
-                                    height: 1.2,
-                                  ),
-                                ),
-                                const SizedBox(height: 5),
-                                Text(
-                                  song.artist,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontSize: 13.5,
-                                    color: SaxifyColors.textSecondary,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          SongDownloadButton(song: song, size: 42),
-                          IconButton(
-                            iconSize: 24,
-                            icon: Icon(
-                              liked
-                                  ? Icons.favorite_rounded
-                                  : Icons.favorite_border_rounded,
-                              color: liked
-                                  ? accent.primary
-                                  : SaxifyColors.textMuted,
-                            ),
-                            onPressed: () => library.toggleLike(song),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    // ---- seek ----------------------------------------------------
-                    StreamBuilder<Duration>(
-                      stream: playback.positionStream,
-                      initialData: playback.position,
-                      builder:
-                          (BuildContext context, AsyncSnapshot<Duration> snap) {
-                            final Duration position =
-                                snap.data ?? Duration.zero;
-                            final double fraction = total.inMilliseconds == 0
-                                ? 0
-                                : (position.inMilliseconds /
-                                          total.inMilliseconds)
-                                      .clamp(0.0, 1.0);
-                            final double value = _dragging
-                                ? _dragValue
-                                : fraction;
-
-                            return Padding(
-                              padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
-                              child: Column(
-                                children: <Widget>[
-                                  Slider(
-                                    value: value,
-                                    onChanged: (double v) => setState(() {
-                                      _dragging = true;
-                                      _dragValue = v;
-                                    }),
-                                    onChangeEnd: (double v) async {
-                                      setState(() => _dragging = false);
-                                      await playback.seekFraction(v);
-                                    },
-                                  ),
-                                  Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 10,
-                                    ),
-                                    child: Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.spaceBetween,
-                                      children: <Widget>[
-                                        Text(
-                                          Fmt.clock(
-                                            _dragging
-                                                ? Duration(
-                                                    milliseconds:
-                                                        (total.inMilliseconds *
-                                                                _dragValue)
-                                                            .round(),
-                                                  )
-                                                : position,
-                                          ),
-                                          style: const TextStyle(
-                                            fontSize: 11.5,
-                                            color: SaxifyColors.textMuted,
-                                            fontFeatures: <FontFeature>[
-                                              FontFeature.tabularFigures(),
-                                            ],
-                                          ),
-                                        ),
-                                        if (playback.isLoading)
-                                          const SizedBox(
-                                            width: 11,
-                                            height: 11,
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 1.6,
-                                            ),
-                                          )
-                                        else
-                                          Text(
-                                            '-${Fmt.clock(total - position)}',
-                                            style: const TextStyle(
-                                              fontSize: 11.5,
-                                              color: SaxifyColors.textMuted,
-                                              fontFeatures: <FontFeature>[
-                                                FontFeature.tabularFigures(),
-                                              ],
-                                            ),
-                                          ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            );
-                          },
-                    ),
-
-                    // ---- transport ----------------------------------------------
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(22, 8, 22, 0),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: <Widget>[
-                          _TransportIcon(
-                            icon: Icons.shuffle_rounded,
-                            active: playback.shuffleEnabled,
-                            onTap: playback.toggleShuffle,
-                          ),
-                          _TransportIcon(
-                            icon: Icons.skip_previous_rounded,
-                            size: 36,
-                            onTap: playback.previous,
-                          ),
-                          _PlayButton(
-                            playing: playback.isPlaying,
-                            loading: playback.isLoading,
-                            onTap: playback.togglePlayPause,
-                          ),
-                          _TransportIcon(
-                            icon: Icons.skip_next_rounded,
-                            size: 36,
-                            onTap: playback.next,
-                          ),
-                          _TransportIcon(
-                            icon: switch (playback.loopMode) {
-                              LoopMode.one => Icons.repeat_one_rounded,
-                              LoopMode.all => Icons.repeat_rounded,
-                              LoopMode.off => Icons.repeat_rounded,
-                            },
-                            active: playback.loopMode != LoopMode.off,
-                            onTap: playback.cycleLoopMode,
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    // ---- extras --------------------------------------------------
-                    // Equalizer shortcut stays to the left of the playback controls.
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-                      child: Row(
-                        children: <Widget>[
-                          _RoundAction(
-                            icon: Icons.graphic_eq_rounded,
-                            active: false,
-                            onTap: () => Navigator.of(context).push(
-                              MaterialPageRoute<void>(
-                                builder: (_) => const EqualizerPage(),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          // Add to playlist: only the sign, no label and no
-                          // extra dialog row — the circular + sits with the
-                          // other round actions.
-                          _RoundAction(
-                            icon: Icons.add_rounded,
-                            active: library.playlists.any(
-                              (Playlist p) =>
-                                  p.songs.any((Song s) => s.id == song.id),
-                            ),
-                            onTap: () => showAddToPlaylistSheet(context, song),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: SingleChildScrollView(
-                              scrollDirection: Axis.horizontal,
-                              child: Row(
-                                children: <Widget>[
-                                  _ChipButton(
-                                    label: '${playback.speed}x',
-                                    icon: Icons.speed_rounded,
-                                    onTap: () => _showSpeedSheet(playback),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  _ChipButton(
-                                    label: 'Queue',
-                                    icon: Icons.queue_music_rounded,
-                                    onTap: _showQueueSheet,
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    // ---- lyrics ---------------------------------------------
-                    Padding(
-                      key: _lyricsSectionKey,
-                      padding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
-                      child: _lyricsRequested
-                          ? _PlayerLyrics(
-                              key: ValueKey<String>('lyrics-${song.id}'),
-                              song: song,
-                            )
-                          : _LyricsHint(
-                              onShow: () =>
-                                  setState(() => _lyricsRequested = true),
-                            ),
-                    ),
-                              ],
-                            ),
-                          );
-                        },
-                      ),
-                    ),
                   ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // ---- transport -----------------------------------------------------------------
+
+  Widget _buildTransport(PlaybackService playback) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(26, 2, 26, 0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: <Widget>[
+          _TransportIcon(
+            icon: Icons.shuffle_rounded,
+            active: playback.shuffleEnabled,
+            onTap: playback.toggleShuffle,
+          ),
+          _TransportIcon(
+            icon: Icons.skip_previous_rounded,
+            size: 38,
+            onTap: playback.previous,
+          ),
+          _PlayButton(
+            playing: playback.isPlaying,
+            loading: playback.isLoading,
+            glow: _palette.glow,
+            onTap: playback.togglePlayPause,
+          ),
+          _TransportIcon(
+            icon: Icons.skip_next_rounded,
+            size: 38,
+            onTap: playback.next,
+          ),
+          _TransportIcon(
+            icon: switch (playback.loopMode) {
+              LoopMode.one => Icons.repeat_one_rounded,
+              LoopMode.all => Icons.repeat_rounded,
+              LoopMode.off => Icons.repeat_rounded,
+            },
+            active: playback.loopMode != LoopMode.off,
+            onTap: playback.cycleLoopMode,
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ---- bottom utility controls ------------------------------------------------------
+  //
+  // Mandatory order: Equalizer | Add to Playlist | Speed | Queue — anchored to
+  // the bottom of the expanded player, above the collapsed lyrics bar.
+
+  Widget _buildUtilityRow(
+    PlaybackService playback,
+    LibraryService library,
+    Song song,
+  ) {
+    final bool inPlaylist = library.playlists.any(
+      (Playlist p) => p.songs.any((Song s) => s.id == song.id),
+    );
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+      child: Row(
+        children: <Widget>[
+          Expanded(
+            child: _UtilityButton(
+              icon: Icons.graphic_eq_rounded,
+              label: 'Equalizer',
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const EqualizerPage(),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: _UtilityButton(
+              // Playlist-plus glyph: stacked playlist lines + a plus sign.
+              icon: Icons.playlist_add_rounded,
+              label: 'Playlist',
+              active: inPlaylist,
+              onTap: () => showAddToPlaylistSheet(context, song),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: _UtilityButton(
+              icon: Icons.speed_rounded,
+              label: '${playback.speed}x',
+              active: playback.speed != 1.0,
+              onTap: () => _showSpeedSheet(playback),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: _UtilityButton(
+              icon: Icons.queue_music_rounded,
+              label: 'Queue',
+              onTap: _showQueueSheet,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Deep gradient derived from the current sleeve. The [AnimatedContainer]s
+/// cross-fade the colours (~750 ms) whenever a new palette arrives, so the
+/// backdrop feels tied to the artwork instead of a hard theme switch.
+class _PlayerBackdrop extends StatelessWidget {
+  const _PlayerBackdrop({required this.palette});
+
+  final PlayerPalette palette;
+
+  static const Duration _fade = Duration(milliseconds: 750);
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedContainer(
+      duration: _fade,
+      curve: Curves.easeOutCubic,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: <Color>[
+            palette.primary,
+            palette.secondary,
+            SaxifyColors.background,
+          ],
+          stops: const <double>[0.0, 0.55, 1.0],
+        ),
+      ),
+      // A very subtle ambient colour wash behind the artwork area — not a
+      // blurred copy of the sleeve, just its light.
+      child: AnimatedContainer(
+        duration: _fade,
+        curve: Curves.easeOutCubic,
+        decoration: BoxDecoration(
+          gradient: RadialGradient(
+            center: const Alignment(0, -0.45),
+            radius: 1.15,
+            colors: <Color>[
+              palette.glow.withValues(alpha: 0.20),
+              Colors.transparent,
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// One of the four bottom utility controls.
+class _UtilityButton extends StatelessWidget {
+  const _UtilityButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.active = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) {
+    final SaxifyAccent accent = context.accent;
+    final Color fg = active ? accent.primary : SaxifyColors.textSecondary;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          height: 54,
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 7),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            color: active
+                ? accent.primary.withValues(alpha: 0.14)
+                : Colors.white.withValues(alpha: 0.06),
+            border: Border.all(
+              color: active
+                  ? accent.primary.withValues(alpha: 0.55)
+                  : Colors.white.withValues(alpha: 0.10),
+            ),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: <Widget>[
+              Icon(icon, size: 20, color: fg),
+              const SizedBox(height: 3),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.2,
+                    color: fg,
+                  ),
                 ),
               ),
             ],
@@ -606,62 +874,91 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
   }
 }
 
-/// Shown until the listener scrolls to (or taps) the lyrics: a tiny affordance
-/// that costs nothing and never fires a request on its own.
-class _LyricsHint extends StatelessWidget {
-  const _LyricsHint({required this.onShow});
+// ---------------------------------------------------------------------------
+// Lyrics sheet
+// ---------------------------------------------------------------------------
 
-  final VoidCallback onShow;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: TextButton.icon(
-        onPressed: onShow,
-        icon: const Icon(Icons.lyrics_outlined, size: 17),
-        label: const Text(
-          'Lyrics',
-          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-        ),
-      ),
-    );
-  }
-}
-
-/// Lyrics pinned to the bottom of the player.
-///
-/// Deliberately quiet: only the words, a Static / Synced switch and a retry
-/// affordance. No song title (it is already on screen above) and no
-/// "wrong lyrics?" chatter — mismatch reporting stays in the lyrics finder.
-class _PlayerLyrics extends StatefulWidget {
-  const _PlayerLyrics({super.key, required this.song});
+/// The dedicated lyrics experience: a pull-up sheet anchored below the bottom
+/// utility controls. Collapsed it is just a slim "Lyrics" bar; dragged (or
+/// tapped) upwards it takes over most of the screen while the artwork above
+/// shrinks. Fetching only starts once the listener actually opens it, so the
+/// player never fires a lyrics request on its own.
+class _LyricsSheet extends StatefulWidget {
+  const _LyricsSheet({
+    required this.song,
+    required this.controller,
+    required this.extentListenable,
+    required this.minExtent,
+    required this.maxExtent,
+    required this.palette,
+    required this.onHeaderTap,
+  });
 
   final Song song;
+  final DraggableScrollableController controller;
+  final ValueListenable<double> extentListenable;
+  final double minExtent;
+  final double maxExtent;
+  final PlayerPalette palette;
+  final VoidCallback onHeaderTap;
 
   @override
-  State<_PlayerLyrics> createState() => _PlayerLyricsState();
+  State<_LyricsSheet> createState() => _LyricsSheetState();
 }
 
-class _PlayerLyricsState extends State<_PlayerLyrics> {
+class _LyricsSheetState extends State<_LyricsSheet> {
   LyricsResult? _result;
-  bool _loading = true;
-  bool _synced = true;
+  bool _requested = false;
+  bool _loading = false;
   bool _missing = false;
+  bool _synced = true;
+
+  // Auto-centering of the active synced line.
+  final GlobalKey _activeLineKey = GlobalKey();
+  ScrollController? _listController;
+  int _lastActive = -1;
+  DateTime? _holdUntil;
 
   @override
   void initState() {
     super.initState();
-    _load();
+    widget.extentListenable.addListener(_onExtentChanged);
   }
 
   @override
-  void didUpdateWidget(covariant _PlayerLyrics oldWidget) {
+  void dispose() {
+    widget.extentListenable.removeListener(_onExtentChanged);
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant _LyricsSheet oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.extentListenable != widget.extentListenable) {
+      oldWidget.extentListenable.removeListener(_onExtentChanged);
+      widget.extentListenable.addListener(_onExtentChanged);
+    }
     if (oldWidget.song.id != widget.song.id) {
       _result = null;
+      _missing = false;
       _synced = true;
+      _lastActive = -1;
+      if (_requested) _load();
+    }
+  }
+
+  bool get _expanded =>
+      widget.extentListenable.value > widget.minExtent + 0.05;
+
+  void _onExtentChanged() {
+    if (!mounted) return;
+    // First expansion triggers the lookup.
+    if (!_requested && _expanded) {
+      _requested = true;
       _load();
     }
+    // Header chevron + secondary controls depend on the expansion state.
+    setState(() {});
   }
 
   Future<void> _load() async {
@@ -678,12 +975,11 @@ class _PlayerLyricsState extends State<_PlayerLyrics> {
         durationSecs: song.duration?.inSeconds ?? 0,
         videoId: song.id,
       );
-      if (!mounted) return;
+      if (!mounted || song.id != widget.song.id) return;
       setState(() {
         _result = result;
         _loading = false;
-        _missing =
-            result.status == LyricsStatus.notFound ||
+        _missing = result.status == LyricsStatus.notFound ||
             (result.plain.trim().isEmpty && result.lines.isEmpty);
         _synced = result.synced;
       });
@@ -696,153 +992,385 @@ class _PlayerLyricsState extends State<_PlayerLyrics> {
     }
   }
 
+  // ---- header drag: let the collapsed bar be swiped up/down ----------------
+
+  void _onHeaderDragUpdate(DragUpdateDetails details) {
+    if (!widget.controller.isAttached) return;
+    final double height = MediaQuery.sizeOf(context).height;
+    if (height <= 0) return;
+    final double size = (widget.controller.size - details.delta.dy / height)
+        .clamp(widget.minExtent, widget.maxExtent);
+    widget.controller.jumpTo(size);
+  }
+
+  void _onHeaderDragEnd(DragEndDetails details) {
+    if (!widget.controller.isAttached) return;
+    final double velocity = details.primaryVelocity ?? 0;
+    double target;
+    if (velocity < -350) {
+      target = widget.maxExtent;
+    } else if (velocity > 350) {
+      target = widget.minExtent;
+    } else {
+      final double size = widget.controller.size;
+      final double mid = (widget.minExtent + widget.maxExtent) / 2;
+      target = size >= mid ? widget.maxExtent : widget.minExtent;
+    }
+    widget.controller.animateTo(
+      target,
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  // ---- synced-line centering ------------------------------------------------
+
+  void _scheduleCenter(int active, int total) {
+    if (active < 0 || active == _lastActive) return;
+    _lastActive = active;
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _centerActive(active, total),
+    );
+  }
+
+  void _centerActive(int active, int total) {
+    if (!mounted || !_expanded || !_synced) return;
+    final DateTime? hold = _holdUntil;
+    if (hold != null && DateTime.now().isBefore(hold)) return;
+    final BuildContext? lineContext = _activeLineKey.currentContext;
+    if (lineContext != null) {
+      Scrollable.ensureVisible(
+        lineContext,
+        alignment: 0.35,
+        duration: const Duration(milliseconds: 320),
+        curve: Curves.easeOutCubic,
+      );
+      return;
+    }
+    // The active line is far outside the viewport: approximate, then the next
+    // tick will fine-tune via ensureVisible.
+    final ScrollController? sc = _listController;
+    if (sc == null || !sc.hasClients || total <= 0) return;
+    final double max = sc.position.maxScrollExtent;
+    sc.animateTo(
+      (max * active / total).clamp(0.0, max),
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  bool _onScrollNotification(ScrollNotification notification) {
+    final bool userDriven =
+        (notification is ScrollStartNotification &&
+            notification.dragDetails != null) ||
+        (notification is ScrollUpdateNotification &&
+            notification.dragDetails != null);
+    if (userDriven) {
+      _holdUntil = DateTime.now().add(const Duration(seconds: 3));
+    }
+    return false;
+  }
+
+  // ---- build ------------------------------------------------------------------
+
   @override
   Widget build(BuildContext context) {
-    final PlaybackService playback = context.watch<PlaybackService>();
-    final SaxifyAccent accent = context.accent;
+    return DraggableScrollableSheet(
+      controller: widget.controller,
+      minChildSize: widget.minExtent,
+      initialChildSize: widget.minExtent,
+      maxChildSize: widget.maxExtent,
+      snap: true,
+      snapSizes: const <double>[0.55],
+      builder: (BuildContext context, ScrollController scrollController) {
+        _listController = scrollController;
+        final bool expanded = _expanded;
+        return ClipRRect(
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
+          child: BackdropFilter(
+            filter: GlassBlur.thickFilter,
+            child: Container(
+              decoration: BoxDecoration(
+                color: Color.alphaBlend(
+                  widget.palette.primary.withValues(alpha: 0.18),
+                  const Color(0xFF0A0B10),
+                ).withValues(alpha: 0.93),
+                border: Border(
+                  top: BorderSide(
+                    color: Colors.white.withValues(alpha: 0.10),
+                  ),
+                ),
+              ),
+              child: Column(
+                children: <Widget>[
+                  _buildHeader(expanded),
+                  if (expanded && _result != null && !_loading && !_missing)
+                    _buildModeRow(),
+                  Expanded(
+                    child: NotificationListener<ScrollNotification>(
+                      onNotification: _onScrollNotification,
+                      child: _buildBody(scrollController),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildHeader(bool expanded) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: widget.onHeaderTap,
+      onVerticalDragUpdate: _onHeaderDragUpdate,
+      onVerticalDragEnd: _onHeaderDragEnd,
+      child: Column(
+        children: <Widget>[
+          const SizedBox(height: 7),
+          Container(
+            width: 36,
+            height: 4,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.22),
+              borderRadius: BorderRadius.circular(3),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 7, 14, 8),
+            child: Row(
+              children: <Widget>[
+                const Icon(
+                  Icons.lyrics_outlined,
+                  size: 16,
+                  color: SaxifyColors.textMuted,
+                ),
+                const SizedBox(width: 8),
+                const Text(
+                  'Lyrics',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: SaxifyColors.textPrimary,
+                  ),
+                ),
+                const Spacer(),
+                AnimatedRotation(
+                  turns: expanded ? 0.5 : 0,
+                  duration: const Duration(milliseconds: 240),
+                  child: const Icon(
+                    Icons.keyboard_arrow_up_rounded,
+                    size: 22,
+                    color: SaxifyColors.textMuted,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Static / Synced toggle + reload + "find lyrics" — technical options that
+  /// live inside the lyrics area instead of the main player.
+  Widget _buildModeRow() {
     final LyricsResult? result = _result;
     final bool hasSynced = result?.synced ?? false;
     final bool synced = _synced && hasSynced;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 10, 6),
+      child: Row(
+        children: <Widget>[
+          _LyricsModeChip(
+            label: 'Static',
+            selected: !synced,
+            onTap: () => setState(() => _synced = false),
+          ),
+          const SizedBox(width: 8),
+          _LyricsModeChip(
+            label: 'Synced',
+            selected: synced,
+            enabled: hasSynced,
+            onTap: () => setState(() => _synced = true),
+          ),
+          const Spacer(),
+          SizedBox(
+            width: 32,
+            height: 32,
+            child: IconButton(
+              padding: EdgeInsets.zero,
+              iconSize: 17,
+              tooltip: 'Reload lyrics',
+              icon: const Icon(Icons.refresh_rounded),
+              onPressed: _load,
+            ),
+          ),
+          SizedBox(
+            width: 32,
+            height: 32,
+            child: IconButton(
+              padding: EdgeInsets.zero,
+              iconSize: 17,
+              tooltip: 'Find or fix lyrics',
+              icon: const Icon(Icons.manage_search_rounded),
+              onPressed: () => showLyricsPanel(context, widget.song),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
-    if (_loading) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 26),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            SizedBox(
-              width: 14,
-              height: 14,
-              child: CircularProgressIndicator(
-                strokeWidth: 1.6,
-                color: accent.primary,
+  Widget _buildBody(ScrollController scrollController) {
+    final double bottomInset = MediaQuery.paddingOf(context).bottom;
+    final SaxifyAccent accent = context.accent;
+
+    if (!_requested || _loading) {
+      return ListView(
+        controller: scrollController,
+        padding: EdgeInsets.fromLTRB(24, 10, 24, bottomInset + 30),
+        children: <Widget>[
+          if (_loading)
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: <Widget>[
+                SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 1.6,
+                    color: accent.primary,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                const Text(
+                  'Looking for lyrics…',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    color: SaxifyColors.textMuted,
+                  ),
+                ),
+              ],
+            )
+          else
+            const Center(
+              child: Text(
+                'Swipe up to read along',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  color: SaxifyColors.textMuted,
+                ),
               ),
             ),
-            const SizedBox(width: 10),
-            const Text(
-              'Lyrics dhoondh rahe hain…',
-              style: TextStyle(fontSize: 12.5, color: SaxifyColors.textMuted),
-            ),
-          ],
-        ),
+        ],
       );
     }
 
+    final LyricsResult? result = _result;
     if (_missing || result == null) {
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(2, 8, 2, 4),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Text(
-              'iska nahi dundh paya..sorry🥲',
-              style: TextStyle(
-                fontSize: 15,
-                height: 1.35,
-                fontWeight: FontWeight.w700,
-                color: accent.primary,
-              ),
+      return ListView(
+        controller: scrollController,
+        padding: EdgeInsets.fromLTRB(28, 26, 28, bottomInset + 30),
+        children: <Widget>[
+          Icon(
+            Icons.lyrics_outlined,
+            size: 38,
+            color: Colors.white.withValues(alpha: 0.28),
+          ),
+          const SizedBox(height: 14),
+          const Text(
+            'No lyrics for this one yet',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 15.5,
+              fontWeight: FontWeight.w700,
+              color: SaxifyColors.textPrimary,
             ),
-            const SizedBox(height: 8),
-            Text(
-              'shayad ye song playback kisi normal server se play ho raha,'
-              'ya iska artist understand hai,,ya shayad ye song abhi '
-              'underrated hai🥲..sorry again,,ifallertzia isko jaldi '
-              'thik kr denge',
-              style: TextStyle(
-                fontSize: 11,
-                height: 1.55,
-                color: SaxifyColors.textMuted.withValues(alpha: 0.9),
-              ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'This track may be too new or too underrated for the lyrics '
+            'providers. ifallertzia is on it — try again in a bit.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 11.5,
+              height: 1.55,
+              color: SaxifyColors.textMuted.withValues(alpha: 0.9),
             ),
-            const SizedBox(height: 10),
-            TextButton.icon(
+          ),
+          const SizedBox(height: 12),
+          Center(
+            child: TextButton.icon(
               onPressed: _load,
               icon: const Icon(Icons.refresh_rounded, size: 15),
               label: const Text('Try again', style: TextStyle(fontSize: 12)),
             ),
-          ],
-        ),
+          ),
+        ],
       );
     }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        Row(
-          children: <Widget>[
-            _LyricsModeChip(
-              label: 'Static',
-              selected: !synced,
-              onTap: () => setState(() => _synced = false),
-            ),
-            const SizedBox(width: 8),
-            _LyricsModeChip(
-              label: 'Synced',
-              selected: synced,
-              enabled: hasSynced,
-              onTap: () => setState(() => _synced = true),
-            ),
-            const Spacer(),
-            SizedBox(
-              width: 30,
-              height: 30,
-              child: IconButton(
-                padding: EdgeInsets.zero,
-                iconSize: 17,
-                tooltip: 'Reload lyrics',
-                icon: const Icon(Icons.refresh_rounded),
-                onPressed: _load,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 14),
-        if (synced)
-          StreamBuilder<Duration>(
-            stream: playback.positionStream,
-            initialData: playback.position,
-            builder: (
-              BuildContext context,
-              AsyncSnapshot<Duration> snap,
-            ) {
-              final int positionMs = (snap.data ?? Duration.zero).inMilliseconds;
-              final int active = activeLineIndex(result.lines, positionMs);
-              return ListView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                padding: EdgeInsets.zero,
-                itemCount: result.lines.length,
-                itemBuilder: (BuildContext context, int i) {
-                  final bool isActive = i == active;
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 7),
-                    child: Text(
-                      result.lines[i].text,
-                      style: TextStyle(
-                        fontSize: isActive ? 17 : 15.5,
-                        height: 1.38,
-                        fontWeight:
-                            isActive ? FontWeight.w700 : FontWeight.w500,
-                        color: isActive ? Colors.white : SaxifyColors.textMuted,
-                      ),
-                    ),
-                  );
-                },
-              );
-            },
-          )
-        else
+    final bool hasSynced = result.synced && result.lines.isNotEmpty;
+    final bool synced = _synced && hasSynced;
+
+    if (!synced) {
+      return ListView(
+        controller: scrollController,
+        padding: EdgeInsets.fromLTRB(24, 6, 24, bottomInset + 40),
+        children: <Widget>[
           Text(
             result.plain,
             style: const TextStyle(
-              fontSize: 15.5,
-              height: 1.55,
+              fontSize: 16,
+              height: 1.6,
+              fontWeight: FontWeight.w500,
               color: SaxifyColors.textSecondary,
             ),
           ),
-      ],
+        ],
+      );
+    }
+
+    final PlaybackService playback = context.watch<PlaybackService>();
+    return StreamBuilder<Duration>(
+      stream: playback.positionStream,
+      initialData: playback.position,
+      builder: (BuildContext context, AsyncSnapshot<Duration> snap) {
+        final int positionMs = (snap.data ?? Duration.zero).inMilliseconds;
+        final int active = activeLineIndex(result.lines, positionMs);
+        _scheduleCenter(active, result.lines.length);
+
+        return ListView.builder(
+          controller: scrollController,
+          padding: EdgeInsets.fromLTRB(24, 6, 24, bottomInset + 120),
+          itemCount: result.lines.length,
+          itemBuilder: (BuildContext context, int i) {
+            final bool isActive = i == active;
+            final Widget line = Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: AnimatedDefaultTextStyle(
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOut,
+                style: TextStyle(
+                  fontSize: isActive ? 19 : 16.5,
+                  height: 1.35,
+                  fontWeight: isActive ? FontWeight.w800 : FontWeight.w600,
+                  color: isActive
+                      ? Colors.white
+                      : Colors.white.withValues(alpha: 0.38),
+                ),
+                child: Text(result.lines[i].text),
+              ),
+            );
+            return isActive
+                ? KeyedSubtree(key: _activeLineKey, child: line)
+                : line;
+          },
+        );
+      },
     );
   }
 }
@@ -873,7 +1401,7 @@ class _LyricsModeChip extends StatelessWidget {
         borderRadius: BorderRadius.circular(999),
         onTap: enabled ? onTap : null,
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(999),
             border: Border.all(color: border),
@@ -884,7 +1412,7 @@ class _LyricsModeChip extends StatelessWidget {
           child: Text(
             label,
             style: TextStyle(
-              fontSize: 12,
+              fontSize: 11.5,
               fontWeight: FontWeight.w600,
               color: selected ? Colors.white : SaxifyColors.textMuted,
             ),
@@ -899,45 +1427,48 @@ class _PlayButton extends StatelessWidget {
   const _PlayButton({
     required this.playing,
     required this.loading,
+    required this.glow,
     required this.onTap,
   });
 
   final bool playing;
   final bool loading;
+  final Color glow;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final SaxifyAccent accent = context.accent;
     return GestureDetector(
       onTap: onTap,
-      child: Container(
-        width: 70,
-        height: 70,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 750),
+        curve: Curves.easeOutCubic,
+        width: 68,
+        height: 68,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          gradient: accent.gradient,
+          color: Colors.white,
           boxShadow: <BoxShadow>[
             BoxShadow(
-              color: accent.primary.withValues(alpha: 0.45),
-              blurRadius: 30,
+              color: glow.withValues(alpha: 0.55),
+              blurRadius: 34,
               offset: const Offset(0, 10),
               spreadRadius: -6,
             ),
           ],
         ),
         child: loading
-            ? Padding(
-                padding: const EdgeInsets.all(20),
+            ? const Padding(
+                padding: EdgeInsets.all(20),
                 child: CircularProgressIndicator(
                   strokeWidth: 2.5,
-                  color: accent.onAccent,
+                  color: Colors.black,
                 ),
               )
             : Icon(
                 playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
                 size: 38,
-                color: accent.onAccent,
+                color: Colors.black,
               ),
       ),
     );
@@ -966,103 +1497,6 @@ class _TransportIcon extends StatelessWidget {
       icon: Icon(
         icon,
         color: active ? accent.primary : SaxifyColors.textPrimary,
-      ),
-    );
-  }
-}
-
-/// Round glass action button (the sound panel trigger).
-class _RoundAction extends StatelessWidget {
-  const _RoundAction({
-    required this.icon,
-    required this.onTap,
-    this.active = false,
-  });
-
-  final IconData icon;
-  final VoidCallback onTap;
-  final bool active;
-
-  @override
-  Widget build(BuildContext context) {
-    final SaxifyAccent accent = context.accent;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        customBorder: const CircleBorder(),
-        child: Container(
-          width: 46,
-          height: 46,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: active
-                ? accent.primary.withValues(alpha: 0.22)
-                : Colors.white.withValues(alpha: 0.07),
-            border: Border.all(
-              color: active
-                  ? accent.primary.withValues(alpha: 0.6)
-                  : Colors.white.withValues(alpha: 0.12),
-            ),
-          ),
-          child: Icon(
-            icon,
-            size: 21,
-            color: active ? accent.primary : SaxifyColors.textSecondary,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ChipButton extends StatelessWidget {
-  const _ChipButton({
-    required this.label,
-    required this.icon,
-    required this.onTap,
-  });
-
-  final String label;
-  final IconData icon;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(SaxifyTheme.radiusXl),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(SaxifyTheme.radiusXl),
-            color: Colors.white.withValues(alpha: 0.06),
-            border: Border.all(
-              color: Colors.white.withValues(alpha: 0.10),
-            ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              Icon(
-                icon,
-                size: 14,
-                color: SaxifyColors.textMuted,
-              ),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: const TextStyle(
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w700,
-                  color: SaxifyColors.textSecondary,
-                ),
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }
