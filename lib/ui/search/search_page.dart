@@ -60,6 +60,11 @@ class _SearchPageState extends State<SearchPage> {
   int _searchGeneration = 0;
   _SearchKind _kind = _SearchKind.songs;
 
+  /// Non-null while a mood/genre station owns the page.
+  String? _stationLabel;
+  String? _stationQuery;
+  int _lastStationNonce = -1;
+
   @override
   void initState() {
     super.initState();
@@ -77,6 +82,19 @@ class _SearchPageState extends State<SearchPage> {
     // Listen to the shell, not just read it: mood buttons and Show all update
     // an IndexedStack child without changing its route or remounting it.
     final ShellController shell = Provider.of<ShellController>(context);
+    if (shell.stationNonce != _lastStationNonce) {
+      _lastStationNonce = shell.stationNonce;
+      final String? label = shell.stationLabel;
+      final String? stationQuery = shell.stationQuery;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (label == null || label.isEmpty) {
+          _closeStation();
+          return;
+        }
+        _openStation(label, stationQuery ?? label);
+      });
+    }
     if (shell.queryNonce == _lastNonce) return;
     _lastNonce = shell.queryNonce;
     final String? query = shell.pendingQuery;
@@ -89,6 +107,8 @@ class _SearchPageState extends State<SearchPage> {
         _browseResults = [];
         _controller.clear();
         setState(() {
+          _stationLabel = null;
+          _stationQuery = null;
           _results = <Song>[];
           _activeQuery = '';
           _error = null;
@@ -101,10 +121,129 @@ class _SearchPageState extends State<SearchPage> {
     });
   }
 
+  // ---------------------------------------------------------------- stations
+  /// Opens a mood/genre station.
+  ///
+  /// Nothing here looks like a search: the box is cleared, the listener sees
+  /// the station's name, and the tracks are fetched with the very same search
+  /// call the app always used — just never echoed back as a query.
+  void _openStation(String label, String query) {
+    unawaited(_loadStation(label, query));
+  }
+
+  Future<void> _loadStation(String label, String query) async {
+    _debounce?.cancel();
+    _cancel?.cancel('superseded');
+    _cancel = CancelToken();
+    final int generation = ++_searchGeneration;
+    setState(() {
+      _kind = _SearchKind.songs;
+      _stationLabel = label;
+      _stationQuery = query;
+      _controller.clear();
+      _focusNode.unfocus();
+      _activeQuery = '';
+      _browseResults = <MusicBrowseItem>[];
+      _results = <Song>[];
+      _error = null;
+      _loading = true;
+    });
+    try {
+      final YoutubeService youtube = context.read<YoutubeService>();
+      final LibraryService library = context.read<LibraryService>();
+      context.read<RecommendationService>().noteSearch(query);
+      final List<Song> results = await youtube.searchSongs(
+        query,
+        limit: 60,
+        cancelToken: _cancel,
+        onPartial: (List<Song> partial) {
+          if (mounted && generation == _searchGeneration) {
+            setState(() => _results = partial);
+          }
+        },
+        onMusicAvailability: (bool available) => _musicAvailable = available,
+      );
+      if (!mounted || generation != _searchGeneration) return;
+      await library.rememberSearch(query);
+      if (!mounted || generation != _searchGeneration) return;
+      setState(() {
+        _results = results;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted || generation != _searchGeneration) return;
+      setState(() {
+        _loading = false;
+        _error = 'Could not load $label right now.';
+        _results = <Song>[];
+      });
+    }
+  }
+
+  void _closeStation() {
+    _searchGeneration++;
+    _debounce?.cancel();
+    _cancel?.cancel();
+    setState(() {
+      _stationLabel = null;
+      _stationQuery = null;
+      _results = <Song>[];
+      _browseResults = <MusicBrowseItem>[];
+      _activeQuery = '';
+      _error = null;
+      _loading = false;
+    });
+  }
+
+  /// The station body: a station header with a play button, then its songs —
+  /// the way a station is presented, never as search output.
+  Widget _stationBody() {
+    final PlaybackService playback = context.read<PlaybackService>();
+    final String label = _stationLabel!;
+    return ListView.builder(
+      padding: const EdgeInsets.only(bottom: 200),
+      itemCount: _results.length + 2,
+      itemBuilder: (BuildContext c, int i) {
+        if (i == 0) {
+          return _StationHeader(
+            label: label,
+            subtitle: _loading && _results.isEmpty
+                ? 'Tuning the station…'
+                : '${_results.length} songs · playing from this station',
+            onPlay: _results.isEmpty
+                ? null
+                : () => playback.playQueue(_results, startIndex: 0),
+            onRefresh: () => _loadStation(label, _stationQuery ?? label),
+            blocked: _error != null,
+            error: _error,
+          );
+        }
+        if (i == 1 && _loading && _results.isEmpty) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+            child: LinearProgressIndicator(minHeight: 2),
+          );
+        }
+        final int index = i - 1;
+        if (index >= _results.length) return const SizedBox(height: 8);
+        final Song song = _results[index];
+        return SongTile(
+          song: song,
+          startRadio: true,
+          onTap: () => playback.playQueue(_results, startIndex: index),
+        );
+      },
+    );
+  }
+
   /// Same search entry point the app already used: `youtube.searchSongs`.
   Future<void> _runSearch(String query) async {
     final String q = query.trim();
     if (q.isEmpty) return;
+    if (_stationLabel != null) {
+      _stationLabel = null;
+      _stationQuery = null;
+    }
 
     _debounce?.cancel();
     _cancel?.cancel('superseded');
@@ -259,6 +398,10 @@ class _SearchPageState extends State<SearchPage> {
                           _cancel?.cancel();
                           _searchGeneration++;
                           setState(() {
+                            // Typing leaves the station and becomes a search
+                            // again — that one is the listener's own query.
+                            _stationLabel = null;
+                            _stationQuery = null;
                             _results = [];
                             _browseResults = [];
                             _loading = false;
@@ -347,7 +490,11 @@ class _SearchPageState extends State<SearchPage> {
                 ),
               ),
               Expanded(
-                child: _loading && _results.isEmpty
+                // A station is its own place: its header, then its songs.
+                // No query line, no "results for …" — just the mood's music.
+                child: _stationLabel != null
+                    ? _stationBody()
+                    : _loading && _results.isEmpty
                     ? const Center(child: CircularProgressIndicator())
                     : _error != null
                     ? EmptyState(
@@ -520,6 +667,161 @@ class _SearchPageState extends State<SearchPage> {
   }
 }
 
+/// The banner that owns a mood/genre station.
+///
+/// It reads as a *place*, not a query: the station's name, how many songs are
+/// inside, one play button — and, only if something really went wrong, a quiet
+/// retry. Nothing about it ever mentions a search.
+class _StationHeader extends StatelessWidget {
+  const _StationHeader({
+    required this.label,
+    required this.subtitle,
+    required this.onPlay,
+    required this.onRefresh,
+    required this.blocked,
+    required this.error,
+  });
+
+  final String label;
+  final String subtitle;
+  final VoidCallback? onPlay;
+  final VoidCallback onRefresh;
+  final bool blocked;
+  final String? error;
+
+  /// `Osho` reads as `Osho Station` — the tile named a mood, this place has a
+  /// name of its own.
+  String get _stationName {
+    final String clean = label.trim();
+    if (clean.isEmpty) return 'Station';
+    return clean.toLowerCase().endsWith('station') ? clean : '$clean Station';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final SaxifyAccent accent = context.accent;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+      child: GlassPanel(
+        flat: true,
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Container(
+                  width: 46,
+                  height: 46,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(14),
+                    gradient: accent.gradient,
+                    boxShadow: <BoxShadow>[
+                      BoxShadow(
+                        color: accent.primary.withValues(alpha: 0.35),
+                        blurRadius: 18,
+                        spreadRadius: -6,
+                        offset: const Offset(0, 8),
+                      ),
+                    ],
+                  ),
+                  child: Icon(
+                    Icons.radio_rounded,
+                    color: accent.onAccent,
+                    size: 24,
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      Text(
+                        'STATION',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 9.5,
+                          letterSpacing: 1.6,
+                          fontWeight: FontWeight.w800,
+                          color: accent.primary,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        _stationName,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: SaxifyTheme.appleFont(
+                          size: 21,
+                          weight: FontWeight.w800,
+                          letterSpacing: -0.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (onPlay != null)
+                  IconButton.filled(
+                    tooltip: 'Play $label',
+                    style: IconButton.styleFrom(
+                      backgroundColor: accent.primary,
+                      foregroundColor: accent.onAccent,
+                      minimumSize: const Size(48, 48),
+                    ),
+                    icon: const Icon(Icons.play_arrow_rounded, size: 28),
+                    onPressed: onPlay,
+                  ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: Text(
+                    blocked ? 'Not available right now' : subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: SaxifyColors.textMuted,
+                    ),
+                  ),
+                ),
+                if (blocked)
+                  TextButton(
+                    onPressed: onRefresh,
+                    child: Text(
+                      'Retry',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: accent.primary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            if (blocked && error != null && error!.isNotEmpty) ...<Widget>[
+              const SizedBox(height: 2),
+              Text(
+                error!,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 11.5,
+                  color: SaxifyColors.textFaint,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _RecentSearches extends StatelessWidget {
   const _RecentSearches({
     required this.queries,
@@ -588,7 +890,7 @@ class _ExploreMusic extends StatelessWidget {
     ('Top Bollywood', 'top Hindi Bollywood songs India'),
     ('New Hindi', 'latest Hindi songs 2026'),
     ('Punjabi Hits', 'Punjabi trending songs India'),
-    ('Devotional', 'Hindi bhajan devotional songs'),
+    ('Bhajan Nights', 'Hindi bhajan devotional songs'),
     ('Osho', 'Osho meditation music discourse'),
   ];
 
@@ -608,12 +910,12 @@ class _ExploreMusic extends StatelessWidget {
         ),
         MoodGenreGrid(
           items: _featured,
-          onSelected: (String query) => shell.goSearch(query),
+          onSelected: (String label, String query) => shell.goStation(label, query),
         ),
         const SectionHeader(title: 'Moods & Genres'),
         MoodGenreGrid(
           items: HomeCatalog.moodGenres,
-          onSelected: (String query) => shell.goSearch(query),
+          onSelected: (String label, String query) => shell.goStation(label, query),
         ),
         const SectionHeader(title: 'New releases'),
         HorizontalRail(

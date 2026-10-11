@@ -23,6 +23,7 @@ import '../artist/artist_router.dart';
 import '../brands/brands_page.dart';
 import '../settings/settings_page.dart';
 import '../shell/shell_controller.dart';
+import '../widgets/liked_songs_artwork.dart';
 import '../widgets/media_cards.dart';
 import '../widgets/neon.dart';
 import '../widgets/saxify_logo.dart';
@@ -101,6 +102,8 @@ class _HomePageState extends State<HomePage> {
                   ),
 
                 // ------------------------------------------------ Made for you
+                // The first card is always Liked Songs — the app's own colours
+                // (the logo's character, liking), then the picks beside it.
                 if (catalog.madeForYou.isNotEmpty) ...<Widget>[
                   SectionHeader(
                     title: 'Made for you',
@@ -110,14 +113,22 @@ class _HomePageState extends State<HomePage> {
                   ),
                   HorizontalRail(
                     height: 200,
-                    itemCount: catalog.madeForYou.length,
+                    itemCount: catalog.madeForYou.length + 1,
                     builder: (BuildContext c, int i) {
-                      final Song song = catalog.madeForYou[i];
+                      final PlaybackService playback =
+                          context.read<PlaybackService>();
+                      if (i == 0) {
+                        return LikedSongsCard(
+                          count: context.watch<LibraryService>().likedSongs.length,
+                          onTap: () => context.read<ShellController>().goLiked(),
+                        );
+                      }
+                      final Song song = catalog.madeForYou[i - 1];
                       return SongCard(
                         song: song,
-                        onTap: () => context.read<PlaybackService>().playQueue(
+                        onTap: () => playback.playQueue(
                           catalog.madeForYou,
-                          startIndex: i,
+                          startIndex: i - 1,
                         ),
                       );
                     },

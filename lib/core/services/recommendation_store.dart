@@ -233,6 +233,64 @@ class RecommendationStore {
     return n > 0;
   }
 
+  /// A lightweight row of the play history — enough to feed the vibe memory
+  /// without carrying artwork or durations around.
+  Future<List<({String id, String title, String artist})>> recentTracks({
+    int limit = 40,
+  }) async {
+    final Database? db = _db;
+    if (db == null) return <({String id, String title, String artist})>[];
+    final List<Map<String, Object?>> rows = await db.query(
+      'play_history',
+      columns: <String>['song_id', 'title', 'artist'],
+      orderBy: 'timestamp DESC',
+      limit: limit,
+    );
+    final List<({String id, String title, String artist})> out =
+        <({String id, String title, String artist})>[];
+    final Set<String> seen = <String>{};
+    for (final Map<String, Object?> row in rows) {
+      final String id = row['song_id'] as String? ?? '';
+      if (id.isEmpty || !seen.add(id)) continue;
+      out.add((
+        id: id,
+        title: row['title'] as String? ?? '',
+        artist: row['artist'] as String? ?? '',
+      ));
+    }
+    return out;
+  }
+
+  /// The local co-listening graph: which track followed which, counted from
+  /// the plays on this device (a pair counts when the next play starts within
+  /// half an hour, so a queue that ran for hours still reads as one session).
+  Future<Map<String, Map<String, int>>> transitions({int limit = 400}) async {
+    final Database? db = _db;
+    if (db == null) return <String, Map<String, int>>{};
+    final List<Map<String, Object?>> rows = await db.query(
+      'play_history',
+      columns: <String>['song_id', 'timestamp'],
+      orderBy: 'timestamp DESC',
+      limit: limit,
+    );
+    final Map<String, Map<String, int>> edges = <String, Map<String, int>>{};
+    for (int i = 0; i + 1 < rows.length; i++) {
+      final String current = rows[i]['song_id'] as String? ?? '';
+      final String next = rows[i + 1]['song_id'] as String? ?? '';
+      final int currentAt = (rows[i]['timestamp'] as int?) ?? 0;
+      final int nextAt = (rows[i + 1]['timestamp'] as int?) ?? 0;
+      if (current.isEmpty || next.isEmpty || current == next) continue;
+      if (currentAt - nextAt > const Duration(minutes: 30).inMilliseconds) {
+        continue;
+      }
+      // rows are newest-first: `next` is the track that came *before*.
+      final Map<String, int> targets =
+          edges.putIfAbsent(next, () => <String, int>{});
+      targets[current] = (targets[current] ?? 0) + 1;
+    }
+    return edges;
+  }
+
   Future<void> _purgeOldSearches() async {
     final Database? db = _db;
     if (db == null) return;

@@ -10,6 +10,9 @@ class IfallBranding {
   static const double logoHeight = 512;
   static const String logoFormat = 'PNG (from I Fall Music Cartoon Logo.png)';
   static const String logoAsset = 'assets/images/saxify_logo.png';
+
+  /// The Liked Songs sleeve: the same character as the logo, with a heart.
+  static const String likedSongsAsset = 'assets/images/liked_songs_motu.png';
   static const String splashAsset = 'assets/images/saxify_splash.png';
   static const double splashLogoSize = 300;
 

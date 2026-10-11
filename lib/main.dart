@@ -29,6 +29,7 @@ import 'core/theme/saxify_accents.dart';
 import 'core/theme/saxify_theme.dart';
 import 'core/theme/theme_controller.dart';
 import 'ui/onboarding/welcome_page.dart';
+import 'ui/shell/mini_player_layer.dart';
 import 'ui/shell/saxify_shell.dart';
 import 'ui/shell/shell_controller.dart';
 
@@ -147,7 +148,14 @@ Future<AppBoot> _initializeApp() async {
   };
   playback.onTrackSkipped = recommendations.noteSkip;
   library.onLikeChanged = (Song song, bool liked) {
-    if (liked) recommendations.noteLike(song);
+    if (liked) {
+      recommendations.noteLike(song);
+      // A like is the strongest thing the listener can say: the session's vibe
+      // memory learns it immediately, so the next queue follows.
+      playback.vibe.noteLike(song);
+    } else {
+      playback.vibe.noteUnlike(song);
+    }
   };
 
   SystemChrome.setSystemUIOverlayStyle(
@@ -240,6 +248,12 @@ class _IfallMusicAppState extends State<IfallMusicApp>
     with WidgetsBindingObserver {
   Timer? _syncTimer;
 
+  /// Root-navigator bookkeeping for the floating mini player.
+  final MiniPlayerRouteObserver _routeObserver = MiniPlayerRouteObserver();
+
+  /// The app's navigator, shared with the dock (which is painted above it).
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+
   @override
   void initState() {
     super.initState();
@@ -256,6 +270,12 @@ class _IfallMusicAppState extends State<IfallMusicApp>
       if (boot.recommendations.store.recovered) {
         BootLog.write('recommendation db recreated');
       }
+      // Seeding the playback engine with the local play history — plus every
+      // liked song — is what makes the *first* "next" of a fresh launch keep
+      // the listener's vibe instead of falling back to a chart.
+      await boot.recommendations
+          .hydrateVibe(boot.playback.vibe, liked: boot.library.likedSongs)
+          .timeout(const Duration(seconds: 4));
     } catch (e) {
       BootLog.write('recommendation open skipped: $e');
     }
@@ -328,7 +348,10 @@ class _IfallMusicAppState extends State<IfallMusicApp>
           value: boot.artists,
           child: Provider<bool>.value(
             value: boot.safeMode,
-            child: const _IfallRoot(),
+            child: _IfallRoot(
+              routeObserver: _routeObserver,
+              navigatorKey: _navigatorKey,
+            ),
           ),
         ),
       ),
@@ -350,7 +373,15 @@ class IfallProfileGate extends StatelessWidget {
 }
 
 class _IfallRoot extends StatelessWidget {
-  const _IfallRoot();
+  const _IfallRoot({required this.routeObserver, required this.navigatorKey});
+
+  /// Reports route changes so the floating mini player knows when to step
+  /// aside (the full player, sheets and dialogs cover the dock).
+  final MiniPlayerRouteObserver routeObserver;
+
+  /// Handed to the dock so it can open the full player from above the
+  /// navigator.
+  final GlobalKey<NavigatorState> navigatorKey;
 
   @override
   Widget build(BuildContext context) {
@@ -359,6 +390,8 @@ class _IfallRoot extends StatelessWidget {
       scaffoldMessengerKey: appMessengerKey,
       title: IfallBranding.appName,
       debugShowCheckedModeBanner: false,
+      navigatorKey: navigatorKey,
+      navigatorObservers: <NavigatorObserver>[routeObserver],
       themeMode: ThemeMode.dark,
       theme: SaxifyTheme.build(
         theme.accent,
@@ -375,7 +408,22 @@ class _IfallRoot extends StatelessWidget {
         final double scale = media.textScaler.scale(1).clamp(1.0, 1.3);
         return MediaQuery(
           data: media.copyWith(textScaler: TextScaler.linear(scale)),
-          child: child ?? const SizedBox.shrink(),
+          // The mini player is painted above the navigator, so it also stays
+          // docked inside every pushed page — album, playlist, artist, brand,
+          // Downloads, On device — instead of only in the shell.
+          child: Stack(
+            fit: StackFit.expand,
+            children: <Widget>[
+              child ?? const SizedBox.shrink(),
+              MiniPlayerLayer(
+                observer: routeObserver,
+                navigatorKey: navigatorKey,
+              ),
+              // Notices ride above the dock, so they are readable on every
+              // page — including while the mini player is showing.
+              const AppNoticeLayer(),
+            ],
+          ),
         );
       },
       home: const IfallProfileGate(),

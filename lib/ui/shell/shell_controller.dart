@@ -8,6 +8,16 @@ import 'package:flutter/foundation.dart';
 /// download button in the Home header.
 enum SaxifyTab { home, search, library, settings }
 
+/// Named routes the shell cares about.
+///
+/// The mini player sits *above* the navigator (see `MiniPlayerLayer`), so it
+/// needs to recognise the one screen that replaces it: the full player.
+class ShellRoutes {
+  const ShellRoutes._();
+
+  static const String fullPlayer = 'ifallmusic://full-player';
+}
+
 /// Index of the Library tabs, kept in one place so deep links stay honest.
 class LibraryTabs {
   const LibraryTabs._();
@@ -27,6 +37,12 @@ class LibraryTabs {
 /// run. Mood chips on Home, "Show all" links and deep links all go through here.
 class ShellController extends ChangeNotifier {
   SaxifyTab _tab = SaxifyTab.home;
+
+  /// Scroll-driven dock state, shared with the floating mini player so the bar
+  /// and the tab bar always shrink and grow together (they are painted by two
+  /// different widgets now).
+  final ValueNotifier<bool> navCompact = ValueNotifier<bool>(false);
+
   final List<SaxifyTab> _history = [];
   bool get canGoBack => _tab != SaxifyTab.home;
   void _visit(SaxifyTab next) {
@@ -83,6 +99,10 @@ class ShellController extends ChangeNotifier {
     _visit(SaxifyTab.search);
     _pendingQuery = query;
     _queryNonce++;
+    // A query of the listener's own replaces whatever station was open.
+    _stationLabel = null;
+    _stationQuery = null;
+    _stationNonce++;
     notifyListeners();
   }
 
@@ -122,5 +142,42 @@ class ShellController extends ChangeNotifier {
     if (_pendingQuery == null) return;
     _pendingQuery = null;
     notifyListeners();
+  }
+
+  // ------------------------------------------------------------- stations
+  String? _stationLabel;
+  String? _stationQuery;
+  int _stationNonce = 0;
+
+  /// Non-null while a mood/genre tile has opened its station.
+  ///
+  /// A station is a *place in the app*, not a search: the tracks are found by
+  /// the same search machinery, but the listener only ever sees the station's
+  /// header and its songs — never a query or a result count.
+  String? get stationLabel => _stationLabel;
+  String? get stationQuery => _stationQuery;
+  int get stationNonce => _stationNonce;
+
+  void goStation(String label, String query) {
+    _visit(SaxifyTab.search);
+    _pendingQuery = null;
+    _stationLabel = label.trim();
+    _stationQuery = query.trim();
+    _stationNonce++;
+    notifyListeners();
+  }
+
+  void clearStation() {
+    if (_stationLabel == null && _stationQuery == null) return;
+    _stationLabel = null;
+    _stationQuery = null;
+    _stationNonce++;
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    navCompact.dispose();
+    super.dispose();
   }
 }

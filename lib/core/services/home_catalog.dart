@@ -236,13 +236,6 @@ class HomeCatalog extends ChangeNotifier {
     ('Telugu', 'Telugu hit songs'),
     ('Osho', 'Osho meditation music discourse'),
     ('Pop', 'pop hits 2026'),
-    ('Chill', 'chill vibes songs'),
-    ('Focus', 'deep focus instrumental music'),
-    ('Party', 'party dance songs'),
-    ('Romance', 'romantic love songs'),
-    ('Classical', 'classical piano instrumental'),
-    ('Workout', 'workout edm songs'),
-    ('Lo-Fi Beats', 'lofi beats to relax'),
   ];
 
   static const List<String> _trendingQueries = <String>[

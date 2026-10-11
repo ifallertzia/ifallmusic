@@ -18,6 +18,7 @@ import 'innertube_resolver.dart';
 import 'library_service.dart';
 import 'notification_bootstrap.dart';
 import 'settings_service.dart';
+import 'vibe_ranker.dart';
 import 'youtube_service.dart';
 
 /// The playback engine.
@@ -37,6 +38,7 @@ class PlaybackService extends ChangeNotifier {
        _settings = settings,
        _library = library,
        _player = player ?? AudioPlayer() {
+    _speed = settings.playbackSpeed;
     _eventSub = _player.playbackEventStream.listen(
       (_) {},
       onError: (Object error, StackTrace stack) {
@@ -84,6 +86,7 @@ class PlaybackService extends ChangeNotifier {
   bool _stopped = false;
   bool _playRequested = true;
   Song? _current;
+  Song? _lastStarted;
   bool _isPlaying = false;
   bool _isLoading = false;
   bool _shuffle = false;
@@ -101,6 +104,11 @@ class PlaybackService extends ChangeNotifier {
 
   /// Fired after a track really starts. Recommendations listen; playback does not wait.
   void Function(Song song)? onTrackStarted;
+
+  /// What this listener has actually been enjoying in this session: the last
+  /// tracks, the skips, the likes and the pairs that followed each other.
+  /// Every automatic queue is ranked against it, so "next" keeps the vibe.
+  final VibeMemory vibe = VibeMemory();
 
   /// Fired when the listener skips a track that barely started.
   void Function(Song song)? onTrackSkipped;
@@ -349,8 +357,13 @@ class PlaybackService extends ChangeNotifier {
   double get volume => _player.volume;
 
   Future<void> setSpeed(double v) async {
-    await _settings.setPlaybackSpeed(v);
-    await _player.setSpeed(v);
+    final double next = v.clamp(0.25, 3.0);
+    _speed = next;
+    await _settings.setPlaybackSpeed(next);
+    await _player.setSpeed(next);
+    // The player page must show 2x the moment it is picked — not after the
+    // next unrelated rebuild.
+    notifyListeners();
   }
 
   Future<void> setSkipSilence(bool enabled) async {
@@ -362,7 +375,11 @@ class PlaybackService extends ChangeNotifier {
     }
   }
 
-  double get speed => _player.speed;
+  /// The app-owned speed. Anchored to the saved setting and updated the instant
+  /// [setSpeed] runs, so every "2x" label in the UI stays in step with the
+  /// engine.
+  double _speed = 1;
+  double get speed => _speed;
 
   Future<void> toggleShuffle() async {
     _shuffle = !_shuffle;
@@ -386,6 +403,7 @@ class PlaybackService extends ChangeNotifier {
     final Song? song = _current;
     if (song != null && _position < const Duration(seconds: 20)) {
       try {
+        vibe.noteSkip(song);
         onTrackSkipped?.call(song);
       } catch (e) {
         debugPrint('onTrackSkipped failed: $e');
@@ -893,7 +911,8 @@ class PlaybackService extends ChangeNotifier {
             .timeout(const Duration(seconds: 25));
         if (!_epoch.current(generation) || _stopped) return;
         await _player.setLoopMode(LoopMode.off);
-        await _player.setSpeed(_settings.playbackSpeed);
+        _speed = _settings.playbackSpeed;
+        await _player.setSpeed(_speed);
         try {
           await _player.setSkipSilenceEnabled(_settings.skipSilence);
         } catch (_) {}
@@ -939,6 +958,15 @@ class PlaybackService extends ChangeNotifier {
   Future<void> _recordStarted(Song song, int generation) async {
     try {
       await _library.recordPlay(song);
+    } catch (_) {}
+    // Session memory: this track was played, and it followed the one before.
+    try {
+      final Song? previous = _lastStarted;
+      if (previous != null && previous.id != song.id) {
+        vibe.noteTransition(previous.id, song);
+      }
+      _lastStarted = song;
+      vibe.notePlay(song);
     } catch (_) {}
     if (!_epoch.current(generation) || _stopped) return;
     try {
@@ -1158,6 +1186,9 @@ class PlaybackService extends ChangeNotifier {
               anchor,
               history: _queue.toList(),
               exclude: _failedIds.toSet(),
+              // Retrieval + ranking both use what the listener is enjoying.
+              vibe: vibe,
+              limit: 20,
             )
             .timeout(const Duration(seconds: 26));
       } catch (_) {
@@ -1169,6 +1200,7 @@ class PlaybackService extends ChangeNotifier {
         candidates,
         history: _queue,
         excludedIds: _failedIds,
+        limit: 20,
       );
       _queue.addAll(fresh);
       notifyListeners();

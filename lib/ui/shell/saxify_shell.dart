@@ -15,10 +15,10 @@ import '../../core/theme/saxify_accents.dart';
 import '../../core/theme/saxify_theme.dart';
 import '../home/home_page.dart';
 import '../library/library_page.dart';
+import '../player/player_palette.dart';
 import '../search/search_page.dart';
 import '../settings/settings_page.dart';
 import '../settings/update_dialog.dart';
-import 'mini_player.dart';
 import 'shell_controller.dart';
 
 /// The app shell: a frosted, floating tab bar over pure black, the persistent
@@ -54,6 +54,9 @@ class _SaxifyShellState extends State<SaxifyShell> {
     final bool compact = direction == ScrollDirection.reverse;
     if (compact == _navCompact) return false;
     if (!mounted) return false;
+    // The mini player is painted above the navigator now, so the dock state is
+    // shared through the shell controller and both bars shrink together.
+    _shell.navCompact.value = compact;
     setState(() => _navCompact = compact);
     return false;
   }
@@ -171,14 +174,15 @@ class _SaxifyShellState extends State<SaxifyShell> {
                   SettingsPage(),
                 ],
               ),
-            // Now playing + navigation float above the content as one glass unit.
+            // The tab bar floats above the content. The mini player itself is
+            // painted above the navigator (MiniPlayerLayer), so it stays docked
+            // on every pushed screen too — not only here in the shell.
             Align(
               alignment: Alignment.bottomCenter,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
                   const _NextArtworkPrecache(),
-                  MiniPlayer(compact: _navCompact),
                   _GlassNavBar(
                     index: _shell.tab.index,
                     compact: _navCompact,
@@ -455,6 +459,9 @@ class _NextArtworkPrecacheState extends State<_NextArtworkPrecache> {
             _warmed != next.id) {
           _warmed = next.id;
           ArtworkCache.precache(context, next.thumbnailUrl);
+          // The player's backdrop belongs to the sleeve: extract the next
+          // track's palette now so it switches the moment the song does.
+          PlayerPaletteService.warm(next.thumbnailUrl);
         }
         return const SizedBox.shrink();
       },

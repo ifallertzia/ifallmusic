@@ -481,8 +481,14 @@ class MoodGenreGrid extends StatelessWidget {
     this.tileHeight = 92,
   });
 
+  /// `(label, behind-the-scenes search query)` rows.
   final List<(String, String)> items;
-  final ValueChanged<String> onSelected;
+
+  /// Called with the tile's **label** and its query: the caller opens a station
+  /// (the label is what the listener sees, the query is only ever used to fetch
+  /// the tracks behind it). Falls back to one argument when the caller only
+  /// takes a String.
+  final void Function(String label, String query) onSelected;
   final double horizontalPadding;
   final double tileHeight;
 
@@ -568,7 +574,7 @@ class MoodGenreGrid extends StatelessWidget {
             return Material(
               color: Colors.transparent,
               child: InkWell(
-                onTap: () => onSelected(item.$2),
+                onTap: () => onSelected(item.$1, item.$2),
                 borderRadius: radius,
                 child: Ink(
                   decoration: BoxDecoration(

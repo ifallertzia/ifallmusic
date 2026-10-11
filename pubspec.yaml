@@ -45,3 +45,5 @@ flutter:
   assets:
     - assets/images/saxify_logo.png
     - assets/images/saxify_splash.png
+    # Liked Songs sleeve — the app-logo character, liking.
+    - assets/images/liked_songs_motu.png

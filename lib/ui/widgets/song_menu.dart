@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/models/song.dart';
+import '../../core/services/app_feedback.dart';
 import '../../core/services/library_service.dart';
 import '../../core/services/music_download_service.dart';
 import '../../core/services/playback_service.dart';
@@ -47,27 +48,19 @@ class _SongSheet extends StatelessWidget {
     final bool allowed = await StoragePermission.ensure(context);
     if (!allowed || !context.mounted) return;
     final PlaybackService playback = context.read<PlaybackService>();
-    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
-    messenger.showSnackBar(
-      const SnackBar(
-        content: Text('Saving to Download/IfallMusic. Playback keeps going.'),
-      ),
-    );
+    showAppNotice('Saving to Download/IfallMusic. Playback keeps going.');
     final MusicDownloadJob job = await context
         .read<MusicDownloadService>()
         .enqueue(song, playback);
-    if (!context.mounted) return;
+    // The service announces failures itself; never double-report them.
+    if (job.phase == MusicDownloadPhase.failed) return;
     final String message = switch (job.phase) {
       MusicDownloadPhase.done => 'Song Downloads folder mein save ho gaya!',
-      MusicDownloadPhase.failed =>
-        job.error ?? 'Could not save that song. Playback keeps going.',
       MusicDownloadPhase.cancelled =>
         'Download cancelled. Playback keeps going.',
       _ => 'Saving to Download/IfallMusic. Playback keeps going.',
     };
-    messenger
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(message)));
+    showAppNotice(message);
   }
 
   @override
@@ -212,11 +205,7 @@ class _SongSheet extends StatelessWidget {
     );
   }
 
-  void _toast(BuildContext context, String message) {
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(message)));
-  }
+  void _toast(BuildContext context, String message) => showAppNotice(message);
 }
 
 class _Action extends StatelessWidget {
