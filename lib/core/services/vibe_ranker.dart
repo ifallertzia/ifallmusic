@@ -409,7 +409,7 @@ Set<String> titleTokens(String title) {
   final String cleaned = title
       .toLowerCase()
       .replaceAll(RegExp(r'\([^)]*\)|\[[^\]]*\]'), ' ')
-      .replaceAll(RegExp(r'[^\p{L}\p{N}\s]+', ' ', unicode: true), ' ')
+      .replaceAll(RegExp(r'[^\p{L}\p{N}\s]+', unicode: true), ' ')
       .replaceAll(RegExp(r'\s+'), ' ')
       .trim();
   final Set<String> out = <String>{};
@@ -431,7 +431,7 @@ String artistKey(String artist) {
       .toLowerCase()
       .replaceAll('"', '')
       .replaceAll(RegExp(r'\s*-\s*topic$'), '')
-      .replaceAll(RegExp(r'[^\p{L}\p{N}\s]+', ' ', unicode: true))
+      .replaceAll(RegExp(r'[^\p{L}\p{N}\s]+', unicode: true), ' ')
       .replaceAll(RegExp(r'\s+'), ' ')
       .trim();
   return primary;
