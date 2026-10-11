@@ -195,6 +195,68 @@ class _SearchPageState extends State<SearchPage> {
     });
   }
 
+  /// The station's own top bar: a radio mark, the station's name and a close
+  /// button that hands the page back to search. No query, no filters.
+  Widget _stationBar(SaxifyAccent accent) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 10, 4),
+      child: Container(
+        height: 48,
+        padding: const EdgeInsets.fromLTRB(10, 0, 4, 0),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(SaxifyTheme.radiusMd),
+          color: Colors.white.withValues(alpha: 0.05),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+        ),
+        child: Row(
+          children: <Widget>[
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(10),
+                gradient: accent.gradient,
+              ),
+              child: Icon(
+                Icons.radio_rounded,
+                size: 18,
+                color: accent.onAccent,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                stationName(_stationLabel ?? ''),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: SaxifyTheme.appleFont(
+                  size: 14.5,
+                  weight: FontWeight.w800,
+                  letterSpacing: -0.2,
+                ),
+              ),
+            ),
+            IconButton(
+              tooltip: 'Close station',
+              icon: const Icon(Icons.close_rounded, size: 18),
+              onPressed: _leaveStation,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Closes the station and gives the page back to search — the field returns
+  /// focused, ready for a query of the listener's own.
+  void _leaveStation() {
+    _closeStation();
+    context.read<ShellController>().clearStation();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _focusNode.requestFocus();
+    });
+  }
+
   /// The station body: a station header with a play button, then its songs —
   /// the way a station is presented, never as search output.
   Widget _stationBody() {
@@ -383,6 +445,10 @@ class _SearchPageState extends State<SearchPage> {
           bottom: false,
           child: Column(
             children: <Widget>[
+              // A station is a *place*: while one owns the page the top row is
+              // its name — never a query box — so nothing on screen looks like
+              // a search was run for these songs.
+              if (_stationLabel != null) _stationBar(accent) else
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
                 child: Row(
@@ -466,29 +532,32 @@ class _SearchPageState extends State<SearchPage> {
                   ],
                 ),
               ),
-              SizedBox(
-                height: 40,
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  children: <Widget>[
-                    for (final _SearchKind kind in _SearchKind.values)
-                      Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: ChoiceChip(
-                          label: Text(_kindLabel(kind)),
-                          selected: _kind == kind,
-                          onSelected: (_) {
-                            setState(() => _kind = kind);
-                            if (_controller.text.trim().isNotEmpty) {
-                              _runSearch(_controller.text);
-                            }
-                          },
+              // The Songs / Albums / Artists chips belong to searching; a
+              // station has no filter row, it simply is its own list.
+              if (_stationLabel == null)
+                SizedBox(
+                  height: 40,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    children: <Widget>[
+                      for (final _SearchKind kind in _SearchKind.values)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: ChoiceChip(
+                            label: Text(_kindLabel(kind)),
+                            selected: _kind == kind,
+                            onSelected: (_) {
+                              setState(() => _kind = kind);
+                              if (_controller.text.trim().isNotEmpty) {
+                                _runSearch(_controller.text);
+                              }
+                            },
+                          ),
                         ),
-                      ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
               Expanded(
                 // A station is its own place: its header, then its songs.
                 // No query line, no "results for …" — just the mood's music.
@@ -667,6 +736,14 @@ class _SearchPageState extends State<SearchPage> {
   }
 }
 
+/// `Osho` reads as `Osho Station` — a mood tile names a vibe, and the place it
+/// opens gets a name of its own.
+String stationName(String label) {
+  final String clean = label.trim();
+  if (clean.isEmpty) return 'Station';
+  return clean.toLowerCase().endsWith('station') ? clean : '$clean Station';
+}
+
 /// The banner that owns a mood/genre station.
 ///
 /// It reads as a *place*, not a query: the station's name, how many songs are
@@ -691,11 +768,7 @@ class _StationHeader extends StatelessWidget {
 
   /// `Osho` reads as `Osho Station` — the tile named a mood, this place has a
   /// name of its own.
-  String get _stationName {
-    final String clean = label.trim();
-    if (clean.isEmpty) return 'Station';
-    return clean.toLowerCase().endsWith('station') ? clean : '$clean Station';
-  }
+  String get _stationName => stationName(label);
 
   @override
   Widget build(BuildContext context) {

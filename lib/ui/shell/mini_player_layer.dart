@@ -16,6 +16,11 @@ class MiniPlayerRouteObserver extends NavigatorObserver {
   /// True while something covers the dock (the full player, a sheet, a dialog).
   final ValueNotifier<bool> hidden = ValueNotifier<bool>(false);
 
+  /// True while a pushed page (a playlist, Downloads, a brand, an artist …)
+  /// sits above the shell. There is no tab bar underneath on those screens, so
+  /// the dock drops down instead of floating in the middle of the page.
+  final ValueNotifier<bool> pageOnTop = ValueNotifier<bool>(false);
+
   @override
   void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
     _stack.add(route);
@@ -49,13 +54,16 @@ class MiniPlayerRouteObserver extends NavigatorObserver {
   void _sync() {
     if (_stack.isEmpty) {
       hidden.value = false;
+      pageOnTop.value = false;
       return;
     }
     final Route<dynamic> top = _stack.last;
     final bool covering = top is PopupRoute ||
         (top is PageRoute<dynamic> &&
             top.settings.name == ShellRoutes.fullPlayer);
+    final bool pushed = _stack.length > 1;
     if (hidden.value != covering) hidden.value = covering;
+    if (pageOnTop.value != pushed) pageOnTop.value = pushed;
   }
 }
 
@@ -93,44 +101,57 @@ class MiniPlayerLayer extends StatelessWidget {
 
     final double bottomInset = MediaQuery.paddingOf(context).bottom;
     final double navPadding = bottomInset > 0 ? bottomInset * 0.5 + 6 : 10;
+    // No tab bar under the dock on a pushed page: sit just above the gesture
+    // bar there, and above the tab bar everywhere in the shell.
+    final double pagePadding = bottomInset > 0 ? bottomInset + 6 : 10;
 
     return ValueListenableBuilder<bool>(
       valueListenable: observer.hidden,
-      builder: (BuildContext context, bool hidden, Widget? _) =>
-          ValueListenableBuilder<bool>(
-            valueListenable: shell.navCompact,
-            builder: (BuildContext context, bool compact, Widget? _) => Align(
-              alignment: Alignment.bottomCenter,
-              child: Padding(
-                padding: EdgeInsets.only(
-                  bottom:
-                      navPadding + (compact ? _navHeightCompact : _navHeight),
-                ),
-                child: IgnorePointer(
-                  ignoring: hidden,
-                  child: AnimatedSlide(
-                    duration: const Duration(milliseconds: 260),
+      builder: (BuildContext context, bool hidden, Widget? _) {
+        return ValueListenableBuilder<bool>(
+          valueListenable: shell.navCompact,
+          builder: (BuildContext context, bool compact, Widget? _) {
+            return ValueListenableBuilder<bool>(
+              valueListenable: observer.pageOnTop,
+              builder: (BuildContext context, bool pageOnTop, Widget? _) {
+                final double bottom = pageOnTop
+                    ? pagePadding
+                    : navPadding + (compact ? _navHeightCompact : _navHeight);
+                return Align(
+                  alignment: Alignment.bottomCenter,
+                  child: AnimatedPadding(
+                    duration: const Duration(milliseconds: 220),
                     curve: Curves.easeOutCubic,
-                    offset: hidden ? const Offset(0, 0.55) : Offset.zero,
-                    child: AnimatedOpacity(
-                      duration: const Duration(milliseconds: 220),
-                      curve: Curves.easeOut,
-                      opacity: hidden ? 0 : 1,
-                      child: AnimatedScale(
+                    padding: EdgeInsets.only(bottom: bottom),
+                    child: IgnorePointer(
+                      ignoring: hidden,
+                      child: AnimatedSlide(
                         duration: const Duration(milliseconds: 260),
                         curve: Curves.easeOutCubic,
-                        scale: hidden ? 0.94 : 1,
-                        child: MiniPlayer(
-                          compact: compact,
-                          navigator: navigatorKey,
+                        offset: hidden ? const Offset(0, 0.55) : Offset.zero,
+                        child: AnimatedOpacity(
+                          duration: const Duration(milliseconds: 220),
+                          curve: Curves.easeOut,
+                          opacity: hidden ? 0 : 1,
+                          child: AnimatedScale(
+                            duration: const Duration(milliseconds: 260),
+                            curve: Curves.easeOutCubic,
+                            scale: hidden ? 0.94 : 1,
+                            child: MiniPlayer(
+                              compact: compact,
+                              navigator: navigatorKey,
+                            ),
+                          ),
                         ),
                       ),
                     ),
                   ),
-                ),
-              ),
-            ),
-          ),
+                );
+              },
+            );
+          },
+        );
+      },
     );
   }
 }
