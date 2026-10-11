@@ -11,6 +11,56 @@ import '../../core/theme/saxify_accents.dart';
 import '../../core/theme/saxify_theme.dart';
 import '../player/full_player_page.dart';
 import '../widgets/artwork.dart';
+import 'shell_controller.dart';
+
+/// Opens the full player the way the dock always has: a soft, non-opaque route
+/// so the shell and playback stay alive underneath. It is named
+/// [ShellRoutes.fullPlayer], which is what makes the dock step aside while the
+/// player owns the screen.
+void openFullPlayer(NavigatorState? navigator, BuildContext context) {
+  final NavigatorState? target = navigator ?? Navigator.maybeOf(context);
+  if (target == null) return;
+  target.push<void>(
+    PageRouteBuilder<void>(
+      settings: const RouteSettings(name: ShellRoutes.fullPlayer),
+      opaque: false,
+      barrierDismissible: false,
+      transitionDuration: const Duration(milliseconds: 360),
+      reverseTransitionDuration: const Duration(milliseconds: 260),
+      pageBuilder: (
+        BuildContext routeContext,
+        Animation<double> animation,
+        Animation<double> secondaryAnimation,
+      ) => const FullPlayerPage(),
+      transitionsBuilder: (
+        BuildContext routeContext,
+        Animation<double> animation,
+        Animation<double> secondaryAnimation,
+        Widget child,
+      ) {
+        final Animation<double> eased = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+          reverseCurve: Curves.easeInCubic,
+        );
+        return FadeTransition(
+          opacity: eased,
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.9, end: 1).animate(eased),
+            alignment: Alignment.bottomCenter,
+            child: SlideTransition(
+              position: Tween<Offset>(
+                begin: const Offset(0, 0.08),
+                end: Offset.zero,
+              ).animate(eased),
+              child: child,
+            ),
+          ),
+        );
+      },
+    ),
+  );
+}
 
 /// The persistent mini player, floating above the tab bar.
 ///
@@ -22,10 +72,15 @@ import '../widgets/artwork.dart';
 /// shrinks — width, artwork, type and controls — together with the nav bar
 /// below it, and springs back as soon as the user scrolls up again.
 class MiniPlayer extends StatelessWidget {
-  const MiniPlayer({super.key, this.compact = false});
+  const MiniPlayer({super.key, this.compact = false, this.navigator});
 
   /// Scroll-driven compact mode (set by the shell).
   final bool compact;
+
+  /// Root navigator key. The dock is painted above the navigator, so it needs
+  /// the key to open the full player; `Navigator.of(context)` would not find
+  /// one from up there.
+  final GlobalKey<NavigatorState>? navigator;
 
   static const Duration _anim = Duration(milliseconds: 240);
   static const Curve _curve = Curves.easeOutCubic;
@@ -85,38 +140,9 @@ class MiniPlayer extends StatelessWidget {
               child: Material(
                 color: Colors.transparent,
                 child: InkWell(
-                  onTap: () => Navigator.of(context).push<void>(
-                    PageRouteBuilder<void>(
-                      opaque: false,
-                      barrierDismissible: false,
-                      transitionDuration: const Duration(milliseconds: 360),
-                      reverseTransitionDuration: const Duration(milliseconds: 260),
-                      pageBuilder: (BuildContext routeContext, Animation<double> animation,
-                          Animation<double> secondaryAnimation) =>
-                          const FullPlayerPage(),
-                      transitionsBuilder: (
-                        BuildContext routeContext,
-                        Animation<double> animation,
-                        Animation<double> secondaryAnimation,
-                        Widget child,
-                      ) {
-                        final Animation<double> eased = CurvedAnimation(
-                          parent: animation,
-                          curve: Curves.easeOutCubic,
-                        );
-                        return FadeTransition(
-                          opacity: eased,
-                          child: SlideTransition(
-                            position: Tween<Offset>(
-                              begin: const Offset(0, 0.12),
-                              end: Offset.zero,
-                            ).animate(eased),
-                            child: child,
-                          ),
-                        );
-                      },
-                    ),
-                  ),
+                  // The full player grows out of the dock it was tapped in, and
+                  // is named so the dock knows to step aside while it is open.
+                  onTap: () => openFullPlayer(navigator?.currentState, context),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: <Widget>[

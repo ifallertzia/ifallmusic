@@ -1060,23 +1060,9 @@ class LibraryDownloadsPage extends StatelessWidget {
                 ],
               ),
             ),
-          for (final job in downloads.jobs.where(
-            (j) => j.phase == MusicDownloadPhase.failed,
-          ))
-            ListTile(
-              leading: const Icon(Icons.error_outline),
-              title: Text(
-                job.song.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              subtitle: Text(job.error ?? 'Download failed'),
-              trailing: IconButton(
-                tooltip: 'Retry download',
-                icon: const Icon(Icons.refresh),
-                onPressed: () => downloads.enqueue(job.song, playback),
-              ),
-            ),
+          // A failed download never becomes a row here — it is announced with
+          // a notification instead, so this list only shows real, playable
+          // offline music.
           if (saved.isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(4, 4, 4, 10),

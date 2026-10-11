@@ -54,6 +54,14 @@ class PlayerPaletteService {
   /// Synchronous cache lookup (null when the sleeve was never analysed).
   static PlayerPalette? cached(String url) => _cache[url];
 
+  /// Extracts a sleeve's palette in the background without waiting for it.
+  /// Used to warm the next track, so the backdrop switches instantly when the
+  /// song does instead of a beat later.
+  static void warm(String url) {
+    if (url.isEmpty || _cache.containsKey(url)) return;
+    unawaited(extract(url));
+  }
+
   /// Resolves the palette for [url], extracting it once and caching it.
   static Future<PlayerPalette> extract(String url) {
     if (url.isEmpty) return Future<PlayerPalette>.value(PlayerPalette.fallback);

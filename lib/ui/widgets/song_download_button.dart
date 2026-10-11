@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/models/song.dart';
+import '../../core/services/app_feedback.dart';
 import '../../core/services/music_download_service.dart';
 import '../../core/services/playback_service.dart';
 import '../../core/theme/saxify_accents.dart';
@@ -113,21 +114,17 @@ class SongDownloadButton extends StatelessWidget {
 
     final bool allowed = await StoragePermission.ensure(context);
     if (!allowed || !context.mounted) return;
-    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
-    messenger
-      ..hideCurrentSnackBar()
-      ..showSnackBar(const SnackBar(content: Text('Song download started')));
+    showAppNotice('Song download started');
 
     final MusicDownloadJob result = await downloads.enqueue(song, playback);
-    if (!context.mounted) return;
+    // Failures announce themselves from the service (and are not kept in the
+    // Downloads list), so no second toast is stacked on top of them.
+    if (result.phase == MusicDownloadPhase.failed) return;
     final String message = switch (result.phase) {
       MusicDownloadPhase.done => 'Saved for offline listening',
-      MusicDownloadPhase.failed => result.error ?? 'Could not download this song',
       MusicDownloadPhase.cancelled => 'Download cancelled',
       _ => 'Downloading · progress is shown on this button',
     };
-    messenger
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(message)));
+    showAppNotice(message);
   }
 }

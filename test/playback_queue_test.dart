@@ -7,6 +7,7 @@ import 'package:ifallmusic/core/models/song.dart';
 import 'package:ifallmusic/core/services/library_service.dart';
 import 'package:ifallmusic/core/services/playback_service.dart';
 import 'package:ifallmusic/core/services/settings_service.dart';
+import 'package:ifallmusic/core/services/vibe_ranker.dart';
 import 'package:ifallmusic/core/services/youtube_service.dart';
 
 Song song(String id) => Song(
@@ -126,6 +127,8 @@ class FakeYoutube implements YoutubeService {
     Song seed, {
     Iterable<Song> history = const [],
     Set<String> exclude = const {},
+    VibeMemory? vibe,
+    int limit = 12,
   }) async => pending?.future ?? recommendations;
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);

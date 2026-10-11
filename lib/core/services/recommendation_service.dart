@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../models/song.dart';
 import 'recommendation_engine.dart';
 import 'recommendation_store.dart';
+import 'vibe_ranker.dart';
 import 'youtube_service.dart';
 
 /// Builds home rails from the existing YouTube search — it does not add a
@@ -33,6 +34,35 @@ class RecommendationService extends ChangeNotifier {
     await _store.open();
     ready = _store.ready;
     notifyListeners();
+  }
+
+  /// Loads what is known on this device into the playback engine's vibe
+  /// memory: recent plays (lighter weight — an earlier session), every liked
+  /// song, and the local co-listening graph.
+  ///
+  /// This is what makes the very first "next" of a fresh launch already sound
+  /// like the listener instead of like a generic chart.
+  Future<void> hydrateVibe(VibeMemory memory, {List<Song> liked = const []}) async {
+    try {
+      if (!_store.ready) await open();
+      final List<({String id, String title, String artist})> recent =
+          await _store.recentTracks(limit: 40);
+      memory.seedHistory(<VibeTrack>[
+        for (final ({String id, String title, String artist}) track in recent)
+          VibeTrack(
+            id: track.id,
+            title: track.title,
+            artist: track.artist,
+            weight: 0.6,
+          ),
+      ]);
+      memory.seedTransitions(await _store.transitions());
+      for (final Song song in liked) {
+        memory.noteLike(song);
+      }
+    } catch (e) {
+      debugPrint('[IfallMusic][Reco] vibe hydrate failed: $e');
+    }
   }
 
   Future<void> notePlay(Song song) async {

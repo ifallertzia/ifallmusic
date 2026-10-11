@@ -29,6 +29,11 @@ import '../widgets/song_tile.dart';
 import 'equalizer_page.dart';
 import 'player_palette.dart';
 
+/// `1.0 → 1x`, `1.5 → 1.5x`, `2.0 → 2x` — the player's own speed shorthand,
+/// so the button never reads `2.0x` or `1.0x`.
+String _speedText(double speed) =>
+    speed == speed.roundToDouble() ? '${speed.toInt()}x' : '${speed}x';
+
 /// The full-screen player.
 ///
 /// Layout, top to bottom: lightweight header, square artwork (the visual
@@ -67,18 +72,36 @@ class _FullPlayerPageState extends State<FullPlayerPage>
   static const double _lyricsMaxExtent = 0.88;
 
   // ---- dynamic artwork palette -------------------------------------------
-  String? _paletteUrl;
+  String? _paletteSongId;
   PlayerPalette _palette = PlayerPalette.fallback;
+
+  /// The playback service is listened to directly, so *every* button on this
+  /// page (speed label, like state, shuffle, loop, play/pause) mirrors the
+  /// engine the instant it changes — no leaving and re-entering the page.
+  PlaybackService? _livePlayback;
 
   @override
   void initState() {
     super.initState();
     _snapBack.addListener(_onSnapBackTick);
     _lyricsCtrl.addListener(_onLyricsExtentChanged);
+    _attachPlayback();
+  }
+
+  void _attachPlayback() {
+    final PlaybackService playback = context.read<PlaybackService>();
+    if (identical(_livePlayback, playback)) return;
+    _livePlayback?.removeListener(_onPlaybackTick);
+    _livePlayback = playback..addListener(_onPlaybackTick);
+  }
+
+  void _onPlaybackTick() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    _livePlayback?.removeListener(_onPlaybackTick);
     _snapBack
       ..removeListener(_onSnapBackTick)
       ..dispose();
@@ -117,22 +140,28 @@ class _FullPlayerPageState extends State<FullPlayerPage>
   // Dynamic backdrop palette
   // -------------------------------------------------------------------------
 
-  /// Keeps [_palette] in sync with the sleeve of the current song. Cached
-  /// palettes apply instantly; new sleeves are analysed off the hot path and
-  /// the backdrop cross-fades once the colours are ready.
+  /// Keeps [_palette] in sync with the sleeve of the current song.
+  ///
+  /// The palette belongs to the *song*, not to the page: as soon as a new track
+  /// starts the backdrop switches with it — instantly when the sleeve was seen
+  /// before (pre-warmed), and via one async extraction otherwise. The previous
+  /// song's colours are never kept on screen, so no shrink-and-reopen (and no
+  /// refresh) is needed for the backdrop to follow the music live.
   void _syncPalette(Song song) {
+    if (_paletteSongId == song.id) return;
+    _paletteSongId = song.id;
     final String url = song.thumbnailUrl;
-    if (url == _paletteUrl) return;
-    _paletteUrl = url;
     final PlayerPalette? hit = PlayerPaletteService.cached(url);
-    if (hit != null) {
-      _palette = hit;
-      return;
+    _palette = hit ?? PlayerPalette.fallback;
+    if (hit == null) {
+      PlayerPaletteService.extract(url).then((PlayerPalette palette) {
+        if (!mounted || _paletteSongId != song.id) return;
+        setState(() => _palette = palette);
+      });
     }
-    PlayerPaletteService.extract(url).then((PlayerPalette palette) {
-      if (!mounted || _paletteUrl != url) return;
-      setState(() => _palette = palette);
-    });
+    // Warm the *next* sleeve too, so a manual skip still switches instantly.
+    final Song? next = context.read<PlaybackService>().nextUp;
+    if (next != null) PlayerPaletteService.warm(next.thumbnailUrl);
   }
 
   // -------------------------------------------------------------------------
@@ -202,20 +231,30 @@ class _FullPlayerPageState extends State<FullPlayerPage>
           shrinkWrap: true,
           padding: const EdgeInsets.only(bottom: 22),
           children: <Widget>[
-            for (final double s in speeds)
-              ListTile(
-                onTap: () {
-                  playback.setSpeed(s);
-                  Navigator.of(sheetContext).pop();
-                },
-                title: Text('${s}x'),
-                trailing: playback.speed == s
-                    ? Icon(
-                        Icons.check_rounded,
-                        color: sheetContext.accent.primary,
-                      )
-                    : null,
+            // Live: the tick follows the speed the moment it changes (also
+            // when it is changed from Settings while this sheet is open).
+            ListenableBuilder(
+              listenable: playback,
+              builder: (BuildContext context, Widget? _) => Column(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  for (final double s in speeds)
+                    ListTile(
+                      onTap: () {
+                        playback.setSpeed(s);
+                        Navigator.of(sheetContext).pop();
+                      },
+                      title: Text(_speedText(s)),
+                      trailing: playback.speed == s
+                          ? Icon(
+                              Icons.check_rounded,
+                              color: sheetContext.accent.primary,
+                            )
+                          : null,
+                    ),
+                ],
               ),
+            ),
           ],
         ),
       ),
@@ -745,7 +784,7 @@ class _FullPlayerPageState extends State<FullPlayerPage>
           Expanded(
             child: _UtilityButton(
               icon: Icons.speed_rounded,
-              label: '${playback.speed}x',
+              label: _speedText(playback.speed),
               active: playback.speed != 1.0,
               onTap: () => _showSpeedSheet(playback),
             ),
