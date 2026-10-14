@@ -207,6 +207,15 @@ class PlayerBackdrop {
     veil: Color(0x58000000),
   );
 
+  /// Saturation ceiling for a background colour.
+  ///
+  /// The value that actually has to hold on screen is 0.34, but the clamp is
+  /// set a little under it: a colour is quantised to 8-bit channels on its way
+  /// out of [HSLColor], and saturation re-derived from those channels can land
+  /// a hair above the number that went in (a purple sleeve measured 0.347 from
+  /// a 0.34 clamp). The headroom keeps the guarantee true for every hue.
+  static const double _satCeiling = 0.32;
+
   /// Turns a sampled sleeve into a background.
   ///
   /// The hue is whatever the artwork actually is — yellow-green sleeves come
@@ -228,11 +237,11 @@ class PlayerBackdrop {
         palette.colors.isEmpty ? MeshPalette.fallback.colors : palette.colors;
     final HSLColor hue = HSLColor.fromColor(_averageOf(sampled));
     final HSLColor base = hue
-        .withSaturation(hue.saturation.clamp(0.05, 0.34))
+        .withSaturation(hue.saturation.clamp(0.05, _satCeiling))
         .withLightness((0.050 + hue.lightness * 0.105).clamp(0.045, 0.165));
     final HSLColor wash = base
         .withLightness((base.lightness + 0.05).clamp(0.0, 0.24))
-        .withSaturation((base.saturation * 0.85).clamp(0.0, 0.34));
+        .withSaturation((base.saturation * 0.85).clamp(0.0, _satCeiling));
     Color hot = sampled.first;
     for (final Color c in sampled) {
       if (c.computeLuminance() > hot.computeLuminance()) hot = c;
