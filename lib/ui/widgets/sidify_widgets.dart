@@ -137,8 +137,21 @@ class Artwork extends StatelessWidget {
 // Glass — the frosted chrome of the tab bar, mini player and menus.
 // ---------------------------------------------------------------------------
 
-/// `bar-glass` from the web CSS: blurred bar colour, hairline edge, soft
-/// shadow. Falls back to a flat surface when the user turns glass off.
+/// Liquid glass: a frosted backdrop under a charcoal pane, lit along the top
+/// edge and finished with a hairline that catches the light. This is the
+/// surface the floating dock (mini player + tab bar) is made of.
+///
+/// Geometry is entirely the caller's — radius, padding and child are passed
+/// straight through, so this changes how a surface *looks*, never how much
+/// room it takes. Two details matter for the Apple-like finish:
+///
+///  * the ambient shadow is painted **outside** the clip (a shadow inside a
+///    [ClipRRect] is clipped away and never reaches the screen) and shadows
+///    never affect layout, so the pane keeps its exact footprint;
+///  * the edge hairline is a gradient stroke painted *over* the content, so
+///    it reads as the pane's lit rim instead of a border drawn underneath.
+///
+/// Falls back to a flat surface when the user turns glass off in Settings.
 class GlassBox extends StatelessWidget {
   const GlassBox({
     super.key,
@@ -153,76 +166,144 @@ class GlassBox extends StatelessWidget {
   final bool bar;
   final EdgeInsetsGeometry? padding;
 
+  /// Frost strength. Restrained on purpose: enough to blur artwork behind the
+  /// dock into colour, cheap enough to stay smooth while the page scrolls.
+  double get _sigma => bar ? 28 : 22;
+
+  /// Wide, soft shadow that lifts the pane off the page.
+  BoxShadow _ambient(SidifyTokens t) => BoxShadow(
+        color: Colors.black.withValues(alpha: t.isDark ? 0.46 : 0.16),
+        blurRadius: bar ? 28 : 22,
+        spreadRadius: -6,
+        offset: const Offset(0, 12),
+      );
+
+  /// Tight contact shadow right under the edge — what makes it float rather
+  /// than hover.
+  BoxShadow _contact(SidifyTokens t) => BoxShadow(
+        color: Colors.black.withValues(alpha: t.isDark ? 0.34 : 0.10),
+        blurRadius: 8,
+        spreadRadius: -4,
+        offset: const Offset(0, 2),
+      );
+
   @override
   Widget build(BuildContext context) {
     final SidifyTokens t = context.sidify;
     final bool glass = context.watch<SettingsService>().liquidGlass;
+    final BorderRadius corners = BorderRadius.circular(radius);
     final Widget content = Container(padding: padding, child: child);
-    final Widget inner = Container(
+
+    if (!glass) {
+      return DecoratedBox(
+        decoration: BoxDecoration(
+          color: t.raised,
+          borderRadius: corners,
+          border: Border.all(color: t.edge, width: 0.75),
+          boxShadow: <BoxShadow>[_ambient(t), _contact(t)],
+        ),
+        child: content,
+      );
+    }
+
+    // The pane: charcoal glass, a touch deeper towards the bottom so it still
+    // reads as a surface when pure-black artwork sits behind it.
+    final Color pane = bar ? t.bar : t.glass;
+    final double paneTop = t.isDark ? 0.84 : 0.88;
+    final double paneBottom = t.isDark ? 0.70 : 0.78;
+
+    return DecoratedBox(
+      // The shadow sits outside the clip: inside a ClipRRect it would be cut
+      // away and never reach the screen. Shadows are paint-only, so the pane
+      // keeps the exact footprint the caller asked for.
       decoration: BoxDecoration(
-        // The site's `bar-glass`/`glass`: a translucent tint under a soft
-        // diagonal sheen, edged by a 0.5px hairline and a lit top rim.
-        gradient: glass
-            ? LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: <Color>[
-                  (bar ? t.bar : t.glass),
-                  (bar ? t.bar : t.glass).withValues(alpha: 0.82),
-                ],
-              )
-            : null,
-        color: glass ? null : t.raised,
-        borderRadius: BorderRadius.circular(radius),
-        border: Border.all(color: t.edge, width: 0.75),
-        boxShadow: <BoxShadow>[
-          BoxShadow(
-            color: Colors.black.withValues(alpha: t.isDark ? 0.45 : 0.12),
-            blurRadius: bar ? 32 : 24,
-            offset: const Offset(0, 10),
-          ),
-          if (bar)
-            BoxShadow(
-              color: Colors.black.withValues(alpha: t.isDark ? 0.28 : 0.08),
-              blurRadius: 16,
-              offset: const Offset(0, 4),
-            ),
-        ],
+        borderRadius: corners,
+        boxShadow: <BoxShadow>[_ambient(t), _contact(t)],
       ),
-      child: glass && bar
-          ? DecoratedBox(
-              // The site's 135° white sheen that makes the bar read as glass.
+      child: ClipRRect(
+        // Everything below is clipped to the pane, so the frost can never
+        // bleed past the rounded silhouette.
+        borderRadius: corners,
+        child: BackdropFilter(
+          filter: ui.ImageFilter.blur(sigmaX: _sigma, sigmaY: _sigma),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: <Color>[
+                  pane.withValues(alpha: paneTop),
+                  pane.withValues(alpha: paneBottom),
+                ],
+              ),
+            ),
+            child: DecoratedBox(
+              // Specular: a lit top rim, a quiet middle, and the faint bounce
+              // light along the bottom edge — restrained, never neon.
               decoration: BoxDecoration(
                 gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
                   colors: <Color>[
-                    Colors.white.withValues(alpha: 0.14),
-                    Colors.white.withValues(alpha: 0.04),
-                    Colors.white.withValues(alpha: 0.02),
-                    Colors.white.withValues(alpha: 0.08),
+                    Colors.white.withValues(alpha: t.isDark ? 0.17 : 0.42),
+                    Colors.white.withValues(alpha: t.isDark ? 0.05 : 0.14),
+                    Colors.white.withValues(alpha: 0),
+                    Colors.black.withValues(alpha: t.isDark ? 0.10 : 0.05),
                   ],
-                  stops: const <double>[0, 0.42, 0.68, 1],
+                  stops: const <double>[0, 0.14, 0.55, 1],
                 ),
               ),
-              child: content,
-            )
-          : content,
-    );
-    if (!glass) return inner;
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(radius),
-      child: BackdropFilter(
-        // Heavy frosted glass — 44px for the floating bar, 30px elsewhere,
-        // matching the site's `bar-glass` / `chrome-glass` blur.
-        filter: ui.ImageFilter.blur(
-          sigmaX: bar ? 44 : 30,
-          sigmaY: bar ? 44 : 30,
+              child: CustomPaint(
+                foregroundPainter: _GlassEdgePainter(radius, t),
+                child: content,
+              ),
+            ),
+          ),
         ),
-        child: inner,
       ),
     );
   }
+}
+
+/// The hairline that finishes a glass pane: bright where the light hits the
+/// top edge, all but gone along the bottom. Drawn inside the clip so it never
+/// adds a pixel to the surface.
+class _GlassEdgePainter extends CustomPainter {
+  const _GlassEdgePainter(this.radius, this.tokens);
+
+  final double radius;
+  final SidifyTokens tokens;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (size.isEmpty) return;
+    final bool dark = tokens.isDark;
+    final Color light = dark ? Colors.white : Colors.black;
+    // Half a pixel in, so the stroke straddles the pane's own silhouette.
+    final Rect rect = (Offset.zero & size).deflate(0.5);
+    final double corner = radius.clamp(0.0, rect.shortestSide / 2);
+    final Paint paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1
+      ..shader = ui.Gradient.linear(
+        rect.topCenter,
+        rect.bottomCenter,
+        <Color>[
+          light.withValues(alpha: dark ? 0.30 : 0.18),
+          light.withValues(alpha: dark ? 0.10 : 0.08),
+          light.withValues(alpha: dark ? 0.05 : 0.04),
+        ],
+        <double>[0, 0.45, 1],
+      );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(rect, Radius.circular(corner)),
+      paint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_GlassEdgePainter oldDelegate) =>
+      oldDelegate.radius != radius || oldDelegate.tokens != tokens;
 }
 
 // ---------------------------------------------------------------------------
@@ -784,6 +865,10 @@ class SidifyGroupRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final SidifyTokens t = context.sidify;
+    // An empty title means the leading icon *is* the label (the Speed row):
+    // no text column at all, so the trailing control gets the row's width and
+    // can wrap instead of fighting a word for the same line.
+    final bool hasText = title.isNotEmpty || subtitle != null;
     final Widget row = Container(
       constraints: const BoxConstraints(minHeight: 52),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -793,30 +878,40 @@ class SidifyGroupRow extends StatelessWidget {
             Icon(icon, size: 19, color: danger ? t.danger : t.text),
             const SizedBox(width: 12),
           ],
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  title,
-                  style: TextStyle(
-                    fontSize: 15,
-                    color: danger ? t.danger : t.text,
-                  ),
-                ),
-                if (subtitle != null)
+          if (hasText)
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
                   Text(
-                    subtitle!,
+                    title,
                     style: TextStyle(
-                      fontSize: 12.5,
-                      height: 1.35,
-                      color: t.text2,
+                      fontSize: 15,
+                      color: danger ? t.danger : t.text,
                     ),
                   ),
-              ],
-            ),
-          ),
-          if (trailing != null) ...<Widget>[
+                  if (subtitle != null)
+                    Text(
+                      subtitle!,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        height: 1.35,
+                        color: t.text2,
+                      ),
+                    ),
+                ],
+              ),
+            )
+          else if (trailing != null)
+            Expanded(
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: trailing!,
+              ),
+            )
+          else if (chevron)
+            const Spacer(),
+          if (hasText && trailing != null) ...<Widget>[
             const SizedBox(width: 8),
             trailing!,
           ],
