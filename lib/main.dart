@@ -14,6 +14,7 @@ import 'core/services/artist_service.dart';
 import 'core/services/boot_log.dart';
 import 'core/services/home_catalog.dart';
 import 'core/services/library_service.dart';
+import 'core/services/listen_together_service.dart';
 import 'core/services/local_music_service.dart';
 import 'core/services/music_download_service.dart';
 import 'core/services/native_bridge.dart';
@@ -29,8 +30,8 @@ import 'core/theme/saxify_accents.dart';
 import 'core/theme/saxify_theme.dart';
 import 'core/theme/theme_controller.dart';
 import 'ui/onboarding/welcome_page.dart';
+import 'ui/shell/ifall_shell.dart';
 import 'ui/shell/mini_player_layer.dart';
-import 'ui/shell/saxify_shell.dart';
 import 'ui/shell/shell_controller.dart';
 
 Future<void> _restoreEqualizerForPlayback(
@@ -341,6 +342,9 @@ class _IfallMusicAppState extends State<IfallMusicApp>
         ChangeNotifierProvider<ShellController>(
           create: (_) => ShellController(),
         ),
+        ChangeNotifierProvider<JamService>(
+          create: (_) => JamService(settings: boot.settings),
+        ),
       ],
       child: Provider<YoutubeService>.value(
         value: boot.youtube,
@@ -368,7 +372,7 @@ class IfallProfileGate extends StatelessWidget {
     if (settings.displayName.isEmpty) {
       return WelcomePage(onComplete: settings.setDisplayName);
     }
-    return const SaxifyShell();
+    return const IfallShell();
   }
 }
 

@@ -89,6 +89,13 @@ class IfallPalette {
 
   bool get isDark => brightness == Brightness.dark;
 
+  /// A neutral fill for chips, fields and progress tracks — one step above
+  /// [background], one below [surface].
+  Color get fill => surfaceVariant;
+
+  /// The destructive colour for this brightness.
+  Color get danger => isDark ? IfallColors.dangerLight : const Color(0xFFFF3B30);
+
   /// Builds the palette for [brightness], tinted by the live [accent].
   factory IfallPalette.of(BuildContext context) {
     final ThemeData theme = Theme.of(context);

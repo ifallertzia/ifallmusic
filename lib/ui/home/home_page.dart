@@ -258,7 +258,7 @@ class _HomePageState extends State<HomePage> {
                       }
                       final AlbumCard album = HomeCatalog.newReleases[i];
                       return AlbumTile(
-                        coverUrl: album.coverUrl ?? '',
+                        coverUrl: album.coverUrl,
                         title: album.title,
                         artist: album.artist,
                         onTap: () => _openAlbum(album),
