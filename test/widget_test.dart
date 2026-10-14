@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ifallmusic/config/branding.dart';
 import 'package:ifallmusic/core/models/album_card.dart';
 import 'package:ifallmusic/core/theme/saxify_accents.dart';
 import 'package:ifallmusic/core/utils/format.dart';
@@ -92,9 +93,12 @@ void main() {
       expect(find.byType(Image), findsOneWidget);
       final image = tester.widget<Image>(find.byType(Image));
       expect(image.image, isA<AssetImage>());
+      // Asserted against the branding constant rather than a literal path:
+      // the mascot was repainted into `ifall_motu_master.png` and the test
+      // should not have to change every time the artwork file is swapped.
       expect(
         (image.image as AssetImage).assetName,
-        'assets/images/saxify_logo.png',
+        IfallBranding.logoAsset,
       );
     });
   });
