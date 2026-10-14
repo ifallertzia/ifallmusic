@@ -1,102 +1,36 @@
-# IfallMusic 2.8.0
+# Sidify 2.9.0
 
-The BitChord-look release: the whole app now wears the frosted-glass,
-true-black design with the sliding-pill tab bar, and the chubby motu
-mascot is the logo in every slot. Same package (`com.ifallmusic.app`),
-same release key — install it straight over 2.7.0, no conflict.
+Sidify is the new name — and the new face — of this app. The whole interface
+now matches sidify.vercel.app, section for section. Same package
+(`com.ifallmusic.app`), same release key: install straight over your current
+app, no conflict. Your library, settings, playlists and downloads all carry
+over untouched.
 
-## New
-- **Listen Together rooms** — create or join a room and listen in sync.
-- **Animated album canvas** on Now Playing, dynamic artwork colours.
-- **True crossfade 0–12 s, Automix, volume normalization**, skip
-  silence, playback speed and a sleep timer (presets + stop-after-track).
-- **Stats for nerds** and Replay / on-device listening stats.
-- **Lyrics from more places** (LRCLIB → lrc.red / KuGou / Megalobiz →
-  lyrics.ovh), **plus translation** that keeps the synced timings.
-- **Last.fm + ListenBrainz scrobbling** and Discord Rich Presence.
-- **Spotify playlist import** — paste a public playlist link; it is
-  matched and rebuilt as a local playlist.
-- **Extra module sources** are now a real final fallback rung in the
-  stream resolver, after the built-in engine.
-- **Per-network audio quality** (Wi-Fi / mobile) now actually caps the
-  stream bitrate on both resolvers; downloads stay uncapped.
+## New look
 
-## Fixes
-- Settings no longer claims "0 downloads active" forever.
-- Lyrics provider order and translation choice apply from first launch.
-- The whole build is CI-green again (analyze, tests, signed APK + AAB).
+- **Five tabs, one glass bar** — Home, Explore, Search, Library and Listen
+  Together under a floating frosted-glass tab bar, with the pill mini-player
+  floating just above it.
+- **Home** — greeting with your name, Top picks, Quick picks, Recently
+  played, New releases, Top artists and picks from your Liked Songs.
+- **Explore** — new releases, trending songs, mood tiles and genre stations.
+- **Search** — recent searches, categories, and Top results / Songs / Albums /
+  Artists filters.
+- **Now Playing** — full screen with an artwork-colour mesh backdrop,
+  breathing artwork, karaoke lyrics that follow the line, queue controls,
+  AutoPlay, crossfade and the equalizer.
+- **Library** — Your Replay, Liked Songs, History, Downloads, Lyrics finder,
+  on-device music, pinnable playlists and followed artists.
+- **Settings** — reorganised the site's way: Profile, Appearance (Dark /
+  Light / Auto, colour from artwork), Playback, Sound, Lyrics, Listen
+  Together, Downloads & storage, backup and About.
+- **The logo** — the new mark (from the "replacement of motu logo" photo)
+  is now the app icon, the splash and the in-app logo everywhere.
 
-# IfallMusic 2.6.0 (build 22)
+## Under the hood
 
-Rebuilt on **build 17** — the layout everybody liked — with only the build-21
-improvements that were asked for. Nothing else from build 21 was carried over.
-
-## Player
-
-- The player page now scrolls. The top row (back, lyrics, sleep timer, menu)
-  stays exactly where it is; everything below moves and the lyrics live at the
-  bottom, below the speed / add / queue row.
-- **Add playlist** is gone as a labelled chip — there is a plain **+** in a
-  circle next to the equalizer instead.
-- The lyrics block shows only the words: no song title (it is already above),
-  no "wrong lyrics?" chatter — mismatch reporting stays in the lyrics finder.
-  A small **Static / Synced** switch and a reload are all that is left.
-- When a track cannot be found the player says:
-
-  > iska nahi dundh paya..sorry🥲
-  >
-  > shayad ye song playback kisi normal server se play ho raha,ya iska artist
-  > understand hai,,ya shayad ye song abhi underrated hai🥲..sorry again,,
-  > ifallertzia isko jaldi thik kr denge
-
-## Home
-
-- Home keeps the build-17 layout.
-- Nothing sits in a card any more: greeting, trending and recommendations read
-  as part of the page.
-- Richer, YouTube-Music-like coloured backdrop — vivid but still professional.
-  Every screen (Home, Search, Library, Settings) now shares it.
-
-## Navigation bar
-
-- The selection is a **sliding pill**: tap a tab and it glides across, or grab
-  the pill and **drag** it sideways (Home → Search → Library) like Instagram on
-  iPhone.
-- Scroll any page down and the whole bar shrinks to icons; scroll up and it
-  comes back with labels.
-
-## Brought in from build 21
-
-- **Spotify Green default**, with the opt-in "use colour across the app" switch
-  in Settings.
-- **Library** reworked: one clean list ("Your Space") with each section opening
-  as its own page, and the ink-splash / Material crash fixed.
-- **Faster Search**: lazily built rows, a remembered-results cache and a
-  "Clear search memory" row in Settings.
-- **Faster on-device search** — results are memoised instead of rescanned on
-  every keystroke.
-- **Gapless**: the next track's stream is resolved 90 s ahead (was 45 s).
-- Cache repair never touches saved preferences any more.
-
-## Fixed
-
-- **Background playback no longer stops on its own.** The notification is now
-  ongoing (a stray swipe cannot kill the track) and the app asks once to be
-  excluded from battery optimisation — the usual reason a long track dies a few
-  minutes after the screen goes off.
-- **Your playlists can no longer be wiped by a settings reset.** Resetting
-  preferences used to clear the whole shared-preferences file, which is also
-  where likes, playlists, history and downloads live.
-- **Search puts original songs first** (YouTube-Music order): real tracks, then
-  albums / artists, then raw video results.
-- **High refresh rate enabled**: the app now asks the display for its fastest
-  mode, so 90 / 120 Hz panels animate at full speed instead of 60.
-- Quality label: a tiny gold **premium** plate with micro "HD" lettering for
-  album-master sources, and nothing at all for normal ones.
-
-## How to update
-
-Download `app-release.apk` below and install it over your current app. The
-Android application id and release-signing configuration are unchanged and the
-build number has increased to 22, so it installs in place. Your library,
-playlists and downloads stay exactly as they are.
+- The playback engine is unchanged: same stream resolver, same queue,
+  gapless, downloads, Listen Together rooms and recommendations.
+- Android label is now **Sidify**; the package id and signing key are
+  untouched, so the update is seamless.
+- Version **2.9.0 (build 34)**.

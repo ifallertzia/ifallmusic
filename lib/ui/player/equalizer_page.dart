@@ -6,15 +6,13 @@ import 'package:provider/provider.dart';
 import '../../core/services/native_bridge.dart';
 import '../../core/services/playback_service.dart';
 import '../../core/services/settings_service.dart';
-import '../../core/theme/saxify_accents.dart';
-import '../../core/theme/saxify_theme.dart';
-import '../widgets/search_fab.dart';
-import '../../core/theme/ifall_ui.dart';
+import '../../core/theme/sidify_theme.dart';
+import '../widgets/sidify_widgets.dart';
 
-/// Studio equalizer with saved user presets.
-///
-/// Bands bind to the running Android player session, and selected settings
-/// persist across tracks and app restarts.
+/// The equalizer, in the Sidify style: an on/off row, preset chips and one
+/// vertical slider per band. Bands bind to the running Android player session
+/// (the engine's native bridge) and persist through Settings, exactly as
+/// before — only the clothes are new.
 class EqualizerPage extends StatefulWidget {
   const EqualizerPage({super.key});
 
@@ -29,9 +27,8 @@ class _EqualizerPageState extends State<EqualizerPage> {
   bool _unsupported = false;
   List<int> _levels = <int>[];
   String? _preset;
-  List<Map<String, dynamic>> _savedPresets = <Map<String, dynamic>>[];
 
-  static const List<String> _custom = <String>[
+  static const List<String> _builtIn = <String>[
     'Flat',
     'Bass Boost',
     'Vocal',
@@ -79,39 +76,31 @@ class _EqualizerPageState extends State<EqualizerPage> {
       _loading = false;
       _info = info;
       _unsupported = info == null || !info.supported;
-      _savedPresets = settings.equalizerCustomPresets;
-      final List<int> savedLevels = settings.equalizerLevels;
       _enabled = settings.equalizerEnabled;
       _preset = settings.equalizerProfileName == 'Original audio'
           ? null
           : settings.equalizerProfileName;
       _levels = info == null ? <int>[] : List<int>.from(info.levels);
-      if (savedLevels.length == info?.bands) _levels = savedLevels;
+      final List<int> saved = settings.equalizerLevels;
+      if (saved.length == info?.bands) _levels = saved;
     });
-    if (info != null && info.supported && settings.equalizerEnabled) {
-      final List<int> savedLevels = settings.equalizerLevels;
-      for (int i = 0; i < savedLevels.length && i < info.bands; i++) {
-        await NativeBridge.eqSetBand(i, savedLevels[i]);
+    if (info != null && info.supported) {
+      if (settings.equalizerEnabled) {
+        final List<int> saved = settings.equalizerLevels;
+        for (int i = 0; i < saved.length && i < info.bands; i++) {
+          await NativeBridge.eqSetBand(i, saved[i]);
+        }
+        await NativeBridge.eqSetEnabled(true);
+      } else {
+        await NativeBridge.eqSetEnabled(false);
       }
-      await NativeBridge.eqSetEnabled(true);
-    } else if (info != null && info.supported) {
-      await NativeBridge.eqSetEnabled(false);
     }
   }
 
   Future<void> _applyPreset(String name) async {
     final EqualizerInfo? info = _info;
     if (info == null) return;
-    Map<String, dynamic>? saved;
-    for (final Map<String, dynamic> item in _savedPresets) {
-      if (item['name'] == name) {
-        saved = item;
-        break;
-      }
-    }
-    final List<int> next = saved?['levels'] is List
-        ? (saved!['levels'] as List).map((Object? v) => v is num ? v.round() : 0).toList()
-        : _curve(name, info);
+    final List<int> next = _curve(name, info);
     for (int i = 0; i < next.length && i < info.bands; i++) {
       await NativeBridge.eqSetBand(i, next[i]);
     }
@@ -123,266 +112,216 @@ class _EqualizerPageState extends State<EqualizerPage> {
       _enabled = true;
     });
     await context.read<SettingsService>().setEqualizerProfile(
-      name: name,
-      levels: next,
-      enabled: true,
-    );
-  }
-
-  Future<void> _saveCustomPreset() async {
-    final TextEditingController controller = TextEditingController();
-    final String? name = await showDialog<String>(
-      context: context,
-      builder: (BuildContext dialogContext) => AlertDialog(
-        title: const Text('Save equalizer preset'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLength: 24,
-          decoration: const InputDecoration(labelText: 'Preset name'),
-          onSubmitted: (String value) => Navigator.of(dialogContext).pop(value),
-        ),
-        actions: <Widget>[
-          TextButton(onPressed: () => Navigator.of(dialogContext).pop(), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.of(dialogContext).pop(controller.text), child: const Text('Save')),
-        ],
-      ),
-    );
-    controller.dispose();
-    final String clean = name?.trim() ?? '';
-    if (clean.isEmpty || !mounted || _levels.isEmpty) return;
-    final SettingsService settings = context.read<SettingsService>();
-    await settings.saveEqualizerCustomPreset(clean, _levels);
-    await NativeBridge.eqSetEnabled(true);
-    await settings.setEqualizerProfile(name: clean, levels: _levels, enabled: true);
-    if (!mounted) return;
-    setState(() {
-      _preset = clean;
-      _enabled = true;
-      _savedPresets = settings.equalizerCustomPresets;
-    });
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Saved "$clean"')));
+          name: name,
+          levels: next,
+          enabled: true,
+        );
   }
 
   List<int> _curve(String name, EqualizerInfo info) {
     final int n = info.bands;
     final int min = info.minLevel;
     final int max = info.maxLevel;
-    int clamp(double unit) {
+    int clampUnit(double unit) {
       final double span = (max - min).toDouble();
       final int value = (min + span * unit).round();
-      if (value < min) return min;
-      if (value > max) return max;
-      return value;
+      return value.clamp(min, max);
     }
 
     return List<int>.generate(n, (int i) {
       final double t = n == 1 ? 0.5 : i / (n - 1);
-      switch (name) {
-        case 'Bass Boost':
-          return clamp(t < 0.35 ? 0.85 : 0.40);
-        case 'Vocal':
-          return clamp(t > 0.3 && t < 0.7 ? 0.82 : 0.42);
-        case 'Rock':
-          return clamp(t < 0.25 || t > 0.75 ? 0.8 : 0.45);
-        case 'Pop':
-          return clamp(0.55 + (t - 0.5).abs() * 0.4);
-        case 'Flat':
-        default:
-          return 0.clamp(min, max);
-      }
+      return switch (name) {
+        'Bass Boost' => clampUnit(t < 0.35 ? 0.85 : 0.40),
+        'Vocal' => clampUnit(t > 0.3 && t < 0.7 ? 0.82 : 0.42),
+        'Rock' => clampUnit(t < 0.25 || t > 0.75 ? 0.8 : 0.45),
+        'Pop' => clampUnit(0.55 + (t - 0.5).abs() * 0.4),
+        _ => 0.clamp(min, max),
+      };
     });
   }
 
-  @override
-  void dispose() {
-    // Leave the effect attached so playback keeps the curve after this page closes.
-    super.dispose();
+  Future<void> _bandChanged(int band, int level) async {
+    final EqualizerInfo? info = _info;
+    if (info == null) return;
+    setState(() {
+      _levels[band] = level;
+      _preset = null;
+    });
+    await NativeBridge.eqSetBand(band, level);
+    if (_enabled) {
+      await context.read<SettingsService>().setEqualizerProfile(
+            name: 'Custom',
+            levels: List<int>.of(_levels),
+            enabled: true,
+          );
+    }
+  }
+
+  Future<void> _setEnabled(bool v) async {
+    setState(() => _enabled = v);
+    await NativeBridge.eqSetEnabled(v);
+    await context.read<SettingsService>().setEqualizerProfile(
+          name: _preset ?? 'Custom',
+          levels: List<int>.of(_levels),
+          enabled: v,
+        );
+  }
+
+  String _freq(int milliHz) {
+    final double hz = milliHz / 1000;
+    if (hz >= 1000) return '${(hz / 1000).toStringAsFixed(hz >= 10000 ? 0 : 1)}k';
+    return '${hz.round()}';
   }
 
   @override
   Widget build(BuildContext context) {
-    final SettingsService settings = context.read<SettingsService>();
-    return IfallBackdrop(
-      intensity: 0.7,
-      child: Scaffold(
+    final SidifyTokens t = context.sidify;
+    final EqualizerInfo? info = _info;
+    return Scaffold(
+      backgroundColor: t.bg,
+      appBar: AppBar(
         backgroundColor: Colors.transparent,
-        appBar: AppBar(
-          title: const Text('Equalizer'),
-          actions: const <Widget>[SaxifySearchButton()],
+        elevation: 0,
+        leading: IconButton(
+          icon: Icon(Icons.arrow_back_rounded, color: t.text),
+          onPressed: () => Navigator.of(context).pop(),
         ),
-        body: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 6, 16, 180),
-          children: <Widget>[
-            // ------------------------------------------------ bands
-            const IfallSectionHeader(
-              title: 'Studio equalizer',
-              subtitle: 'Bound to the live player session',
-              padding: EdgeInsets.fromLTRB(4, 6, 4, 10),
-            ),
-            if (_loading)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 40),
-                child: Center(child: CircularProgressIndicator()),
-              )
-            else if (_unsupported)
-              const IfallEmpty(
-                icon: Icons.graphic_eq_rounded,
-                message:
-                    'Equalizer unavailable — this device does not expose an audio session equalizer. Playback is unchanged.',
-              )
-            else ...<Widget>[
-              IfallGlass(
-                radius: SaxifyTheme.radiusMd,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+        title: Text('Equalizer', style: SidifyText.titleM(t.text)),
+      ),
+      body: _loading
+          ? Center(child: CircularProgressIndicator(color: t.text2))
+          : _unsupported || info == null
+              ? EmptyState(
+                  icon: Icons.equalizer_rounded,
+                  title: 'Equalizer unavailable',
+                  desc: 'Play a song first, then come back — the equalizer '
+                      'attaches to the playing audio.',
+                )
+              : ListView(
+                  padding: const EdgeInsets.only(top: 8, bottom: 40),
                   children: <Widget>[
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('Enable equalizer'),
-                      subtitle: const Text(
-                        'Connected to the current player session',
-                        style: TextStyle(color: IfallTokens.textMuted, fontSize: 12),
-                      ),
-                      value: _enabled,
-                      onChanged: (bool v) async {
-                        await NativeBridge.eqSetEnabled(v);
-                        if (!mounted) return;
-                        setState(() => _enabled = v);
-                        await settings.setEqualizerProfile(
-                          name: v ? (_preset ?? 'Custom') : 'Original audio',
-                          levels: _levels,
-                          enabled: v,
-                        );
-                      },
-                    ),
-                    const SizedBox(height: 4),
-                    const Text(
-                      'Presets',
-                      style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
-                    ),
-                    const SizedBox(height: 10),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
+                    SidifyGroup(
                       children: <Widget>[
-                        for (final String name in <String>[
-                          ..._custom,
-                          ...?_info?.presets.where((String p) => !_custom.contains(p)),
-                        ..._savedPresets.map((Map<String, dynamic> p) => p['name'].toString()),
-                        ])
-                          ChoiceChip(
-                            label: Text(name),
-                            selected: _preset == name,
-                            onSelected: (_) => _applyPreset(name),
+                        SidifyGroupRow(
+                          icon: Icons.equalizer_rounded,
+                          title: 'Equalizer',
+                          subtitle: _preset ?? 'Custom curve',
+                          trailing: SidifySwitch(
+                            value: _enabled,
+                            label: 'Equalizer',
+                            onChanged: _setEnabled,
                           ),
+                        ),
                       ],
                     ),
-                    const SizedBox(height: 10),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: TextButton.icon(
-                        onPressed: _levels.isEmpty ? null : _saveCustomPreset,
-                        icon: const Icon(Icons.add_rounded, size: 18),
-                        label: const Text('Save current preset'),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+                      child: Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: <Widget>[
+                          for (final String name in _builtIn)
+                            _presetChip(name),
+                        ],
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: <Widget>[
+                          for (int i = 0; i < info.bands; i++)
+                            Expanded(child: _bandSlider(info, i)),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Text(
+                        'Levels are in decibels, bound to the device\'s audio '
+                        'session. The curve is restored automatically on the '
+                        'next song.',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          height: 1.45,
+                          color: t.text2,
+                        ),
                       ),
                     ),
                   ],
                 ),
-              ),
-              const SizedBox(height: 12),
-              for (int i = 0; i < (_info?.bands ?? 0); i++)
-                _BandSlider(
-                  index: i,
-                  centerHz: (_info!.centersMilliHz.length > i
-                          ? _info!.centersMilliHz[i]
-                          : 0) /
-                      1000,
-                  min: _info!.minLevel,
-                  max: _info!.maxLevel,
-                  value: _levels.length > i ? _levels[i] : 0,
-                  enabled: _enabled,
-                  onChanged: (int level) async {
-                    setState(() {
-                      _preset = null;
-                      if (_levels.length > i) _levels[i] = level;
-                    });
-                    await NativeBridge.eqSetBand(i, level);
-                    if (!mounted) return;
-                    await settings.setEqualizerProfile(
-                      name: 'Custom',
-                      levels: _levels,
-                      enabled: _enabled,
-                    );
-                  },
-                ),
-            ],
-          ],
+    );
+  }
+
+  Widget _presetChip(String name) {
+    final SidifyTokens t = context.sidify;
+    final bool on = _preset == name && _enabled;
+    return Material(
+      color: on ? t.primary : t.fill,
+      borderRadius: BorderRadius.circular(999),
+      child: InkWell(
+        onTap: () => _applyPreset(name),
+        borderRadius: BorderRadius.circular(999),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          child: Text(
+            name,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: on ? t.onPrimary : t.text,
+            ),
+          ),
         ),
       ),
     );
   }
-}
 
-class _BandSlider extends StatelessWidget {
-  const _BandSlider({
-    required this.index,
-    required this.centerHz,
-    required this.min,
-    required this.max,
-    required this.value,
-    required this.enabled,
-    required this.onChanged,
-  });
-
-  final int index;
-  final num centerHz;
-  final int min;
-  final int max;
-  final int value;
-  final bool enabled;
-  final ValueChanged<int> onChanged;
-
-  String get _label {
-    if (centerHz >= 1000) return '${(centerHz / 1000).toStringAsFixed(1)} kHz';
-    if (centerHz <= 0) return 'Band ${index + 1}';
-    return '${centerHz.round()} Hz';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final SaxifyAccent accent = context.accent;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
+  Widget _bandSlider(EqualizerInfo info, int band) {
+    final SidifyTokens t = context.sidify;
+    final int level = band < _levels.length ? _levels[band] : 0;
+    final double db = level / 100;
+    final int center = band < info.centersMilliHz.length
+        ? info.centersMilliHz[band]
+        : 0;
+    return Opacity(
+      opacity: _enabled ? 1 : 0.45,
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Row(
-            children: <Widget>[
-              Expanded(
-                child: Text(
-                  _label,
-                  style: const TextStyle(
-                    fontSize: 12.5,
-                    color: IfallTokens.textSecondary,
-                  ),
-                ),
-              ),
-              Text(
-                '${value > 0 ? '+' : ''}${(value / 100).toStringAsFixed(1)} dB',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: accent.primary,
-                ),
-              ),
-            ],
+          Text(
+            '${db >= 0 ? '+' : ''}${db.toStringAsFixed(1)}',
+            style: TextStyle(fontSize: 11, color: t.text2),
           ),
-          Slider(
-            min: min.toDouble(),
-            max: max.toDouble(),
-            value: value.clamp(min, max).toDouble(),
-            onChanged: enabled ? (double v) => onChanged(v.round()) : null,
+          SizedBox(
+            height: 190,
+            child: RotatedBox(
+              quarterTurns: 3,
+              child: SliderTheme(
+                data: SliderThemeData(
+                  trackHeight: 4,
+                  activeTrackColor: t.text,
+                  inactiveTrackColor: t.fill3,
+                  thumbColor: t.text,
+                  thumbShape:
+                      const RoundSliderThumbShape(enabledThumbRadius: 7),
+                  overlayShape:
+                      const RoundSliderOverlayShape(overlayRadius: 14),
+                ),
+                child: Slider(
+                  value: level.toDouble(),
+                  min: info.minLevel.toDouble(),
+                  max: info.maxLevel.toDouble(),
+                  onChanged: _enabled
+                      ? (double v) => _bandChanged(band, v.round())
+                      : null,
+                ),
+              ),
+            ),
+          ),
+          Text(
+            center > 0 ? _freq(center) : '—',
+            style: TextStyle(fontSize: 11.5, color: t.text2),
           ),
         ],
       ),

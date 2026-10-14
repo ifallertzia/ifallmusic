@@ -8,7 +8,7 @@ class ArtworkCache {
   ArtworkCache._();
 
   static final Map<String, ImageProvider> _providers = <String, ImageProvider>{};
-  static const ImageProvider logo = AssetImage(IfallBranding.splashAsset);
+  static const ImageProvider logo = AssetImage(SidifyBranding.splashAsset);
 
   static ImageProvider providerFor(String url) {
     if (url.isEmpty || url.startsWith('content:') || url.startsWith('file:')) {

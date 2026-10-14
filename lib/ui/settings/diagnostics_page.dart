@@ -1,131 +1,183 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
+
 import '../../config/branding.dart';
-import '../../core/theme/ifall_ui.dart';
+import '../../core/services/app_feedback.dart';
+import '../../core/services/boot_log.dart';
+import '../../core/services/native_bridge.dart';
+import '../../core/services/playback_service.dart';
+import '../../core/theme/sidify_theme.dart';
+import '../widgets/sidify_widgets.dart';
 
-/// App diagnostics — deliberately short and human readable.
-///
-/// The old build let you point the app at a remote downloader backend and then
-/// reported on it here. That whole section is gone: nothing in IfallMusic
-/// depends on a server, so there is nothing to poll.
-class DiagnosticsPage extends StatelessWidget {
-  const DiagnosticsPage({super.key, this.safeMode = false});
+/// Diagnostics: what the app is running, the last playback error, and the
+/// boot log — the page to open when something misbehaves. Copyable, so a
+/// report can be pasted anywhere.
+class DiagnosticsPage extends StatefulWidget {
+  const DiagnosticsPage({super.key});
 
-  final bool safeMode;
+  @override
+  State<DiagnosticsPage> createState() => _DiagnosticsPageState();
+}
+
+class _DiagnosticsPageState extends State<DiagnosticsPage> {
+  String _log = '';
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final String log = await BootLog.tail();
+    if (!mounted) return;
+    setState(() {
+      _log = log;
+      _loading = false;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
-    return IfallBackdrop(
-      intensity: 0.65,
-      child: Scaffold(
+    final SidifyTokens t = context.sidify;
+    final PlaybackService playback = context.watch<PlaybackService>();
+    return Scaffold(
+      backgroundColor: t.bg,
+      appBar: AppBar(
         backgroundColor: Colors.transparent,
-        appBar: AppBar(title: const Text('Diagnostics')),
-        body: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 60),
-          children: <Widget>[
-            IfallGlass(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Row(
-                    children: <Widget>[
-                      const Icon(Icons.info_outline_rounded, size: 18),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          '${IfallBranding.appName} ${IfallBranding.fullVersionLabel}',
-                          style: const TextStyle(fontWeight: FontWeight.w700),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    safeMode
-                        ? 'Safe mode is on — heavy startup steps were skipped. Playback still works.'
-                        : 'Everything is running normally.',
-                    style: const TextStyle(
-                      color: IfallTokens.textMuted,
-                      fontSize: 12.5,
-                      height: 1.45,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 12),
-            IfallGlass(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  const Text('Audio', style: TextStyle(fontWeight: FontWeight.w700)),
-                  const SizedBox(height: 10),
-                  _Row(
-                    label: '8D audio',
-                    value: 'Coming soon',
-                  ),
-                  const SizedBox(height: 6),
-                  _Row(
-                    label: 'Download folder',
-                    value: 'Download/${IfallBranding.downloadFolderName}',
-                  ),
-                  const SizedBox(height: 6),
-                  const _Row(label: 'Downloads', value: 'On-device · no backend'),
-                ],
-              ),
-            ),
-            const SizedBox(height: 12),
-            IfallGlass(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  const Text('Branding', style: TextStyle(fontWeight: FontWeight.w700)),
-                  const SizedBox(height: 10),
-                  Text(
-                    'Logo ${IfallBranding.logoWidth.toInt()}×${IfallBranding.logoHeight.toInt()} '
-                    '${IfallBranding.logoFormat}\n${IfallBranding.logoAsset}',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      height: 1.5,
-                      color: IfallTokens.textMuted,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
+        elevation: 0,
+        leading: IconButton(
+          icon: Icon(Icons.arrow_back_rounded, color: t.text),
+          onPressed: () => Navigator.of(context).pop(),
         ),
+        title: Text('Diagnostics', style: SidifyText.titleM(t.text)),
+        actions: <Widget>[
+          IconButton(
+            icon: Icon(Icons.copy_rounded, size: 19, color: t.text),
+            tooltip: 'Copy report',
+            onPressed: () {
+              Clipboard.setData(
+                ClipboardData(text: 'Sidify diagnostics\n$_log'),
+              );
+              showAppNotice('Diagnostics copied');
+            },
+          ),
+        ],
+      ),
+      body: ListView(
+        padding: const EdgeInsets.only(top: 8, bottom: 60),
+        physics: const BouncingScrollPhysics(),
+        children: <Widget>[
+          SidifyGroup(
+            header: 'App',
+            children: <Widget>[
+              _row(context, 'App', 'Sidify ${SidifyBranding.fullVersionLabel}'),
+              _row(context, 'Package', SidifyBranding.packageName),
+              _row(context, 'Platform',
+                  '${Platform.operatingSystem} ${Platform.operatingSystemVersion.split(' ').take(2).join(' ')}'),
+              _row(
+                context,
+                'Downloads',
+                'On-device · saved in the app',
+              ),
+            ],
+          ),
+          SidifyGroup(
+            header: 'Playback',
+            children: <Widget>[
+              _row(
+                context,
+                'Now playing',
+                playback.current?.title ?? 'Nothing',
+              ),
+              _row(
+                context,
+                'State',
+                playback.isPlaying
+                    ? 'Playing'
+                    : playback.isLoading
+                        ? 'Loading'
+                        : 'Paused',
+              ),
+              _row(
+                context,
+                'Last error',
+                playback.lastError?.body ?? 'None',
+              ),
+            ],
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Text(
+              'BOOT LOG',
+              style: SidifyText.eyebrow(t.text2),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: t.raised.withValues(alpha: 0.8),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: SelectableText(
+                _loading
+                    ? 'Loading…'
+                    : (_log.isEmpty ? 'The boot log is empty.' : _log),
+                style: TextStyle(
+                  fontSize: 11.5,
+                  height: 1.5,
+                  color: t.text2,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: SidifyButton(
+              label: 'Repair local cache',
+              variant: SidifyButtonVariant.secondary,
+              onTap: () async {
+                await NativeBridge.repairLocalCache();
+                showAppNotice('Cache repaired');
+                _load();
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
-}
 
-class _Row extends StatelessWidget {
-  const _Row({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: <Widget>[
-        Expanded(
-          child: Text(
-            label,
-            style: const TextStyle(fontSize: 12.5, color: IfallTokens.textSecondary),
+  Widget _row(BuildContext context, String label, String value) {
+    final SidifyTokens t = context.sidify;
+    return Container(
+      constraints: const BoxConstraints(minHeight: 48),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(
+        children: <Widget>[
+          SizedBox(
+            width: 110,
+            child: Text(
+              label,
+              style: TextStyle(fontSize: 13.5, color: t.text2),
+            ),
           ),
-        ),
-        const SizedBox(width: 10),
-        Flexible(
-          child: Text(
-            value,
-            maxLines: 2,
-            textAlign: TextAlign.end,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+          Expanded(
+            child: Text(
+              value,
+              style: TextStyle(fontSize: 13.5, color: t.text),
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

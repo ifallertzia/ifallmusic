@@ -128,6 +128,15 @@ class SettingsService extends ChangeNotifier {
   static const String kKeepScreenAwake = 'ifall.keep_screen_awake.v1';
   static const String kAutoDownloadLikes = 'ifall.auto_download_likes.v1';
 
+  // ------------------------------------------------------ Sidify shell (UI)
+  // Preferences the Sidify interface owns: artwork-tinted surfaces, reduced
+  // motion, how the Library lays its playlists out, and which playlists are
+  // pinned to the top. Additive only — no existing key changes meaning.
+  static const String kDynamicColor = 'sidify.dynamic_color.v1';
+  static const String kReduceMotion = 'sidify.reduce_motion.v1';
+  static const String kLibraryLayout = 'sidify.library_layout.v1';
+  static const String kPinnedPlaylists = 'sidify.pinned_playlists.v1';
+
   // ---------------------------------------------------------------- account
   String get displayName => _prefs.getString(kDisplayName)?.trim() ?? '';
   Future<void> setDisplayName(String v) =>
@@ -284,6 +293,30 @@ class SettingsService extends ChangeNotifier {
   };
   Future<void> setThemeMode(ThemeMode mode) => _prefs
       .setString(kThemeMode, mode.name)
+      .then((_) => notifyListeners());
+
+  // ---------------------------------------------------------- Sidify shell
+  /// Colour sampled from the playing artwork tints the player backdrop, the
+  /// page ambience and collection headers.
+  bool get dynamicColor => _prefs.getBool(kDynamicColor) ?? true;
+  Future<void> setDynamicColor(bool v) =>
+      _prefs.setBool(kDynamicColor, v).then((_) => notifyListeners());
+
+  /// Calms the interface down: no artwork breathing, no drifting colours.
+  bool get reduceMotion => _prefs.getBool(kReduceMotion) ?? false;
+  Future<void> setReduceMotion(bool v) =>
+      _prefs.setBool(kReduceMotion, v).then((_) => notifyListeners());
+
+  /// How the Library shows playlists: `grid` or `list`.
+  String get libraryLayout => _prefs.getString(kLibraryLayout) ?? 'grid';
+  Future<void> setLibraryLayout(String v) =>
+      _prefs.setString(kLibraryLayout, v).then((_) => notifyListeners());
+
+  /// Playlists pinned to the top of the Library, most recent pin first.
+  List<String> get pinnedPlaylists =>
+      _prefs.getStringList(kPinnedPlaylists) ?? const <String>[];
+  Future<void> setPinnedPlaylists(List<String> v) => _prefs
+      .setStringList(kPinnedPlaylists, v)
       .then((_) => notifyListeners());
 
   /// The frosted-glass treatment. It is cheap on modern phones but a costly
@@ -651,6 +684,11 @@ class SettingsService extends ChangeNotifier {
     'saxify.spatial_reverb',
     'saxify.spatial_speed',
     'saxify.stream_resolver_mode.v1',
+    // ------------------------------------------------------ Sidify shell UI
+    'sidify.dynamic_color.v1',
+    'sidify.library_layout.v1',
+    'sidify.pinned_playlists.v1',
+    'sidify.reduce_motion.v1',
     // --------------------------------------------- BitChord-parity settings
     'ifall.automix.v1',
     'ifall.auto_download_likes.v1',

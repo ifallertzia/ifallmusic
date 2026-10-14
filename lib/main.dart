@@ -26,15 +26,13 @@ import 'core/services/recommendation_service.dart';
 import 'core/services/recommendation_worker.dart';
 import 'core/services/settings_service.dart';
 import 'core/services/youtube_service.dart';
+import 'core/theme/sidify_theme.dart';
 import 'services/lyrics_service.dart';
-import 'core/theme/saxify_accents.dart';
-import 'core/theme/saxify_theme.dart';
-import 'core/theme/theme_controller.dart';
 import 'ui/onboarding/welcome_page.dart';
-import 'ui/shell/ifall_shell.dart';
-import 'ui/shell/mini_player_layer.dart';
-import 'ui/shell/shell_controller.dart';
-import 'core/theme/ifall_ui.dart';
+import 'ui/shell/sidify_dock.dart';
+import 'ui/shell/sidify_shell.dart';
+import 'ui/shell/sidify_shell_controller.dart';
+import 'ui/widgets/sidify_widgets.dart';
 
 Future<void> _restoreEqualizerForPlayback(
   SettingsService settings,
@@ -82,14 +80,14 @@ Future<void> main() async {
         BootLog.write('init failed: $error\n$stack');
       }
       if (boot == null) {
-        runApp(const IfallRecoveryApp());
+        runApp(const SidifyRecoveryApp());
         return;
       }
-      runApp(IfallMusicApp(boot: boot));
+      runApp(SidifyApp(boot: boot));
     },
     (Object error, StackTrace stack) {
       BootLog.write('Zone error: $error\n$stack');
-      runApp(const IfallRecoveryApp());
+      runApp(const SidifyRecoveryApp());
     },
   );
 }
@@ -120,8 +118,6 @@ Future<AppBoot> _initializeApp() async {
   // from the first search, not just after the Settings page is opened.
   LyricsService.instance.providers = settings.lyricsProviders;
   LyricsService.translateTarget = settings.lyricsTranslateTo;
-  // One-shot: land on the Spotify Green default look.
-  await settings.applyGreenDefault();
   final LibraryService library = LibraryService(prefs);
   final LocalMusicService localMusic = LocalMusicService(prefs);
   final YoutubeService youtube = YoutubeService();
@@ -242,21 +238,20 @@ class AppBoot {
   final bool safeMode;
 }
 
-class IfallMusicApp extends StatefulWidget {
-  const IfallMusicApp({super.key, required this.boot});
+class SidifyApp extends StatefulWidget {
+  const SidifyApp({super.key, required this.boot});
 
   final AppBoot boot;
 
   @override
-  State<IfallMusicApp> createState() => _IfallMusicAppState();
+  State<SidifyApp> createState() => _SidifyAppState();
 }
 
-class _IfallMusicAppState extends State<IfallMusicApp>
-    with WidgetsBindingObserver {
+class _SidifyAppState extends State<SidifyApp> with WidgetsBindingObserver {
   Timer? _syncTimer;
 
-  /// Root-navigator bookkeeping for the floating mini player.
-  final MiniPlayerRouteObserver _routeObserver = MiniPlayerRouteObserver();
+  /// Root-navigator bookkeeping for the floating mini player and tab bar.
+  final SidifyRouteObserver _routeObserver = SidifyRouteObserver();
 
   /// The app's navigator, shared with the dock (which is painted above it).
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
@@ -335,9 +330,6 @@ class _IfallMusicAppState extends State<IfallMusicApp>
         ChangeNotifierProvider<MusicDownloadService>.value(
           value: boot.musicDownloads,
         ),
-        ChangeNotifierProvider<ThemeController>(
-          create: (_) => ThemeController(boot.settings),
-        ),
         ChangeNotifierProvider<HomeCatalog>(
           create: (_) => HomeCatalog(
             youtube: boot.youtube,
@@ -345,15 +337,15 @@ class _IfallMusicAppState extends State<IfallMusicApp>
             artists: boot.artists,
           ),
         ),
-        ChangeNotifierProvider<ShellController>(
-          create: (_) => ShellController(),
+        ChangeNotifierProvider<SidifyShellController>(
+          create: (_) => SidifyShellController(),
         ),
         ChangeNotifierProvider<JamService>(
           create: (_) => JamService(settings: boot.settings),
         ),
         ChangeNotifierProvider<PresenceService>(
-          create: (_) => PresenceService(settings: boot.settings)
-            ..attach(boot.playback),
+          create: (_) =>
+              PresenceService(settings: boot.settings)..attach(boot.playback),
         ),
       ],
       child: Provider<YoutubeService>.value(
@@ -362,7 +354,7 @@ class _IfallMusicAppState extends State<IfallMusicApp>
           value: boot.artists,
           child: Provider<bool>.value(
             value: boot.safeMode,
-            child: _IfallRoot(
+            child: _SidifyRoot(
               routeObserver: _routeObserver,
               navigatorKey: _navigatorKey,
             ),
@@ -373,8 +365,9 @@ class _IfallMusicAppState extends State<IfallMusicApp>
   }
 }
 
-class IfallProfileGate extends StatelessWidget {
-  const IfallProfileGate({super.key});
+/// Welcome gate: no name yet, no shell — just the welcome.
+class SidifyProfileGate extends StatelessWidget {
+  const SidifyProfileGate({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -382,16 +375,16 @@ class IfallProfileGate extends StatelessWidget {
     if (settings.displayName.isEmpty) {
       return WelcomePage(onComplete: settings.setDisplayName);
     }
-    return const IfallShell();
+    return const SidifyShell();
   }
 }
 
-class _IfallRoot extends StatelessWidget {
-  const _IfallRoot({required this.routeObserver, required this.navigatorKey});
+class _SidifyRoot extends StatelessWidget {
+  const _SidifyRoot({required this.routeObserver, required this.navigatorKey});
 
-  /// Reports route changes so the floating mini player knows when to step
-  /// aside (the full player, sheets and dialogs cover the dock).
-  final MiniPlayerRouteObserver routeObserver;
+  /// Reports route changes so the floating dock knows when to step aside
+  /// (the full player, sheets and dialogs cover it).
+  final SidifyRouteObserver routeObserver;
 
   /// Handed to the dock so it can open the full player from above the
   /// navigator.
@@ -399,22 +392,16 @@ class _IfallRoot extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ThemeController theme = context.watch<ThemeController>();
+    final SettingsService settings = context.watch<SettingsService>();
     return MaterialApp(
       scaffoldMessengerKey: appMessengerKey,
-      title: IfallBranding.appName,
+      title: SidifyBranding.appName,
       debugShowCheckedModeBanner: false,
       navigatorKey: navigatorKey,
       navigatorObservers: <NavigatorObserver>[routeObserver],
-      themeMode: ThemeMode.dark,
-      theme: SaxifyTheme.build(
-        theme.accent,
-        qualityAccent: theme.paletteAccent,
-      ),
-      darkTheme: SaxifyTheme.build(
-        theme.accent,
-        qualityAccent: theme.paletteAccent,
-      ),
+      themeMode: settings.themeMode,
+      theme: SidifyTheme.build(Brightness.light),
+      darkTheme: SidifyTheme.build(Brightness.dark),
       builder: (BuildContext context, Widget? child) {
         // Apple-like restraint on huge system font scales: the layout keeps its
         // rhythm and text stays readable instead of overflowing.
@@ -422,14 +409,15 @@ class _IfallRoot extends StatelessWidget {
         final double scale = media.textScaler.scale(1).clamp(1.0, 1.3);
         return MediaQuery(
           data: media.copyWith(textScaler: TextScaler.linear(scale)),
-          // The mini player is painted above the navigator, so it also stays
-          // docked inside every pushed page — album, playlist, artist, brand,
-          // Downloads, On device — instead of only in the shell.
+          // The glass dock (tab bar + mini player) is painted above the
+          // navigator, so it also stays docked inside every pushed page —
+          // album, playlist, artist, Downloads, On device — instead of only
+          // in the shell.
           child: Stack(
             fit: StackFit.expand,
             children: <Widget>[
               child ?? const SizedBox.shrink(),
-              MiniPlayerLayer(
+              SidifyDock(
                 observer: routeObserver,
                 navigatorKey: navigatorKey,
               ),
@@ -440,20 +428,20 @@ class _IfallRoot extends StatelessWidget {
           ),
         );
       },
-      home: const IfallProfileGate(),
+      home: const SidifyProfileGate(),
     );
   }
 }
 
 /// Shown only when startup could not finish — black, quiet, one action.
-class IfallRecoveryApp extends StatelessWidget {
-  const IfallRecoveryApp({super.key});
+class SidifyRecoveryApp extends StatelessWidget {
+  const SidifyRecoveryApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      theme: SaxifyTheme.build(SaxifyAccents.violetPulse),
+      theme: SidifyTheme.build(Brightness.dark),
       home: Scaffold(
         backgroundColor: Colors.black,
         body: SafeArea(
@@ -462,52 +450,29 @@ class IfallRecoveryApp extends StatelessWidget {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: <Widget>[
-                Image.asset(IfallBranding.logoAsset, width: 96, height: 96),
+                const SidifyLogoMark(size: 96),
                 const SizedBox(height: 20),
-                Text(
-                  'IfallMusic could not finish starting.',
+                const Text(
+                  'Sidify could not finish starting.',
                   textAlign: TextAlign.center,
-                  style: SaxifyTheme.appleFont(
-                    size: 19,
-                    weight: FontWeight.w700,
+                  style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white,
                   ),
                 ),
                 const SizedBox(height: 8),
                 const Text(
-                  'Repair the local cache and try again. Your library, settings and downloads stay on this device.',
+                  'Your library and settings are safe. Restart the app; if it '
+                  'keeps happening, clear the app cache from Android settings.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: IfallTokens.textMuted,
-                    height: 1.5,
-                  ),
+                  style: TextStyle(fontSize: 13.5, color: Colors.white70),
                 ),
-                const SizedBox(height: 22),
-                SizedBox(
-                  width: double.infinity,
-                  height: 50,
-                  child: OutlinedButton.icon(
-                    onPressed: () async {
-                      await NativeBridge.repairLocalCache();
-                      try {
-                        final AppBoot boot = await _initializeApp().timeout(
-                          const Duration(seconds: 20),
-                        );
-                        runApp(IfallMusicApp(boot: boot));
-                      } catch (error) {
-                        BootLog.write('retry failed: $error');
-                      }
-                    },
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.white,
-                      side: const BorderSide(color: Colors.white24),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(IfallUI.rPill),
-                      ),
-                    ),
-                    icon: const Icon(Icons.refresh_rounded),
-                    label: const Text('Repair cache & retry'),
-                  ),
+                const SizedBox(height: 24),
+                SidifyButton(
+                  label: 'Try again',
+                  icon: Icons.refresh_rounded,
+                  onTap: () => main(),
                 ),
               ],
             ),

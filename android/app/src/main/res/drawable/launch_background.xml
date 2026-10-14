@@ -4,6 +4,6 @@
     <item>
         <bitmap
             android:gravity="center"
-            android:src="@drawable/saxify_splash_logo" />
+            android:src="@drawable/sidify_splash_logo" />
     </item>
 </layer-list>

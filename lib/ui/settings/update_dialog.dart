@@ -1,68 +1,75 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 
+import '../../config/branding.dart';
 import '../../core/services/update_service.dart';
-import '../../core/theme/saxify_accents.dart';
-import '../../core/theme/saxify_theme.dart';
-import '../widgets/neon.dart';
-import '../widgets/saxify_logo.dart';
-import '../../core/theme/ifall_ui.dart';
+import '../../core/theme/sidify_theme.dart';
+import '../widgets/sidify_widgets.dart';
 
-/// Runs an update check and, if a newer release exists, shows the
-/// "Update available" dialog with in-app download + install.
-Future<void> checkAndPromptUpdate(BuildContext context, {bool silent = true}) async {
+/// Check for updates, and install the new build in place when there is one.
+/// The APK it installs is signed with the same release key as always, so it
+/// lands over the current app with no conflict (see docs/RELEASE_SIGNING.md).
+Future<void> showUpdateDialog(BuildContext context) async {
+  final SidifyTokens t = context.sidify;
   final UpdateService service = UpdateService();
+  showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (BuildContext dialogContext) => AlertDialog(
+      backgroundColor: t.raised,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      content: Row(
+        children: <Widget>[
+          SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2, color: t.text2),
+          ),
+          const SizedBox(width: 14),
+          Text('Checking for updates…', style: TextStyle(color: t.text)),
+        ],
+      ),
+    ),
+  );
+  UpdateInfo? info;
   try {
-    final UpdateInfo? info = await service.check();
-    if (!context.mounted) return;
-    if (info == null) {
-      if (!silent) _toast(context, 'Could not reach the update server');
-      return;
-    }
-    if (!info.hasUpdate) {
-      // Name the build the check actually compared against. Without it,
-      // "you are on the latest version" looks the same whether the newest
-      // release really is installed or the newest release was never published.
-      if (!silent) {
-        _toast(
-          context,
-          'You are on the latest version — published build is '
-          '${info.latestLabel}',
-        );
-      }
-      return;
-    }
-    await showDialog<void>(
-      context: context,
-      barrierDismissible: true,
-      builder: (BuildContext c) => _UpdateDialog(info: info),
-    );
-  } finally {
-    service.dispose();
+    info = await service.check();
+  } catch (_) {
+    info = null;
   }
+  if (!context.mounted) return;
+  Navigator.of(context).pop();
+  if (info == null) {
+    return showDialog<void>(
+      context: context,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        backgroundColor: t.raised,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: Text('Could not check', style: SidifyText.title(t.text)),
+        content: Text(
+          'The update check did not answer. You can always get the latest '
+          'Sidify app from ${SidifyBranding.websiteUrl.replaceAll('https://', '')}.',
+          style: TextStyle(color: t.text2),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: Text('Close', style: TextStyle(color: t.text)),
+          ),
+        ],
+      ),
+    );
+  }
+  return showDialog<void>(
+    context: context,
+    builder: (BuildContext dialogContext) =>
+        _UpdateDialog(service: service, info: info!),
+  );
 }
-
-void _toast(BuildContext context, String message) {
-  ScaffoldMessenger.of(context)
-    ..hideCurrentSnackBar()
-    ..showSnackBar(SnackBar(content: Text(message)));
-}
-
-enum _Phase { idle, downloading, done, error }
-
-/// Clean, short changelog shown in the in-app update dialog — only the items
-/// that matter to the listener. The full release body on GitHub is intentionally
-/// not shown here so the dialog stays focused.
-///
-/// Keep this in step with RELEASE_NOTES.md: the top entry is always the newest
-/// release.
-const String _kShortChangelog =
-    '• Some known bugs fixed.\n'
-    '• Playlist button added at the bottom of the player.';
 
 class _UpdateDialog extends StatefulWidget {
-  const _UpdateDialog({required this.info});
+  const _UpdateDialog({required this.service, required this.info});
 
+  final UpdateService service;
   final UpdateInfo info;
 
   @override
@@ -70,178 +77,116 @@ class _UpdateDialog extends StatefulWidget {
 }
 
 class _UpdateDialogState extends State<_UpdateDialog> {
-  final UpdateService _service = UpdateService();
-  _Phase _phase = _Phase.idle;
-  double _progress = 0;
+  double _progress = -1;
   String? _error;
 
-  @override
-  void dispose() {
-    _service.dispose();
-    super.dispose();
-  }
-
-  Future<void> _start() async {
+  Future<void> _download() async {
     final String? url = widget.info.apkUrl;
     if (url == null) return;
     setState(() {
-      _phase = _Phase.downloading;
       _progress = 0;
       _error = null;
     });
     try {
-      final String path = await _service.downloadApk(
+      final String path = await widget.service.downloadApk(
         url,
-        onProgress: (double fraction, int bytes) {
-          if (!mounted) return;
-          setState(() => _progress = fraction);
+        onProgress: (double fraction, int _) {
+          if (mounted) setState(() => _progress = fraction);
         },
       );
-      if (!mounted) return;
-      setState(() => _phase = _Phase.done);
-      await _service.install(path);
+      await widget.service.install(path);
+      if (mounted) Navigator.of(context).pop();
     } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _phase = _Phase.error;
-        _error = '$e';
-      });
+      if (mounted) {
+        setState(() {
+          _progress = -1;
+          _error = 'Download failed. Check the connection and try again.';
+        });
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final SaxifyAccent accent = context.accent;
+    final SidifyTokens t = context.sidify;
     final UpdateInfo info = widget.info;
-
-    return Dialog(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(22, 22, 22, 18),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Row(
-              children: <Widget>[
-                const SaxifyLogo(size: 40),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Text('Update available',
-                          style: GoogleFonts.spaceGrotesk(
-                              fontSize: 18, fontWeight: FontWeight.w700)),
-                      const SizedBox(height: 3),
-                      Text(
-                        '${info.currentLabel} → ${info.latestLabel}'
-                        '${info.sizeLabel.isNotEmpty ? ' · ${info.sizeLabel}' : ''}',
-                        style: const TextStyle(
-                            fontSize: 12.5, color: IfallTokens.textMuted),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+    return AlertDialog(
+      backgroundColor: t.raised,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      title: Row(
+        children: <Widget>[
+          const SidifyLogoMark(size: 34),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              info.hasUpdate ? 'Update available' : 'You are up to date',
+              style: SidifyText.title(t.text),
             ),
-            const SizedBox(height: 14),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: IfallTokens.surfaceAlt,
-                borderRadius: BorderRadius.circular(SaxifyTheme.radiusSm),
-                border: Border.all(color: IfallTokens.border),
-              ),
-              child: Text(
-                _kShortChangelog,
-                style: const TextStyle(
-                  fontSize: 13,
-                  height: 1.55,
-                  color: IfallTokens.textSecondary,
-                ),
-              ),
-            ),
-            const SizedBox(height: 18),
-            if (_phase == _Phase.downloading) ...<Widget>[
-              LinearProgressIndicator(value: _progress),
-              const SizedBox(height: 8),
-              Text(
-                'Downloading… ${(_progress * 100).toStringAsFixed(0)}%',
-                style: const TextStyle(
-                    fontSize: 12, color: IfallTokens.textMuted),
-              ),
-            ] else if (_phase == _Phase.error) ...<Widget>[
-              Text(
-                'Download failed: $_error',
-                style: const TextStyle(
-                    fontSize: 12, color: IfallTokens.danger),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: <Widget>[
-                  Expanded(
-                    child: NeonButton(
-                      label: 'Retry',
-                      compact: true,
-                      onPressed: _start,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: NeonButton(
-                      label: 'Cancel',
-                      filled: false,
-                      compact: true,
-                      onPressed: () => Navigator.of(context).pop(),
-                    ),
-                  ),
-                ],
-              ),
-            ] else ...<Widget>[
-              Row(
-                children: <Widget>[
-                  Expanded(
-                    child: NeonButton(
-                      label: info.downloadable ? 'Update now' : 'Not available',
-                      icon: Icons.system_update_rounded,
-                      compact: true,
-                      onPressed: info.downloadable ? _start : null,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: NeonButton(
-                      label: 'Later',
-                      filled: false,
-                      compact: true,
-                      onPressed: () => Navigator.of(context).pop(),
-                    ),
-                  ),
-                ],
-              ),
-              if (!info.downloadable) ...<Widget>[
-                const SizedBox(height: 10),
-                const Text(
-                  'This update can\'t be installed in-app yet. Please try '
-                  'again in a little while.',
-                  style: TextStyle(
-                      fontSize: 11.5, color: IfallTokens.textMuted),
-                ),
-              ],
-            ],
-            if (_phase == _Phase.done) ...<Widget>[
-              const SizedBox(height: 10),
-              Text(
-                'Download complete — the installer should open now.\n\n'
-                'Finish the install and you are on the newest version. Your '
-                'library and playlists stay exactly as they are.',
-                style: TextStyle(fontSize: 11.5, height: 1.45, color: accent.primary),
-              ),
-            ],
-          ],
-        ),
+          ),
+        ],
       ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            info.hasUpdate
+                ? 'Sidify ${info.latestLabel} is ready'
+                    '${info.sizeLabel.isNotEmpty ? ' · ${info.sizeLabel}' : ''}. '
+                    'It installs over this app — your library, settings and '
+                    'downloads stay put.'
+                : 'Sidify ${info.currentLabel} is the latest build.',
+            style: TextStyle(fontSize: 14, height: 1.45, color: t.text2),
+          ),
+          if (info.hasUpdate && info.notes.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 10),
+            Text(
+              info.notes,
+              style: TextStyle(fontSize: 13, height: 1.45, color: t.text2),
+            ),
+          ],
+          if (_progress >= 0) ...<Widget>[
+            const SizedBox(height: 16),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(999),
+              child: LinearProgressIndicator(
+                value: _progress,
+                minHeight: 5,
+                backgroundColor: t.fill2,
+                color: t.text,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Downloading… ${(_progress * 100).round()}%',
+              style: TextStyle(fontSize: 12.5, color: t.text2),
+            ),
+          ],
+          if (_error != null) ...<Widget>[
+            const SizedBox(height: 10),
+            Text(_error!, style: TextStyle(fontSize: 13, color: t.danger)),
+          ],
+        ],
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: _progress >= 0
+              ? null
+              : () => Navigator.of(context).pop(),
+          child: Text(
+            info.hasUpdate ? 'Later' : 'Close',
+            style: TextStyle(color: t.text2),
+          ),
+        ),
+        if (info.hasUpdate && info.downloadable)
+          TextButton(
+            onPressed: _progress >= 0 ? null : _download,
+            child: Text(
+              _progress >= 0 ? 'Downloading…' : 'Download & install',
+              style: TextStyle(color: t.text, fontWeight: FontWeight.w600),
+            ),
+          ),
+      ],
     );
   }
 }

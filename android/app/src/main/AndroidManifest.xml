@@ -42,7 +42,7 @@
     </queries>
 
     <application
-        android:label="IfallMusic"
+        android:label="Sidify"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true">

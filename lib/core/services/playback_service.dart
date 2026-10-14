@@ -1181,7 +1181,7 @@ class PlaybackService extends ChangeNotifier {
           id: song.id,
           title: song.title,
           artist: song.artist,
-          album: song.album ?? song.subtitle ?? IfallBranding.appName,
+          album: song.album ?? song.subtitle ?? SidifyBranding.appName,
           artUri: art != null && art.hasScheme ? art : null,
           duration: song.duration,
         );
