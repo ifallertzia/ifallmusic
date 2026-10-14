@@ -61,6 +61,14 @@ class FakePlayer implements AudioPlayer {
   }
 
   @override
+  Future<void> dispose() async {
+    await states.close();
+    await positions.close();
+    await durations.close();
+    await events.close();
+  }
+
+  @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
@@ -171,9 +179,10 @@ void main() {
     expect(find.text('Liked Songs'), findsWidgets);
     expect(find.byIcon(Icons.arrow_back_rounded), findsOneWidget);
 
-    await tester.pageBack();
+    // Liked Songs has its own glass back button in the header.
+    await tester.tap(find.byIcon(Icons.arrow_back_rounded));
     await tester.pumpAndSettle();
-    expectCleanPump(tester, 'after pageBack');
+    expectCleanPump(tester, 'after tapping back');
 
     // Back lands on the library hub again, never on Home.
     expect(find.text('Library'), findsOneWidget);
