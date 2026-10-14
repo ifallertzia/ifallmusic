@@ -16,6 +16,7 @@ import '../utils/playback_errors.dart';
 import 'playback_error_reporter.dart';
 import 'radio_queue.dart';
 import 'innertube_resolver.dart';
+import 'module_source_resolver.dart';
 import 'library_service.dart';
 import 'notification_bootstrap.dart';
 import 'settings_service.dart';
@@ -903,18 +904,44 @@ class PlaybackService extends ChangeNotifier {
       }
     }
 
+    Object? legacyError;
     if (mode != StreamResolverMode.innertubeOnly) {
       try {
         return await _resolveWithExplode(videoId).timeout(_legacyBudget);
       } catch (error) {
-        throw Exception(
-          'No playable stream found. Smart resolver failed.'
-          '${primaryError != null ? ' Innertube: $primaryError.' : ''}'
-          ' Legacy: $error',
-        );
+        legacyError = error;
+        debugPrint('[resolver] Legacy explode failed: $error');
       }
     }
 
+    // Final rung (BitChord-parity): the listener's own extra/module sources.
+    // This only runs after the built-in engine has exhausted itself, so it
+    // can rescue a track but never shadow a stream the engine would have
+    // found. With no sources configured it costs one empty-list check.
+    final List<Map<String, dynamic>> sources = _settings.extraSources;
+    if (sources.isNotEmpty) {
+      final Song? current = _current;
+      final String? moduleUrl = await _modules
+          .resolve(
+            videoId: videoId.value,
+            title: current?.id == videoId.value ? current!.title : '',
+            artist: current?.id == videoId.value ? current!.artist : '',
+            sources: sources,
+          )
+          .timeout(const Duration(seconds: 8), onTimeout: () => null);
+      if (moduleUrl != null) {
+        debugPrint('[resolver] extra source served ${videoId.value}');
+        return moduleUrl;
+      }
+    }
+
+    if (legacyError != null) {
+      throw Exception(
+        'No playable stream found. Smart resolver failed.'
+        '${primaryError != null ? ' Innertube: $primaryError.' : ''}'
+        ' Legacy: $legacyError',
+      );
+    }
     throw Exception('No playable stream found: $primaryError');
   }
 
@@ -1536,5 +1563,8 @@ class PlaybackService extends ChangeNotifier {
     unawaited(_trackController.close());
     _player.dispose();
     super.dispose();
+  }
+}
+   super.dispose();
   }
 }

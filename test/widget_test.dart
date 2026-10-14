@@ -94,7 +94,8 @@ void main() {
       expect(image.image, isA<AssetImage>());
       expect(
         (image.image as AssetImage).assetName,
-        'assets/images/saxify_logo.png',
+        // The chubby (motu) mascot is the logo in every slot now.
+        'assets/images/ifall_motu_master.png',
       );
     });
   });

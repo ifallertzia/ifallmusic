@@ -107,7 +107,10 @@ void main() {
       );
       expect((await missing.find(title: 'Song')).status, LyricsStatus.notFound);
       await missing.find(title: 'Song');
-      expect(misses, 2);
+      // One find = LRCLIB /get + LRCLIB /search + lrc.red (the extra fallback
+      // rung added with the BitChord-parity providers); the second find is
+      // served from the not-found cache and makes no calls at all.
+      expect(misses, 3);
       final unavailable = LyricsService(
         persist: false,
         dio: mock((_) {
