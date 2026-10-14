@@ -144,7 +144,6 @@ class IfallText {
     Color? color,
     double letterSpacing = -0.3,
     double height = 1.25,
-    TextOverflow? overflow,
     int? maxLines,
   }) {
     return GoogleFonts.inter(

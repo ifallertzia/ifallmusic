@@ -7,6 +7,11 @@ script tokenizes just enough of the language — strings, raw strings, character
 literals, comments — to make sure the structural brackets balance and that no
 file ends mid-construct.
 
+It also checks that every top-level declaration really is top level. A function
+moved between scopes without its closing brace keeps every bracket balanced —
+the counts cancel out — but it swallows every declaration after it, which is
+exactly the failure this second check exists to catch.
+
 It is a safety net, not a compiler:
 
     python3 scripts/dart_sanity.py [path ...]
@@ -14,10 +19,17 @@ It is a safety net, not a compiler:
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
 PAIRS = {')': '(', ']': '[', '}': '{'}
+
+# A declaration that must sit at column 0, i.e. outside any other declaration.
+DECL_RE = re.compile(
+    r"^(?:abstract\s+|base\s+|final\s+|sealed\s+)*"
+    r"(?:class|enum|typedef|extension|mixin)\s+\w"
+)
 
 
 def check(path: Path) -> list[str]:
@@ -134,6 +146,68 @@ def check(path: Path) -> list[str]:
     return errors
 
 
+def blank_out(src: str) -> str:
+    """Replace the inside of comments and strings with inert filler.
+
+    Braces inside `'...'` or `// ...` are text, not structure, so they must not
+    move the depth counter. Newlines are kept so line numbers stay correct.
+    """
+    out: list[str] = []
+    i, n = 0, len(src)
+    while i < n:
+        ch = src[i]
+        nxt = src[i + 1] if i + 1 < n else ""
+        if ch == "/" and nxt == "/":
+            j = src.find("\n", i)
+            i = n if j < 0 else j
+            continue
+        if ch == "/" and nxt == "*":
+            j = src.find("*/", i + 2)
+            j = n if j < 0 else j + 2
+            out.append("".join(c if c == "\n" else " " for c in src[i:j]))
+            i = j
+            continue
+        if ch in "\"'":
+            quote = ch
+            j = i + 1
+            while j < n:
+                if src[j] == "\\":
+                    j += 2
+                    continue
+                if src[j] == quote or src[j] == "\n":
+                    break
+                j += 1
+            out.append("".join(c if c == "\n" else " " for c in src[i : j + 1]))
+            i = j + 1
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def check_declaration_depth(path: Path) -> list[str]:
+    """Every `class`/`enum`/`mixin` must start at brace depth 0.
+
+    A function lifted out of a class without its closing brace leaves the
+    bracket counts balanced while the parser stays inside an expression, so
+    everything after it is misread. This is the only cheap way to see it.
+    """
+    errors: list[str] = []
+    depth = 0
+    src = blank_out(path.read_text(encoding="utf-8", errors="replace"))
+    for number, text in enumerate(src.split("\n"), 1):
+        if DECL_RE.match(text) and depth != 0:
+            errors.append(
+                f"{path}:{number}: declaration inside another construct "
+                f"(brace depth {depth}) — a brace is probably missing above: "
+                f"{text.strip()[:50]}"
+            )
+        depth += text.count("{") - text.count("}")
+    if depth != 0:
+        errors.append(f"{path}: unbalanced braces (ends at depth {depth})")
+    return errors
+
+
 def main(argv: list[str]) -> int:
     targets = argv[1:] or ["lib", "test"]
     files: list[Path] = []
@@ -146,7 +220,7 @@ def main(argv: list[str]) -> int:
 
     total = 0
     for f in files:
-        errs = check(f)
+        errs = check(f) + check_declaration_depth(f)
         if errs:
             total += len(errs)
             for e in errs[:20]:
