@@ -8,7 +8,6 @@ import '../../core/services/home_catalog.dart';
 import '../../core/services/library_service.dart';
 import '../../core/services/playback_service.dart';
 import '../../core/services/youtube_service.dart';
-import '../../core/theme/sidify_theme.dart';
 import '../widgets/collection_header.dart';
 import '../widgets/sidify_widgets.dart';
 

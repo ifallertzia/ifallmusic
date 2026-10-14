@@ -135,7 +135,7 @@ class MeshPaletteService {
       );
     }
 
-    const List<Color> fb = MeshPalette.fallback.colors;
+    final List<Color> fb = MeshPalette.fallback.colors;
     final List<Color> tuned = <Color>[
       for (int i = 0; i < 4; i++) _tune(avg(sums[i], fb[i])),
     ];
