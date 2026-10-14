@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../../config/branding.dart';
 import '../../core/theme/ifall_ui.dart';
-import '../widgets/saxify_logo.dart';
 
 /// First-launch profile setup.
 ///
@@ -173,7 +172,7 @@ class _WelcomePageState extends State<WelcomePage> {
                           alignment: WrapAlignment.center,
                           spacing: 8,
                           runSpacing: 8,
-                          children: const <Widget>[
+                          children: <Widget>[
                             IfallChip(
                               label: 'Ad-free listening',
                               icon: Icons.block_rounded,

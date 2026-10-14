@@ -32,7 +32,6 @@ class PresenceService extends ChangeNotifier {
 
   StreamSubscription<Song>? _sub;
   Timer? _tick;
-  Song? _current;
   bool _scrobbled = false;
   final List<_PendingScrobble> _retry = <_PendingScrobble>[];
   String _status = 'Idle';
@@ -75,7 +74,6 @@ class PresenceService extends ChangeNotifier {
   }
 
   void _onTrack(Song song) {
-    _current = song;
     _scrobbled = false;
     _fire(song, scrobble: false);
     _flushRetry();

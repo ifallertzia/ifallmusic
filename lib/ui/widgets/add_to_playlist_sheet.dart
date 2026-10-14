@@ -9,7 +9,6 @@ import '../../core/theme/saxify_accents.dart';
 import '../../core/theme/saxify_theme.dart';
 import '../../core/utils/format.dart';
 import 'artwork.dart';
-import 'neon.dart';
 import '../../core/theme/ifall_ui.dart';
 
 /// "Add to playlist" sheet: pick an existing playlist or create a new one.

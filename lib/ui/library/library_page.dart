@@ -10,7 +10,6 @@ import '../../core/services/library_service.dart';
 import '../../core/services/local_music_service.dart';
 import '../../core/services/music_download_service.dart';
 import '../../core/services/playback_service.dart';
-import '../../core/services/app_feedback.dart';
 import '../../core/theme/ifall_ui.dart';
 import '../../core/utils/format.dart';
 import '../../screens/lyrics_finder_screen.dart';
@@ -120,58 +119,6 @@ class _LibraryPageState extends State<LibraryPage> {
     final LibraryService library = context.watch<LibraryService>();
     final MusicDownloadService downloads = context.watch<MusicDownloadService>();
     final LocalMusicService local = context.watch<LocalMusicService>();
-
-    final List<({String title, String detail, IconData icon, int tab})>
-    sections = <({String title, String detail, IconData icon, int tab})>[
-      (
-        title: 'Liked songs',
-        detail: '${library.likedSongs.length} songs',
-        icon: Icons.favorite_border_rounded,
-        tab: LibraryTabs.liked,
-      ),
-      (
-        title: 'Playlists',
-        detail: '${library.playlists.length} playlists',
-        icon: Icons.queue_music_rounded,
-        tab: LibraryTabs.playlists,
-      ),
-      (
-        title: 'Your songs',
-        detail: '${library.songs.length} saved songs',
-        icon: Icons.music_note_rounded,
-        tab: LibraryTabs.songs,
-      ),
-      (
-        title: 'Downloads',
-        detail: '${downloads.downloaded.length} offline songs',
-        icon: Icons.download_rounded,
-        tab: LibraryTabs.downloads,
-      ),
-      (
-        title: 'On this device',
-        detail: '${local.songs.length} songs',
-        icon: Icons.phone_android_rounded,
-        tab: LibraryTabs.onDevice,
-      ),
-      (
-        title: 'Recently played',
-        detail: '${library.history.length} songs',
-        icon: Icons.history_rounded,
-        tab: LibraryTabs.history,
-      ),
-      (
-        title: 'Artists',
-        detail: '${library.artists.length} followed',
-        icon: Icons.mic_none_rounded,
-        tab: LibraryTabs.artists,
-      ),
-      (
-        title: 'Lyrics Finder',
-        detail: 'Find the words to any track',
-        icon: Icons.lyrics_outlined,
-        tab: LibraryTabs.lyrics,
-      ),
-    ];
 
     final List<({String title, String detail, IconData icon, int tab, Color tone})>
     sections = <({String title, String detail, IconData icon, int tab, Color tone})>[
