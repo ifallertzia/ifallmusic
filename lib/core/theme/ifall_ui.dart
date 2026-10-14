@@ -176,6 +176,29 @@ class IfallText {
       style(11.5, weight: FontWeight.w700, letterSpacing: 0.2, color: color);
 }
 
+/// Flat colour tokens for widgets that have not been threaded through
+/// [IfallPalette] yet.
+///
+/// The app ships dark-only (`themeMode: ThemeMode.dark` in `main.dart`) and
+/// these are exactly the values [IfallPalette] resolves for
+/// [Brightness.dark] — so the two systems agree on every pixel and a widget
+/// can be converted one file at a time.
+class IfallTokens {
+  const IfallTokens._();
+
+  static const Color background = IfallColors.black;
+  static const Color surface = Color(0xFF0D0D0F);
+  static const Color surfaceAlt = Color(0xFF1C1C1E);
+  static const Color border = Color(0xFF2C2C2E);
+  static const Color hairline = Color(0x14FFFFFF);
+  static const Color textPrimary = IfallColors.white;
+  static const Color textSecondary = Color(0xFF8E8E93);
+  static const Color textMuted = Color(0xFF8E8E93);
+  static const Color textFaint = Color(0xFF6E6E73);
+  static const Color danger = IfallColors.dangerLight;
+  static const Color success = IfallColors.green;
+}
+
 // --------------------------------------------------------------------- glass
 
 /// A frosted panel: translucent fill, hairline border, blurred backdrop.
@@ -995,7 +1018,7 @@ class IfallEmpty extends StatelessWidget {
             Opacity(
               opacity: 0.85,
               child: Image.asset(
-                'assets/images/ifall_logo.png',
+                IfallBranding.logoAsset,
                 width: size,
                 height: size,
                 fit: BoxFit.contain,

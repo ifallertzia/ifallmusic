@@ -20,6 +20,7 @@ import '../search/search_page.dart';
 import '../settings/settings_page.dart';
 import '../settings/update_dialog.dart';
 import 'shell_controller.dart';
+import '../../core/theme/ifall_ui.dart';
 
 /// The app shell: a frosted, floating tab bar over pure black, the persistent
 /// mini player and the four sections.
@@ -159,7 +160,7 @@ class _SaxifyShellState extends State<SaxifyShell> {
         if (!_shell.back()) NativeBridge.backgroundApp();
       },
       child: Scaffold(
-        backgroundColor: SaxifyColors.background,
+        backgroundColor: IfallTokens.background,
         extendBody: true,
         body: NotificationListener<UserScrollNotification>(
           onNotification: _onScroll,
@@ -402,7 +403,7 @@ class _NavItem extends StatelessWidget {
             Icon(
               selected ? filled : outlined,
               size: compact ? 21 : 23,
-              color: selected ? Colors.white : SaxifyColors.textMuted,
+              color: selected ? Colors.white : IfallTokens.textMuted,
             ),
             // The label retires when the bar shrinks, so the icon always
             // stays centred instead of being pushed upwards.
@@ -421,7 +422,7 @@ class _NavItem extends StatelessWidget {
                       fontWeight: selected
                           ? FontWeight.w700
                           : FontWeight.w500,
-                      color: selected ? Colors.white : SaxifyColors.textMuted,
+                      color: selected ? Colors.white : IfallTokens.textMuted,
                     ),
                   ),
                 ),

@@ -1678,7 +1678,7 @@ class _ThemePanelState extends State<_ThemePanel> {
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             fontSize: 12,
-                            color: SaxifyColors.textMuted,
+                            color: IfallTokens.textMuted,
                           ),
                         ),
                       ],
@@ -1746,7 +1746,7 @@ class _ThemePanelState extends State<_ThemePanel> {
                       : 'Clean black look; only song-quality text changes colour',
                   style: const TextStyle(
                     fontSize: 12,
-                    color: SaxifyColors.textMuted,
+                    color: IfallTokens.textMuted,
                   ),
                 ),
               ),
@@ -1764,7 +1764,7 @@ class _ThemePanelState extends State<_ThemePanel> {
                       : 'Choose a colour above to keep it fixed',
                   style: const TextStyle(
                     fontSize: 12,
-                    color: SaxifyColors.textMuted,
+                    color: IfallTokens.textMuted,
                   ),
                 ),
               ),
@@ -1944,7 +1944,7 @@ class _AccentMixerState extends State<_AccentMixer> {
                         '${preview.primaryHex}  →  ${preview.secondaryHex}',
                         style: const TextStyle(
                           fontSize: 11.5,
-                          color: SaxifyColors.textMuted,
+                          color: IfallTokens.textMuted,
                         ),
                       ),
                     ),
@@ -2003,7 +2003,7 @@ class _AccentMixerState extends State<_AccentMixer> {
             style: TextStyle(
               fontSize: 11,
               height: 1.45,
-              color: SaxifyColors.textFaint,
+              color: IfallTokens.textFaint,
             ),
           ),
         ],
@@ -2039,7 +2039,7 @@ class _RgbSliders extends StatelessWidget {
           '$label · R$r G$g B$b',
           style: const TextStyle(
             fontSize: 11.5,
-            color: SaxifyColors.textSecondary,
+            color: IfallTokens.textSecondary,
           ),
         ),
         _Channel(
@@ -2115,7 +2115,7 @@ class _Channel extends StatelessWidget {
             textAlign: TextAlign.end,
             style: const TextStyle(
               fontSize: 11.5,
-              color: SaxifyColors.textMuted,
+              color: IfallTokens.textMuted,
             ),
           ),
         ),
@@ -2193,7 +2193,7 @@ class _AboutCardState extends State<_AboutCard> {
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         fontSize: 11.5,
-                        color: SaxifyColors.textMuted,
+                        color: IfallTokens.textMuted,
                       ),
                     ),
                   ],
@@ -2210,7 +2210,7 @@ class _AboutCardState extends State<_AboutCard> {
             style: TextStyle(
               fontSize: 12.5,
               height: 1.55,
-              color: SaxifyColors.textSecondary,
+              color: IfallTokens.textSecondary,
             ),
           ),
           const SizedBox(height: 14),
@@ -2240,7 +2240,7 @@ class _AboutCardState extends State<_AboutCard> {
                       'App version',
                       style: TextStyle(
                         fontSize: 12.5,
-                        color: SaxifyColors.textSecondary,
+                        color: IfallTokens.textSecondary,
                       ),
                     ),
                     const SizedBox(height: 2),
@@ -2256,7 +2256,7 @@ class _AboutCardState extends State<_AboutCard> {
                       '${IfallBranding.packageName} · updates install in place',
                       style: const TextStyle(
                         fontSize: 10.5,
-                        color: SaxifyColors.textMuted,
+                        color: IfallTokens.textMuted,
                       ),
                     ),
                   ],
@@ -2371,7 +2371,7 @@ class _MadeWithLoveFooterState extends State<_MadeWithLoveFooter>
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
-                      color: SaxifyColors.textSecondary,
+                      color: IfallTokens.textSecondary,
                       shadows: <Shadow>[
                         Shadow(
                           color: heart.withValues(alpha: 0.35),
@@ -2441,7 +2441,7 @@ Future<void> _showReportDialog(BuildContext context) async {
                   style: TextStyle(
                     fontSize: 12.5,
                     height: 1.45,
-                    color: SaxifyColors.textSecondary,
+                    color: IfallTokens.textSecondary,
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -2631,7 +2631,7 @@ class _PanelHeader extends StatelessWidget {
           const SizedBox(height: 3),
           Text(
             subtitle,
-            style: const TextStyle(fontSize: 12, color: SaxifyColors.textMuted),
+            style: const TextStyle(fontSize: 12, color: IfallTokens.textMuted),
           ),
         ],
       ),
@@ -2687,7 +2687,7 @@ class _TileText extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
               fontSize: 11.5,
-              color: SaxifyColors.textMuted,
+              color: IfallTokens.textMuted,
             ),
           ),
         ],
@@ -2721,7 +2721,7 @@ class _SettingTile extends StatelessWidget {
           const Icon(
             Icons.chevron_right_rounded,
             size: 18,
-            color: SaxifyColors.textFaint,
+            color: IfallTokens.textFaint,
           ),
       child: _TileText(title: title, subtitle: subtitle),
     );

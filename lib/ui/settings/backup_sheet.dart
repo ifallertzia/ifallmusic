@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../../core/services/library_service.dart';
 import '../../core/theme/saxify_theme.dart';
+import '../../core/theme/ifall_ui.dart';
 
 /// Copy JSON is the old action. Paste & Import is new, with merge or replace.
 Future<void> showBackupSheet(BuildContext context, LibraryService library) async {
@@ -11,7 +12,7 @@ Future<void> showBackupSheet(BuildContext context, LibraryService library) async
   await showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
-    backgroundColor: SaxifyColors.surface,
+    backgroundColor: IfallTokens.surface,
     builder: (BuildContext sheet) {
       return Padding(
         padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + MediaQuery.viewInsetsOf(sheet).bottom),
@@ -23,7 +24,7 @@ Future<void> showBackupSheet(BuildContext context, LibraryService library) async
             const SizedBox(height: 8),
             const Text(
               'This is a local library JSON backup, separate from cloud playlist codes. It is copied to your clipboard and imported on this device; IfallMusic does not upload it.',
-              style: TextStyle(fontSize: 12, color: SaxifyColors.textMuted),
+              style: TextStyle(fontSize: 12, color: IfallTokens.textMuted),
             ),
             Align(
               alignment: Alignment.centerRight,

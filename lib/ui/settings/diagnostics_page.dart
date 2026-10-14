@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../config/branding.dart';
 import '../../core/theme/glass.dart';
 import '../../core/theme/saxify_theme.dart';
+import '../../core/theme/ifall_ui.dart';
 
 /// App diagnostics — deliberately short and human readable.
 ///
@@ -45,7 +46,7 @@ class DiagnosticsPage extends StatelessWidget {
                         ? 'Safe mode is on — heavy startup steps were skipped. Playback still works.'
                         : 'Everything is running normally.',
                     style: const TextStyle(
-                      color: SaxifyColors.textMuted,
+                      color: IfallTokens.textMuted,
                       fontSize: 12.5,
                       height: 1.45,
                     ),
@@ -87,7 +88,7 @@ class DiagnosticsPage extends StatelessWidget {
                     style: const TextStyle(
                       fontSize: 12,
                       height: 1.5,
-                      color: SaxifyColors.textMuted,
+                      color: IfallTokens.textMuted,
                     ),
                   ),
                 ],
@@ -113,7 +114,7 @@ class _Row extends StatelessWidget {
         Expanded(
           child: Text(
             label,
-            style: const TextStyle(fontSize: 12.5, color: SaxifyColors.textSecondary),
+            style: const TextStyle(fontSize: 12.5, color: IfallTokens.textSecondary),
           ),
         ),
         const SizedBox(width: 10),

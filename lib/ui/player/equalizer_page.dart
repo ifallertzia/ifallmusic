@@ -10,6 +10,7 @@ import '../../core/theme/glass.dart';
 import '../../core/theme/saxify_accents.dart';
 import '../../core/theme/saxify_theme.dart';
 import '../widgets/search_fab.dart';
+import '../../core/theme/ifall_ui.dart';
 
 /// Studio equalizer with saved user presets.
 ///
@@ -243,7 +244,7 @@ class _EqualizerPageState extends State<EqualizerPage> {
                       title: const Text('Enable equalizer'),
                       subtitle: const Text(
                         'Connected to the current player session',
-                        style: TextStyle(color: SaxifyColors.textMuted, fontSize: 12),
+                        style: TextStyle(color: IfallTokens.textMuted, fontSize: 12),
                       ),
                       value: _enabled,
                       onChanged: (bool v) async {
@@ -365,7 +366,7 @@ class _BandSlider extends StatelessWidget {
                   _label,
                   style: const TextStyle(
                     fontSize: 12.5,
-                    color: SaxifyColors.textSecondary,
+                    color: IfallTokens.textSecondary,
                   ),
                 ),
               ),

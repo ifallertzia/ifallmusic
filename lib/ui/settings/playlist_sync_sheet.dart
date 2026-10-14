@@ -9,6 +9,7 @@ import '../../core/services/library_service.dart';
 import '../../core/services/playlist_sync_service.dart';
 import '../../core/services/settings_service.dart';
 import '../../core/theme/saxify_theme.dart';
+import '../../core/theme/ifall_ui.dart';
 
 Future<void> sharePlaylistCode(BuildContext context, Playlist playlist) async {
   final TextEditingController name = TextEditingController(text: playlist.name);
@@ -80,7 +81,7 @@ Future<void> showImportCodeSheet(BuildContext context) async {
   await showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
-    backgroundColor: SaxifyColors.surface,
+    backgroundColor: IfallTokens.surface,
     builder: (BuildContext sheet) {
       return Padding(
         padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + MediaQuery.viewInsetsOf(sheet).bottom),
@@ -92,7 +93,7 @@ Future<void> showImportCodeSheet(BuildContext context) async {
             const SizedBox(height: 8),
             const Text(
               'Cloud playlist codes are separate from local library JSON. Full-library restore needs the Render route GET /playlist/all/:code; a single-playlist code uses GET /playlist/:code. Generating codes needs POST /playlist and POST /playlist/all.',
-              style: TextStyle(fontSize: 12, color: SaxifyColors.textMuted),
+              style: TextStyle(fontSize: 12, color: IfallTokens.textMuted),
             ),
             Align(
               alignment: Alignment.centerRight,

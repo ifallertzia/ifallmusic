@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../config/branding.dart';
 import '../../core/theme/saxify_theme.dart';
+import '../../core/theme/ifall_ui.dart';
 
 /// The Liked Songs sleeve.
 ///
@@ -131,7 +132,7 @@ class LikedSongsCard extends StatelessWidget {
                   fontSize: 13,
                   height: 1.25,
                   fontWeight: FontWeight.w700,
-                  color: SaxifyColors.textPrimary,
+                  color: IfallTokens.textPrimary,
                 ),
               ),
               const SizedBox(height: 3),
@@ -141,7 +142,7 @@ class LikedSongsCard extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   fontSize: 11.5,
-                  color: SaxifyColors.textMuted,
+                  color: IfallTokens.textMuted,
                 ),
               ),
             ],

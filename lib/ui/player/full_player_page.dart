@@ -28,6 +28,7 @@ import '../widgets/song_download_button.dart';
 import 'equalizer_page.dart';
 import 'player_palette.dart';
 import 'player_sheets.dart';
+import '../../core/theme/ifall_ui.dart';
 
 /// `1.0 → 1x`, `1.5 → 1.5x`, `2.0 → 2x` — the player's own speed shorthand,
 /// so the button never reads `2.0x` or `1.0x`.
@@ -242,7 +243,7 @@ class _FullPlayerPageState extends State<FullPlayerPage>
               const Icon(
                 Icons.music_off_rounded,
                 size: 46,
-                color: SaxifyColors.textFaint,
+                color: IfallTokens.textFaint,
               ),
               const SizedBox(height: 14),
               Text(
@@ -538,7 +539,7 @@ class _FullPlayerPageState extends State<FullPlayerPage>
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     fontSize: 13.5,
-                    color: SaxifyColors.textSecondary,
+                    color: IfallTokens.textSecondary,
                   ),
                 ),
               ],
@@ -551,7 +552,7 @@ class _FullPlayerPageState extends State<FullPlayerPage>
             tooltip: liked ? 'Remove from Liked' : 'Like',
             icon: Icon(
               liked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-              color: liked ? accent.primary : SaxifyColors.textMuted,
+              color: liked ? accent.primary : IfallTokens.textMuted,
             ),
             onPressed: () => library.toggleLike(song),
           ),
@@ -621,7 +622,7 @@ class _FullPlayerPageState extends State<FullPlayerPage>
                       ),
                       style: const TextStyle(
                         fontSize: 11.5,
-                        color: SaxifyColors.textMuted,
+                        color: IfallTokens.textMuted,
                         fontFeatures: <FontFeature>[
                           FontFeature.tabularFigures(),
                         ],
@@ -638,7 +639,7 @@ class _FullPlayerPageState extends State<FullPlayerPage>
                         '-${Fmt.clock(total - position)}',
                         style: const TextStyle(
                           fontSize: 11.5,
-                          color: SaxifyColors.textMuted,
+                          color: IfallTokens.textMuted,
                           fontFeatures: <FontFeature>[
                             FontFeature.tabularFigures(),
                           ],
@@ -781,7 +782,7 @@ class _PlayerBackdrop extends StatelessWidget {
           colors: <Color>[
             palette.primary,
             palette.secondary,
-            SaxifyColors.background,
+            IfallTokens.background,
           ],
           stops: const <double>[0.0, 0.55, 1.0],
         ),
@@ -823,7 +824,7 @@ class _UtilityButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final SaxifyAccent accent = context.accent;
-    final Color fg = active ? accent.primary : SaxifyColors.textSecondary;
+    final Color fg = active ? accent.primary : IfallTokens.textSecondary;
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -1140,7 +1141,7 @@ class _LyricsSheetState extends State<_LyricsSheet> {
                 const Icon(
                   Icons.lyrics_outlined,
                   size: 16,
-                  color: SaxifyColors.textMuted,
+                  color: IfallTokens.textMuted,
                 ),
                 const SizedBox(width: 8),
                 const Text(
@@ -1148,7 +1149,7 @@ class _LyricsSheetState extends State<_LyricsSheet> {
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
-                    color: SaxifyColors.textPrimary,
+                    color: IfallTokens.textPrimary,
                   ),
                 ),
                 const Spacer(),
@@ -1158,7 +1159,7 @@ class _LyricsSheetState extends State<_LyricsSheet> {
                   child: const Icon(
                     Icons.keyboard_arrow_up_rounded,
                     size: 22,
-                    color: SaxifyColors.textMuted,
+                    color: IfallTokens.textMuted,
                   ),
                 ),
               ],
@@ -1245,7 +1246,7 @@ class _LyricsSheetState extends State<_LyricsSheet> {
                   'Looking for lyrics…',
                   style: TextStyle(
                     fontSize: 12.5,
-                    color: SaxifyColors.textMuted,
+                    color: IfallTokens.textMuted,
                   ),
                 ),
               ],
@@ -1256,7 +1257,7 @@ class _LyricsSheetState extends State<_LyricsSheet> {
                 'Swipe up to read along',
                 style: TextStyle(
                   fontSize: 12.5,
-                  color: SaxifyColors.textMuted,
+                  color: IfallTokens.textMuted,
                 ),
               ),
             ),
@@ -1282,7 +1283,7 @@ class _LyricsSheetState extends State<_LyricsSheet> {
             style: TextStyle(
               fontSize: 15.5,
               fontWeight: FontWeight.w700,
-              color: SaxifyColors.textPrimary,
+              color: IfallTokens.textPrimary,
             ),
           ),
           const SizedBox(height: 8),
@@ -1293,7 +1294,7 @@ class _LyricsSheetState extends State<_LyricsSheet> {
             style: TextStyle(
               fontSize: 11.5,
               height: 1.55,
-              color: SaxifyColors.textMuted.withValues(alpha: 0.9),
+              color: IfallTokens.textMuted.withValues(alpha: 0.9),
             ),
           ),
           const SizedBox(height: 12),
@@ -1322,7 +1323,7 @@ class _LyricsSheetState extends State<_LyricsSheet> {
               fontSize: 16,
               height: 1.6,
               fontWeight: FontWeight.w500,
-              color: SaxifyColors.textSecondary,
+              color: IfallTokens.textSecondary,
             ),
           ),
         ],
@@ -1409,7 +1410,7 @@ class _LyricsModeChip extends StatelessWidget {
             style: TextStyle(
               fontSize: 11.5,
               fontWeight: FontWeight.w600,
-              color: selected ? Colors.white : SaxifyColors.textMuted,
+              color: selected ? Colors.white : IfallTokens.textMuted,
             ),
           ),
         ),
@@ -1491,7 +1492,7 @@ class _TransportIcon extends StatelessWidget {
       iconSize: size,
       icon: Icon(
         icon,
-        color: active ? accent.primary : SaxifyColors.textPrimary,
+        color: active ? accent.primary : IfallTokens.textPrimary,
       ),
     );
   }

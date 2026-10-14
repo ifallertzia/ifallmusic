@@ -13,6 +13,7 @@ import '../../widgets/quality_badge.dart';
 import 'artwork.dart';
 import 'song_download_button.dart';
 import 'song_menu.dart';
+import '../../core/theme/ifall_ui.dart';
 
 /// One row in any track list. Matches the site's result rows: square artwork,
 /// title, artist, duration, heart, overflow menu.
@@ -88,7 +89,7 @@ class SongTile extends StatelessWidget {
                       fontWeight: FontWeight.w700,
                       color: isCurrent
                           ? accent.primary
-                          : SaxifyColors.textFaint,
+                          : IfallTokens.textFaint,
                     ),
                   ),
                 ),
@@ -136,7 +137,7 @@ class SongTile extends StatelessWidget {
                             : FontWeight.w600,
                         color: isCurrent
                             ? accent.primary
-                            : SaxifyColors.textPrimary,
+                            : IfallTokens.textPrimary,
                       ),
                     ),
                     const SizedBox(height: 2),
@@ -170,7 +171,7 @@ class SongTile extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           fontSize: 12,
-                          color: SaxifyColors.textMuted,
+                          color: IfallTokens.textMuted,
                         ),
                       ),
                   ],
@@ -199,7 +200,7 @@ class SongTile extends StatelessWidget {
                           size: 19,
                           color: liked
                               ? accent.primary
-                              : SaxifyColors.textFaint,
+                              : IfallTokens.textFaint,
                         ),
                         onPressed: () => library.toggleLike(song),
                       ),
@@ -215,7 +216,7 @@ class SongTile extends StatelessWidget {
                           icon: const Icon(
                             Icons.more_horiz_rounded,
                             size: 20,
-                            color: SaxifyColors.textFaint,
+                            color: IfallTokens.textFaint,
                           ),
                           onPressed: () =>
                               showSongSheet(context, song, radio: startRadio),
@@ -261,14 +262,14 @@ class QueueTile extends StatelessWidget {
         style: TextStyle(
           fontSize: 13.5,
           fontWeight: FontWeight.w600,
-          color: isPlaying ? accent.primary : SaxifyColors.textPrimary,
+          color: isPlaying ? accent.primary : IfallTokens.textPrimary,
         ),
       ),
       subtitle: Text(
         song.artist,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: const TextStyle(fontSize: 11.5, color: SaxifyColors.textMuted),
+        style: const TextStyle(fontSize: 11.5, color: IfallTokens.textMuted),
       ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
@@ -280,7 +281,7 @@ class QueueTile extends StatelessWidget {
             icon: const Icon(
               Icons.close_rounded,
               size: 18,
-              color: SaxifyColors.textFaint,
+              color: IfallTokens.textFaint,
             ),
             onPressed: onRemove,
           ),

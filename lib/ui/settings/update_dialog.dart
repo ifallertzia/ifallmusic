@@ -6,6 +6,7 @@ import '../../core/theme/saxify_accents.dart';
 import '../../core/theme/saxify_theme.dart';
 import '../widgets/neon.dart';
 import '../widgets/saxify_logo.dart';
+import '../../core/theme/ifall_ui.dart';
 
 /// Runs an update check and, if a newer release exists, shows the
 /// "Update available" dialog with in-app download + install.
@@ -136,7 +137,7 @@ class _UpdateDialogState extends State<_UpdateDialog> {
                         '${info.currentLabel} → ${info.latestLabel}'
                         '${info.sizeLabel.isNotEmpty ? ' · ${info.sizeLabel}' : ''}',
                         style: const TextStyle(
-                            fontSize: 12.5, color: SaxifyColors.textMuted),
+                            fontSize: 12.5, color: IfallTokens.textMuted),
                       ),
                     ],
                   ),
@@ -148,16 +149,16 @@ class _UpdateDialogState extends State<_UpdateDialog> {
               width: double.infinity,
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: SaxifyColors.surfaceAlt,
+                color: IfallTokens.surfaceAlt,
                 borderRadius: BorderRadius.circular(SaxifyTheme.radiusSm),
-                border: Border.all(color: SaxifyColors.border),
+                border: Border.all(color: IfallTokens.border),
               ),
               child: Text(
                 _kShortChangelog,
                 style: const TextStyle(
                   fontSize: 13,
                   height: 1.55,
-                  color: SaxifyColors.textSecondary,
+                  color: IfallTokens.textSecondary,
                 ),
               ),
             ),
@@ -168,13 +169,13 @@ class _UpdateDialogState extends State<_UpdateDialog> {
               Text(
                 'Downloading… ${(_progress * 100).toStringAsFixed(0)}%',
                 style: const TextStyle(
-                    fontSize: 12, color: SaxifyColors.textMuted),
+                    fontSize: 12, color: IfallTokens.textMuted),
               ),
             ] else if (_phase == _Phase.error) ...<Widget>[
               Text(
                 'Download failed: $_error',
                 style: const TextStyle(
-                    fontSize: 12, color: SaxifyColors.danger),
+                    fontSize: 12, color: IfallTokens.danger),
               ),
               const SizedBox(height: 12),
               Row(
@@ -225,7 +226,7 @@ class _UpdateDialogState extends State<_UpdateDialog> {
                   'This update can\'t be installed in-app yet. Please try '
                   'again in a little while.',
                   style: TextStyle(
-                      fontSize: 11.5, color: SaxifyColors.textMuted),
+                      fontSize: 11.5, color: IfallTokens.textMuted),
                 ),
               ],
             ],

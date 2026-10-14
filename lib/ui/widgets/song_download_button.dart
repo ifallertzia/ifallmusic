@@ -8,6 +8,7 @@ import '../../core/services/playback_service.dart';
 import '../../core/theme/saxify_accents.dart';
 import '../../core/theme/saxify_theme.dart';
 import '../downloads/storage_permission.dart';
+import '../../core/theme/ifall_ui.dart';
 
 /// Per-song download control with live progress. Tapping a completed download
 /// starts its local copy; tapping an active download cancels it.
@@ -69,8 +70,8 @@ class SongDownloadButton extends StatelessWidget {
             : Icons.download_rounded,
         size: size * 0.52,
         color: job?.phase == MusicDownloadPhase.failed
-            ? SaxifyColors.danger
-            : (floating ? Colors.white : SaxifyColors.textSecondary),
+            ? IfallTokens.danger
+            : (floating ? Colors.white : IfallTokens.textSecondary),
       );
     }
 

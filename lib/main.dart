@@ -34,6 +34,7 @@ import 'ui/onboarding/welcome_page.dart';
 import 'ui/shell/ifall_shell.dart';
 import 'ui/shell/mini_player_layer.dart';
 import 'ui/shell/shell_controller.dart';
+import 'core/theme/ifall_ui.dart';
 
 Future<void> _restoreEqualizerForPlayback(
   SettingsService settings,
@@ -473,7 +474,7 @@ class IfallRecoveryApp extends StatelessWidget {
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 13,
-                    color: SaxifyColors.textMuted,
+                    color: IfallTokens.textMuted,
                     height: 1.5,
                   ),
                 ),
