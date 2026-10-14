@@ -58,7 +58,7 @@ class SidifyBranding {
   /// Kept in step with pubspec.yaml by `scripts/sync_version.sh`, which CI runs
   /// on every version bump. Do not edit these three by hand.
   static const String versionLabel = '2.9.0';
-  static const String buildLabel = '34';
+  static const String buildLabel = '35';
   static const String tagline = 'Stream beyond limits';
   static const String userAgent = 'Sidify/2.9.0 (Flutter)';
 
