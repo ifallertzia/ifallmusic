@@ -66,6 +66,7 @@ class PlaybackService extends ChangeNotifier {
   final LibraryService _library;
   final AudioPlayer _player;
   final InnertubeResolver _innertube = InnertubeResolver();
+  final ModuleSourceResolver _modules = ModuleSourceResolver();
   final Random _random = Random();
 
   StreamSubscription<PlaybackEvent>? _eventSub;
@@ -1563,8 +1564,5 @@ class PlaybackService extends ChangeNotifier {
     unawaited(_trackController.close());
     _player.dispose();
     super.dispose();
-  }
-}
-   super.dispose();
   }
 }
