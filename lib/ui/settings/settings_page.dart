@@ -17,8 +17,10 @@ import '../../core/services/app_feedback.dart';
 import '../../core/services/library_service.dart';
 import '../../core/services/listen_together_service.dart';
 import '../../core/services/playback_service.dart';
+import '../../core/services/presence_service.dart';
 import '../../core/services/settings_service.dart';
 import '../../core/services/youtube_service.dart';
+import '../../services/lyrics_service.dart';
 import '../../core/theme/ifall_ui.dart';
 import '../../core/theme/theme_controller.dart';
 import '../../core/utils/format.dart';
@@ -1025,6 +1027,7 @@ class AccountsSettingsPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final SettingsService settings = context.watch<SettingsService>();
+    final PresenceService presence = context.watch<PresenceService>();
     final IfallPalette c = IfallPalette.of(context);
 
     return _SettingsScaffold(
@@ -1071,6 +1074,19 @@ class AccountsSettingsPage extends StatelessWidget {
                   await settings.setLastFmUser('');
                 },
               ),
+          ],
+        ),
+        IfallGroup(
+          title: 'Status',
+          footer: presence.queuedScrobbles == 0
+              ? null
+              : '${presence.queuedScrobbles} scrobble(s) are waiting for a connection and retry on the next track.',
+          children: <Widget>[
+            IfallRow(
+              icon: Icons.sync_alt_rounded,
+              title: 'Last activity',
+              value: presence.status,
+            ),
           ],
         ),
         IfallGroup(
@@ -1155,6 +1171,7 @@ class AccountsSettingsPage extends StatelessWidget {
     required String title,
     required String initial,
     bool obscure = false,
+    String? hint,
   }) {
     final TextEditingController controller =
         TextEditingController(text: initial);
@@ -1166,6 +1183,7 @@ class AccountsSettingsPage extends StatelessWidget {
           controller: controller,
           autofocus: true,
           obscureText: obscure,
+          decoration: InputDecoration(hintText: hint ?? title),
           onSubmitted: (String v) => Navigator.of(dialogContext).pop(v),
         ),
         actions: <Widget>[
@@ -1207,6 +1225,23 @@ class DiscordSettingsPage extends StatelessWidget {
               title: 'Enable Discord presence',
               value: settings.discordEnabled,
               onChanged: settings.setDiscordEnabled,
+            ),
+            IfallRow(
+              icon: Icons.hub_outlined,
+              title: 'Presence relay',
+              subtitle: settings.discordRelay.isEmpty
+                  ? 'Not set — Discord needs a relay on a device it can reach'
+                  : settings.discordRelay,
+              onTap: () async {
+                final String? relay = await _prompt(
+                  context,
+                  title: 'Presence relay URL',
+                  initial: settings.discordRelay,
+                  hint: 'https://my-relay.example.com/presence',
+                );
+                if (relay == null) return;
+                await settings.setDiscordRelay(relay);
+              },
             ),
             IfallRow(
               icon: Icons.edit_outlined,
@@ -1257,6 +1292,19 @@ class DiscordSettingsPage extends StatelessWidget {
 class LyricsSettingsPage extends StatelessWidget {
   const LyricsSettingsPage({super.key});
 
+  /// Persists the choice and repoints the live lookup chain, so the next
+  /// search uses the new order without restarting the app.
+  void _setProviders(SettingsService settings, String provider, bool on) {
+    final List<String> next = List<String>.from(settings.lyricsProviders);
+    if (on) {
+      if (!next.contains(provider)) next.add(provider);
+    } else {
+      next.remove(provider);
+    }
+    settings.setLyricsProviders(next);
+    LyricsService.instance.providers = next;
+  }
+
   @override
   Widget build(BuildContext context) {
     final SettingsService settings = context.watch<SettingsService>();
@@ -1276,27 +1324,13 @@ class LyricsSettingsPage extends StatelessWidget {
                 trailing: Switch.adaptive(
                   value: settings.lyricsProviders.contains(provider),
                   activeColor: IfallPalette.of(context).accent,
-                  onChanged: (bool on) {
-                    final List<String> next =
-                        List<String>.from(settings.lyricsProviders);
-                    if (on) {
-                      if (!next.contains(provider)) next.add(provider);
-                    } else {
-                      next.remove(provider);
-                    }
-                    settings.setLyricsProviders(next);
-                  },
+                  onChanged: (bool on) => _setProviders(settings, provider, on),
                 ),
-                onTap: () {
-                  final List<String> next =
-                      List<String>.from(settings.lyricsProviders);
-                  if (next.contains(provider)) {
-                    next.remove(provider);
-                  } else {
-                    next.add(provider);
-                  }
-                  settings.setLyricsProviders(next);
-                },
+                onTap: () => _setProviders(
+                  settings,
+                  provider,
+                  !settings.lyricsProviders.contains(provider),
+                ),
               ),
           ],
         ),

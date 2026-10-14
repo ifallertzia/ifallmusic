@@ -21,6 +21,7 @@ import 'core/services/native_bridge.dart';
 import 'core/services/notification_bootstrap.dart';
 import 'core/services/playback_service.dart';
 import 'core/services/playlist_sync_service.dart';
+import 'core/services/presence_service.dart';
 import 'core/services/recommendation_service.dart';
 import 'core/services/recommendation_worker.dart';
 import 'core/services/settings_service.dart';
@@ -344,6 +345,10 @@ class _IfallMusicAppState extends State<IfallMusicApp>
         ),
         ChangeNotifierProvider<JamService>(
           create: (_) => JamService(settings: boot.settings),
+        ),
+        ChangeNotifierProvider<PresenceService>(
+          create: (_) => PresenceService(settings: boot.settings)
+            ..attach(boot.playback),
         ),
       ],
       child: Provider<YoutubeService>.value(

@@ -152,6 +152,13 @@ class PlaybackService extends ChangeNotifier {
   Stream<Duration> get positionStream => _player.positionStream;
   Stream<Duration?> get durationStream => _player.durationStream;
 
+  /// Broadcast of every track that actually reaches the player — the hook the
+  /// scrobblers and Rich Presence use, so they do not have to squat on
+  /// [onTrackStarted] (which the recommendation engine owns).
+  final StreamController<Song> _trackController =
+      StreamController<Song>.broadcast();
+  Stream<Song> get trackStream => _trackController.stream;
+
   bool get _isFlutterTestPlayer =>
       Platform.environment.containsKey('FLUTTER_TEST') ||
       _player.runtimeType.toString().toLowerCase().contains('fake');
@@ -1208,6 +1215,7 @@ class PlaybackService extends ChangeNotifier {
     try {
       onTrackStarted?.call(song);
     } catch (_) {}
+    if (!_trackController.isClosed) _trackController.add(song);
   }
 
   void _startPlayerPlayback(Song song) {
@@ -1525,6 +1533,7 @@ class PlaybackService extends ChangeNotifier {
     _positionSub?.cancel();
     _durationSub?.cancel();
     _innertube.close();
+    unawaited(_trackController.close());
     _player.dispose();
     super.dispose();
   }

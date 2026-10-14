@@ -25,6 +25,10 @@ class LyricsProviders {
   static const String megalobiz = 'Megalobiz';
   static const String embedded = 'Embedded';
 
+  /// The plain-text provider that has always been the last rung. It is not a
+  /// user choice — it is what runs when everything above it came back empty.
+  static const String plainFallback = 'lyrics.ovh';
+
   static const List<String> all = <String>[
     lrclib,
     lrcRed,
@@ -107,6 +111,7 @@ class SettingsService extends ChangeNotifier {
   static const String kJamLastCode = 'ifall.jam_last_code.v1';
   static const String kDiscordEnabled = 'ifall.discord_enabled.v1';
   static const String kDiscordDetails = 'ifall.discord_details.v1';
+  static const String kDiscordRelay = 'ifall.discord_relay.v1';
   static const String kLastFmSession = 'ifall.lastfm_session.v1';
   static const String kLastFmUser = 'ifall.lastfm_user.v1';
   static const String kLastFmEnabled = 'ifall.lastfm_enabled.v1';
@@ -351,6 +356,13 @@ class SettingsService extends ChangeNotifier {
   String get discordDetails => _prefs.getString(kDiscordDetails) ?? '';
   Future<void> setDiscordDetails(String v) =>
       _prefs.setString(kDiscordDetails, v.trim()).then((_) => notifyListeners());
+
+  /// Where Rich Presence is POSTed. Discord's own transport is a local IPC
+  /// socket that a phone cannot open, so presence goes through a relay the
+  /// listener runs. Empty means presence is off.
+  String get discordRelay => _prefs.getString(kDiscordRelay) ?? '';
+  Future<void> setDiscordRelay(String v) =>
+      _prefs.setString(kDiscordRelay, v.trim()).then((_) => notifyListeners());
 
   bool get lastFmEnabled => _prefs.getBool(kLastFmEnabled) ?? false;
   Future<void> setLastFmEnabled(bool v) =>
@@ -629,6 +641,7 @@ class SettingsService extends ChangeNotifier {
     'ifall.crossfade_seconds.v1',
     'ifall.discord_details.v1',
     'ifall.discord_enabled.v1',
+    'ifall.discord_relay.v1',
     'ifall.extra_sources.v1',
     'ifall.high_performance.v1',
     'ifall.jam_display_name.v1',
