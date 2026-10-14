@@ -12,6 +12,7 @@ import '../../core/theme/saxify_theme.dart';
 import '../player/full_player_page.dart';
 import '../widgets/artwork.dart';
 import 'shell_controller.dart';
+import '../../core/theme/ifall_ui.dart';
 
 /// Opens the full player the way the dock always has: a soft, non-opaque route
 /// so the shell and playback stay alive underneath. It is named
@@ -230,7 +231,7 @@ class MiniPlayer extends StatelessWidget {
                                     style: SaxifyTheme.appleFont(
                                       size: compact ? 12 : 13.5,
                                       weight: FontWeight.w700,
-                                      color: SaxifyColors.textPrimary,
+                                      color: IfallTokens.textPrimary,
                                     ),
                                     child: Text(
                                       song.title,
@@ -266,7 +267,7 @@ class MiniPlayer extends StatelessWidget {
                                       curve: _curve,
                                       style: TextStyle(
                                         fontSize: compact ? 10.5 : 11.5,
-                                        color: SaxifyColors.textMuted,
+                                        color: IfallTokens.textMuted,
                                       ),
                                       child: Text(
                                         song.artist,
@@ -295,7 +296,7 @@ class MiniPlayer extends StatelessWidget {
                                       size: 19,
                                       color: liked
                                           ? accent.primary
-                                          : SaxifyColors.textFaint,
+                                          : IfallTokens.textFaint,
                                     ),
                                     onPressed: () => library.toggleLike(song),
                                   ),
@@ -326,7 +327,7 @@ class MiniPlayer extends StatelessWidget {
                                     icon: const Icon(
                                       Icons.skip_next_rounded,
                                       size: 25,
-                                      color: SaxifyColors.textSecondary,
+                                      color: IfallTokens.textSecondary,
                                     ),
                                     onPressed: playback.next,
                                   ),

@@ -1,15 +1,13 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/models/song.dart';
 import '../../core/services/playback_service.dart';
 import '../../core/services/youtube_service.dart';
-import '../../core/theme/saxify_theme.dart';
+import '../../core/theme/ifall_ui.dart';
 import '../../data/labels.dart';
 import '../../widgets/brand_logo.dart';
 import '../shell/shell_controller.dart';
-import '../widgets/neon.dart';
 import '../widgets/search_fab.dart';
 import '../widgets/song_tile.dart';
 
@@ -25,10 +23,13 @@ class _BrandsPageState extends State<BrandsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final IfallPalette c = IfallPalette.of(context);
     final List<MusicBrand> brands = MusicBrands.filter(_filter);
     return Scaffold(
+      backgroundColor: c.background,
       appBar: AppBar(
-        title: const Text('Music brands'),
+        backgroundColor: c.background,
+        title: Text('Music brands', style: IfallText.title(c.onSurface)),
         actions: const <Widget>[SaxifySearchButton()],
       ),
       body: Column(
@@ -55,43 +56,53 @@ class _BrandsPageState extends State<BrandsPage> {
               itemBuilder: (BuildContext context, int i) {
                 final MusicBrand brand = brands[i];
                 return Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: NeonCard(
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => BrandChannelPage(brand: brand),
-                      ),
-                    ),
-                    child: Row(
-                      children: <Widget>[
-                        BrandLogo(brand: brand),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: IfallGlass(
+                    radius: IfallUI.rMd,
+                    blur: 0,
+                    padding: EdgeInsets.zero,
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(IfallUI.rMd),
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => BrandChannelPage(brand: brand),
+                          ),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Row(
                             children: <Widget>[
-                              Text(
-                                brand.name,
-                                style: GoogleFonts.spaceGrotesk(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w700,
+                              BrandLogo(brand: brand),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: <Widget>[
+                                    Text(
+                                      brand.name,
+                                      style: IfallText.body(c.onSurface)
+                                          .copyWith(fontWeight: FontWeight.w700),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      '${brand.region} · @${brand.handle}',
+                                      style: IfallText.caption(
+                                        c.onSurfaceVariant,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
-                              Text(
-                                '${brand.region} · @${brand.handle}',
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  color: SaxifyColors.textMuted,
-                                ),
+                              Icon(
+                                Icons.chevron_right_rounded,
+                                color: c.onSurfaceVariant,
                               ),
                             ],
                           ),
                         ),
-                        const Icon(
-                          Icons.chevron_right_rounded,
-                          color: SaxifyColors.textFaint,
-                        ),
-                      ],
+                      ),
                     ),
                   ),
                 );
@@ -134,38 +145,54 @@ class _BrandChannelPageState extends State<BrandChannelPage> {
 
   @override
   Widget build(BuildContext context) {
+    final IfallPalette c = IfallPalette.of(context);
     return Scaffold(
+      backgroundColor: c.background,
       appBar: AppBar(
-        title: Text(widget.brand.name),
+        backgroundColor: c.background,
+        title: Text(widget.brand.name, style: IfallText.title(c.onSurface)),
         actions: const <Widget>[SaxifySearchButton()],
       ),
       body: FutureBuilder<List<Song>>(
         future: _future,
         builder: (BuildContext context, AsyncSnapshot<List<Song>> snap) {
           if (snap.connectionState != ConnectionState.done) {
-            return const Center(child: CircularProgressIndicator());
+            return Center(child: CircularProgressIndicator(color: c.accent));
           }
           final List<Song> songs = snap.data ?? <Song>[];
           if (songs.isEmpty) {
-            return EmptyState(
+            return IfallEmpty(
               icon: Icons.video_library_outlined,
-              title: 'Songs unavailable',
               message: 'Check your connection and try again in a moment.',
               actionLabel: 'Retry',
-              onAction: _retry,
+              action: _retry,
             );
           }
           return ListView(
             padding: const EdgeInsets.only(bottom: 140),
             children: <Widget>[
               Padding(
-                padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
-                child: NeonButton(
-                  label: 'Play uploads',
-                  icon: Icons.play_arrow_rounded,
-                  expand: true,
-                  onPressed: () =>
-                      context.read<PlaybackService>().playQueue(songs),
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 46,
+                  child: FilledButton.icon(
+                    onPressed: () =>
+                        context.read<PlaybackService>().playQueue(songs),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: c.accent,
+                      foregroundColor:
+                          ThemeData.estimateBrightnessForColor(c.accent) ==
+                                  Brightness.dark
+                              ? Colors.white
+                              : Colors.black,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(IfallUI.rPill),
+                      ),
+                    ),
+                    icon: const Icon(Icons.play_arrow_rounded),
+                    label: const Text('Play uploads'),
+                  ),
                 ),
               ),
               for (int i = 0; i < songs.length; i++)

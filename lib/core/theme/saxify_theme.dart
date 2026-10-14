@@ -101,12 +101,34 @@ class SaxifyTheme {
     );
   }
 
+
+  /// Light-theme counterparts of [SaxifyColors], used only by [build] when the
+  /// listener has asked for the light look.
+  static const _LightColors _light = _LightColors();
+
   static ThemeData build(
     SaxifyAccent accent, {
     SaxifyAccent? qualityAccent,
+    Brightness brightness = Brightness.dark,
   }) {
+    final bool dark = brightness == Brightness.dark;
+    final Color pageBg = dark ? SaxifyColors.background : _light.background;
+    final Color sheetBg = dark ? SaxifyColors.surface : _light.surface;
+    final Color elevatedBg = dark ? SaxifyColors.surfaceAlt : _light.surfaceAlt;
+    final Color cardBg = dark ? SaxifyColors.card : _light.card;
+    final Color cardHoverBg = dark ? SaxifyColors.cardHover : _light.cardHover;
+    final Color ink = dark ? SaxifyColors.textPrimary : _light.textPrimary;
+    final Color inkSoft = dark ? SaxifyColors.textSecondary : _light.textSecondary;
+    final Color inkMuted = dark ? SaxifyColors.textMuted : _light.textMuted;
+    final Color inkFaint = dark ? SaxifyColors.textFaint : _light.textFaint;
+    final Color hairline = dark ? SaxifyColors.hairline : _light.hairline;
+    final Color stroke = dark ? SaxifyColors.border : _light.border;
+    final Color film = dark ? SaxifyColors.glass : _light.glass;
+    final Color filmStrong =
+        dark ? SaxifyColors.glassHighlight : _light.glassHighlight;
+
     final TextTheme base = GoogleFonts.interTextTheme(
-      ThemeData(brightness: Brightness.dark).textTheme,
+      ThemeData(brightness: brightness).textTheme,
     );
 
     final TextTheme textTheme = base
@@ -136,8 +158,8 @@ class SaxifyTheme {
           labelMedium: base.labelMedium?.copyWith(fontWeight: FontWeight.w600, letterSpacing: 0.2),
         )
         .apply(
-          bodyColor: SaxifyColors.textPrimary,
-          displayColor: SaxifyColors.textPrimary,
+          bodyColor: ink,
+          displayColor: ink,
         )
         .copyWith(
           bodyLarge: (base.bodyLarge ?? const TextStyle()).copyWith(
@@ -150,7 +172,10 @@ class SaxifyTheme {
           ),
         );
 
-    final ColorScheme scheme = const ColorScheme.dark().copyWith(
+    final ColorScheme scheme = (dark
+            ? const ColorScheme.dark()
+            : const ColorScheme.light())
+        .copyWith(
       primary: accent.primary,
       onPrimary: accent.onAccent,
       primaryContainer: accent.secondary,
@@ -158,68 +183,69 @@ class SaxifyTheme {
       secondary: accent.secondary,
       onSecondary: Colors.white,
       tertiary: accent.secondary,
-      surface: SaxifyColors.background,
-      onSurface: SaxifyColors.textPrimary,
-      surfaceContainerLowest: SaxifyColors.background,
-      surfaceContainerLow: SaxifyColors.surface,
-      surfaceContainer: SaxifyColors.surfaceAlt,
-      surfaceContainerHigh: SaxifyColors.card,
-      surfaceContainerHighest: SaxifyColors.cardHover,
-      onSurfaceVariant: SaxifyColors.textSecondary,
-      outline: SaxifyColors.border,
-      outlineVariant: SaxifyColors.hairline,
+      surface: pageBg,
+      onSurface: ink,
+      surfaceContainerLowest: pageBg,
+      surfaceContainerLow: sheetBg,
+      surfaceContainer: elevatedBg,
+      surfaceContainerHigh: cardBg,
+      surfaceContainerHighest: cardHoverBg,
+      onSurfaceVariant: inkSoft,
+      outline: stroke,
+      outlineVariant: hairline,
       error: SaxifyColors.danger,
-      brightness: Brightness.dark,
+      brightness: brightness,
     );
 
     return ThemeData(
       useMaterial3: true,
-      brightness: Brightness.dark,
+      brightness: brightness,
       colorScheme: scheme,
-      scaffoldBackgroundColor: SaxifyColors.background,
-      canvasColor: SaxifyColors.background,
+      scaffoldBackgroundColor: pageBg,
+      canvasColor: pageBg,
       primaryColor: accent.primary,
-      dividerColor: SaxifyColors.hairline,
+      dividerColor: hairline,
       splashFactory: InkSparkle.splashFactory,
       splashColor: accent.primary.withValues(alpha: 0.08),
       highlightColor: accent.primary.withValues(alpha: 0.04),
       textTheme: textTheme,
-      iconTheme: const IconThemeData(color: SaxifyColors.textSecondary),
+      iconTheme: IconThemeData(color: inkSoft),
       appBarTheme: AppBarTheme(
         backgroundColor: Colors.transparent,
         surfaceTintColor: Colors.transparent,
-        foregroundColor: SaxifyColors.textPrimary,
+        foregroundColor: ink,
         elevation: 0,
         scrolledUnderElevation: 0,
         centerTitle: false,
-        systemOverlayStyle: SystemUiOverlayStyle.light,
+        systemOverlayStyle:
+            dark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
         titleTextStyle: TextStyle(
           fontSize: 21,
           fontWeight: FontWeight.w700,
           letterSpacing: -0.4,
-          color: SaxifyColors.textPrimary,
+          color: ink,
           fontFamily: GoogleFonts.inter().fontFamily,
         ),
       ),
       cardTheme: CardThemeData(
-        color: SaxifyColors.glass,
+        color: film,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(radiusLg),
-          side: const BorderSide(color: SaxifyColors.border),
+          side: BorderSide(color: stroke),
         ),
       ),
-      dividerTheme: const DividerThemeData(
-        color: SaxifyColors.hairline,
+      dividerTheme: DividerThemeData(
+        color: hairline,
         thickness: 1,
         space: 1,
       ),
       inputDecorationTheme: InputDecorationThemeData(
         filled: true,
-        fillColor: SaxifyColors.glass,
-        hintStyle: const TextStyle(color: SaxifyColors.textFaint),
+        fillColor: film,
+        hintStyle: TextStyle(color: inkFaint),
         contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(radiusXl),
@@ -227,7 +253,7 @@ class SaxifyTheme {
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(radiusXl),
-          borderSide: const BorderSide(color: SaxifyColors.border),
+          borderSide: BorderSide(color: stroke),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(radiusXl),
@@ -235,12 +261,12 @@ class SaxifyTheme {
         ),
       ),
       chipTheme: ChipThemeData(
-        backgroundColor: SaxifyColors.glass,
+        backgroundColor: film,
         selectedColor: accent.primary.withValues(alpha: 0.30),
-        side: const BorderSide(color: SaxifyColors.border),
+        side: BorderSide(color: stroke),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-        labelStyle: const TextStyle(
-          color: SaxifyColors.textPrimary,
+        labelStyle: TextStyle(
+          color: ink,
           fontWeight: FontWeight.w600,
         ),
         shape: RoundedRectangleBorder(
@@ -249,16 +275,16 @@ class SaxifyTheme {
       ),
       sliderTheme: SliderThemeData(
         activeTrackColor: accent.primary,
-        inactiveTrackColor: SaxifyColors.glassHighlight,
-        thumbColor: Colors.white,
+        inactiveTrackColor: filmStrong,
+        thumbColor: dark ? Colors.white : accent.primary,
         overlayColor: accent.primary.withValues(alpha: 0.18),
         trackHeight: 5,
         thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 9),
       ),
       progressIndicatorTheme: ProgressIndicatorThemeData(
         color: accent.primary,
-        linearTrackColor: SaxifyColors.glassHighlight,
-        circularTrackColor: SaxifyColors.glassHighlight,
+        linearTrackColor: filmStrong,
+        circularTrackColor: filmStrong,
       ),
       bottomSheetTheme: const BottomSheetThemeData(
         backgroundColor: Colors.transparent,
@@ -269,16 +295,16 @@ class SaxifyTheme {
         ),
       ),
       dialogTheme: DialogThemeData(
-        backgroundColor: SaxifyColors.surface,
+        backgroundColor: sheetBg,
         surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(radiusLg),
-          side: const BorderSide(color: SaxifyColors.border),
+          side: BorderSide(color: stroke),
         ),
       ),
       snackBarTheme: SnackBarThemeData(
-        backgroundColor: const Color(0xF21A1A22),
-        contentTextStyle: const TextStyle(color: SaxifyColors.textPrimary),
+        backgroundColor: dark ? const Color(0xF21A1A22) : const Color(0xF2FFFFFF),
+        contentTextStyle: TextStyle(color: ink),
         behavior: SnackBarBehavior.floating,
         elevation: 8,
         shape: RoundedRectangleBorder(
@@ -287,15 +313,16 @@ class SaxifyTheme {
       ),
       switchTheme: SwitchThemeData(
         thumbColor: WidgetStateProperty.resolveWith<Color>(
-          (Set<WidgetState> states) =>
-              states.contains(WidgetState.selected) ? Colors.white : SaxifyColors.textMuted,
+          (Set<WidgetState> states) => states.contains(WidgetState.selected)
+              ? Colors.white
+              : inkMuted,
         ),
         trackColor: WidgetStateProperty.resolveWith<Color>(
           (Set<WidgetState> states) => states.contains(WidgetState.selected)
               ? accent.primary
-              : SaxifyColors.glassHighlight,
+              : filmStrong,
         ),
-        trackOutlineColor: const WidgetStatePropertyAll<Color>(SaxifyColors.border),
+        trackOutlineColor: WidgetStatePropertyAll<Color>(stroke),
       ),
       navigationBarTheme: NavigationBarThemeData(
         backgroundColor: Colors.transparent,
@@ -312,33 +339,33 @@ class SaxifyTheme {
             size: 23,
             color: states.contains(WidgetState.selected)
                 ? accent.primary
-                : SaxifyColors.textMuted,
+                : inkMuted,
           ),
         ),
         labelTextStyle: WidgetStateProperty.resolveWith<TextStyle>(
           (Set<WidgetState> states) => TextStyle(
             fontSize: 11,
             fontWeight: states.contains(WidgetState.selected) ? FontWeight.w700 : FontWeight.w500,
-            color: states.contains(WidgetState.selected) ? accent.primary : SaxifyColors.textMuted,
+            color: states.contains(WidgetState.selected) ? accent.primary : inkMuted,
           ),
         ),
       ),
       tabBarTheme: TabBarThemeData(
         labelColor: accent.primary,
-        unselectedLabelColor: SaxifyColors.textMuted,
+        unselectedLabelColor: inkMuted,
         indicatorColor: accent.primary,
         dividerColor: Colors.transparent,
         labelStyle: const TextStyle(fontWeight: FontWeight.w700),
         unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500),
       ),
-      listTileTheme: const ListTileThemeData(
-        iconColor: SaxifyColors.textSecondary,
-        textColor: SaxifyColors.textPrimary,
+      listTileTheme: ListTileThemeData(
+        iconColor: inkSoft,
+        textColor: ink,
       ),
       iconButtonTheme: IconButtonThemeData(
         style: IconButton.styleFrom(
-          foregroundColor: SaxifyColors.textSecondary,
-          highlightColor: Colors.white.withValues(alpha: 0.06),
+          foregroundColor: inkSoft,
+          highlightColor: (dark ? Colors.white : Colors.black).withValues(alpha: 0.06),
         ),
       ),
       filledButtonTheme: FilledButtonThemeData(
@@ -359,8 +386,8 @@ class SaxifyTheme {
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          foregroundColor: SaxifyColors.textPrimary,
-          side: const BorderSide(color: SaxifyColors.borderStrong),
+          foregroundColor: ink,
+          side: BorderSide(color: dark ? SaxifyColors.borderStrong : stroke),
           minimumSize: const Size(0, 52),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radiusXl)),
         ),
@@ -370,4 +397,26 @@ class SaxifyTheme {
       ],
     );
   }
+}
+
+/// Light-theme counterparts of [SaxifyColors].
+///
+/// Kept private to [SaxifyTheme] so nothing outside the theme reaches for a
+/// hard-coded light value; widgets ask [IfallPalette.of] instead.
+class _LightColors {
+  const _LightColors();
+
+  final Color background = const Color(0xFFFFFFFF);
+  final Color surface = const Color(0xFFF7F7F9);
+  final Color surfaceAlt = const Color(0xFFF2F2F7);
+  final Color card = const Color(0xFFFFFFFF);
+  final Color cardHover = const Color(0xFFEFEFF4);
+  final Color textPrimary = const Color(0xFF000000);
+  final Color textSecondary = const Color(0xCC000000);
+  final Color textMuted = const Color(0x99000000);
+  final Color textFaint = const Color(0x66000000);
+  final Color hairline = const Color(0x1A000000);
+  final Color border = const Color(0x26000000);
+  final Color glass = const Color(0x0A000000);
+  final Color glassHighlight = const Color(0x14000000);
 }

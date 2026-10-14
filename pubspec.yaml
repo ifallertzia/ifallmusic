@@ -23,6 +23,7 @@ dependencies:
   cached_network_image: ^3.4.1
   url_launcher: ^6.3.1
 
+
   # --- Phase 2: in-app updates, downloads, on-device recommendations ---
   package_info_plus: ^8.0.0
   unorm_dart: ^0.3.0
@@ -43,6 +44,12 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
+    # The chubby ("mota golu molu") mascot — the face of the app, used on the
+    # welcome card, the empty states, the About page and the splash.
+    - assets/images/ifall_motu_master.png
+    - assets/images/ifall_motu_heart.png
+    - assets/images/ifall_logo.png
+    - assets/images/ifall_splash.png
     - assets/images/saxify_logo.png
     - assets/images/saxify_splash.png
     # Liked Songs sleeve — the app-logo character, liking.

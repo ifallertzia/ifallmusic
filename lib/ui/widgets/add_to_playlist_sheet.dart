@@ -10,6 +10,7 @@ import '../../core/theme/saxify_theme.dart';
 import '../../core/utils/format.dart';
 import 'artwork.dart';
 import 'neon.dart';
+import '../../core/theme/ifall_ui.dart';
 
 /// "Add to playlist" sheet: pick an existing playlist or create a new one.
 Future<void> showAddToPlaylistSheet(BuildContext context, Song song) {
@@ -80,7 +81,7 @@ class _AddToPlaylistSheet extends StatelessWidget {
       builder: (BuildContext context, ScrollController scrollController) {
         return Container(
           decoration: const BoxDecoration(
-            color: SaxifyColors.surface,
+            color: IfallTokens.surface,
             borderRadius: BorderRadius.vertical(top: Radius.circular(SaxifyTheme.radiusLg)),
           ),
           child: Column(
@@ -90,7 +91,7 @@ class _AddToPlaylistSheet extends StatelessWidget {
                 width: 40,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: SaxifyColors.border,
+                  color: IfallTokens.border,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -113,7 +114,7 @@ class _AddToPlaylistSheet extends StatelessWidget {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
-                                fontSize: 12, color: SaxifyColors.textMuted),
+                                fontSize: 12, color: IfallTokens.textMuted),
                           ),
                         ],
                       ),
@@ -141,17 +142,17 @@ class _AddToPlaylistSheet extends StatelessWidget {
                           style: TextStyle(fontWeight: FontWeight.w700)),
                       subtitle: const Text('Start a fresh collection',
                           style: TextStyle(
-                              fontSize: 12, color: SaxifyColors.textMuted)),
+                              fontSize: 12, color: IfallTokens.textMuted)),
                       onTap: () => _promptCreate(context, library),
                     ),
                     if (library.playlists.isEmpty)
                       const Padding(
                         padding: EdgeInsets.symmetric(vertical: 24),
-                        child: EmptyState(
+                        child: IfallEmpty(
                           icon: Icons.queue_music_rounded,
-                          title: 'No playlists yet',
+                          compact: true,
                           message:
-                              'Create your first playlist and it will show up here.',
+                              'No playlists yet — create your first one and it will show up here.',
                         ),
                       )
                     else
@@ -168,13 +169,13 @@ class _AddToPlaylistSheet extends StatelessWidget {
                               style: const TextStyle(fontWeight: FontWeight.w600)),
                           subtitle: Text('${playlist.count} songs',
                               style: const TextStyle(
-                                  fontSize: 12, color: SaxifyColors.textMuted)),
+                                  fontSize: 12, color: IfallTokens.textMuted)),
                           trailing: playlist.songs
                                   .any((Song s) => s.id == song.id)
                               ? Icon(Icons.check_circle_rounded,
                                   color: accent.primary, size: 20)
                               : const Icon(Icons.add_circle_outline_rounded,
-                                  color: SaxifyColors.textFaint, size: 20),
+                                  color: IfallTokens.textFaint, size: 20),
                           onTap: () async {
                             final bool added =
                                 await library.addToPlaylist(playlist.id, song);

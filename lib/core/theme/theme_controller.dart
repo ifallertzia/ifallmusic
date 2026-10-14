@@ -48,6 +48,25 @@ class ThemeController extends ChangeNotifier {
 
   bool get accentAcrossApp => _settings.accentAcrossApp;
 
+  /// `system` follows the phone; `light` and `dark` pin the app.
+  ThemeMode get themeMode => _settings.themeMode;
+  Future<void> setThemeMode(ThemeMode mode) async {
+    await _settings.setThemeMode(mode);
+    notifyListeners();
+  }
+
+  /// Frosted-glass surfaces. Off on weak devices leaves the same layout with
+  /// flat translucent fills instead of backdrop filters.
+  bool get liquidGlass => _settings.liquidGlass;
+  Future<void> setLiquidGlass(bool value) async {
+    await _settings.setLiquidGlass(value);
+    notifyListeners();
+  }
+
+  /// Whether the listener has pinned Light or Dark rather than following the
+  /// phone. The system bars follow whatever the app is actually painting.
+  bool get pinnedBrightness => _settings.themeMode != ThemeMode.system;
+
   Future<void> setAccentAcrossApp(bool value) async {
     await _settings.setAccentAcrossApp(value);
     notifyListeners();

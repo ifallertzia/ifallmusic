@@ -5,6 +5,7 @@ import 'package:permission_handler/permission_handler.dart';
 
 import '../../core/services/native_bridge.dart';
 import '../../core/theme/saxify_theme.dart';
+import '../../core/theme/ifall_ui.dart';
 
 /// English, short, and honest. Deny means stream-only — the app keeps going.
 class StoragePermission {
@@ -58,7 +59,7 @@ class StoragePermission {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text('Storage denied. You can still stream. Nothing will be saved.'),
-        backgroundColor: SaxifyColors.cardHover,
+        backgroundColor: IfallTokens.surfaceAlt,
       ),
     );
   }

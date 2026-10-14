@@ -14,6 +14,7 @@ import '../artist/artist_router.dart';
 import '../downloads/storage_permission.dart';
 import 'add_to_playlist_sheet.dart';
 import 'artwork.dart';
+import '../../core/theme/ifall_ui.dart';
 
 /// The overflow sheet behind every track row.
 Future<void> showSongSheet(
@@ -74,7 +75,7 @@ class _SongSheet extends StatelessWidget {
       child: SingleChildScrollView(
         child: Container(
           decoration: const BoxDecoration(
-            color: SaxifyColors.surface,
+            color: IfallTokens.surface,
             borderRadius: BorderRadius.vertical(
               top: Radius.circular(SaxifyTheme.radiusLg),
             ),
@@ -87,7 +88,7 @@ class _SongSheet extends StatelessWidget {
                 width: 40,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: SaxifyColors.border,
+                  color: IfallTokens.border,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -117,7 +118,7 @@ class _SongSheet extends StatelessWidget {
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
                               fontSize: 12,
-                              color: SaxifyColors.textMuted,
+                              color: IfallTokens.textMuted,
                             ),
                           ),
                         ],
@@ -219,7 +220,7 @@ class _Action extends StatelessWidget {
   Widget build(BuildContext context) {
     return ListTile(
       onTap: onTap,
-      leading: Icon(icon, size: 21, color: SaxifyColors.textSecondary),
+      leading: Icon(icon, size: 21, color: IfallTokens.textSecondary),
       title: Text(
         label,
         style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),

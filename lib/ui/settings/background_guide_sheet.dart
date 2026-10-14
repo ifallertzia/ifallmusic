@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../core/theme/saxify_accents.dart';
 import '../../core/theme/saxify_theme.dart';
 import '../widgets/neon.dart';
+import '../../core/theme/ifall_ui.dart';
 
 /// "Instructions to play in background" — the guide the web app ships in
 /// Settings, rewritten for a real Android app.
@@ -67,7 +68,7 @@ class _BackgroundGuideSheet extends StatelessWidget {
       builder: (BuildContext context, ScrollController controller) {
         return Container(
           decoration: const BoxDecoration(
-            color: SaxifyColors.surface,
+            color: IfallTokens.surface,
             borderRadius: BorderRadius.vertical(
                 top: Radius.circular(SaxifyTheme.radiusLg)),
           ),
@@ -80,7 +81,7 @@ class _BackgroundGuideSheet extends StatelessWidget {
                   width: 40,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: SaxifyColors.border,
+                    color: IfallTokens.border,
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
@@ -105,7 +106,7 @@ class _BackgroundGuideSheet extends StatelessWidget {
               const SizedBox(height: 6),
               const Text(
                 'Keep the music going with the screen off or the app closed.',
-                style: TextStyle(fontSize: 12.5, color: SaxifyColors.textMuted),
+                style: TextStyle(fontSize: 12.5, color: IfallTokens.textMuted),
               ),
               const SizedBox(height: 20),
               for (int i = 0; i < _steps.length; i++)
@@ -149,7 +150,7 @@ class _BackgroundGuideSheet extends StatelessWidget {
                               style: const TextStyle(
                                   fontSize: 12.5,
                                   height: 1.5,
-                                  color: SaxifyColors.textSecondary),
+                                  color: IfallTokens.textSecondary),
                             ),
                           ],
                         ),

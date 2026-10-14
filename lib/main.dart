@@ -14,12 +14,14 @@ import 'core/services/artist_service.dart';
 import 'core/services/boot_log.dart';
 import 'core/services/home_catalog.dart';
 import 'core/services/library_service.dart';
+import 'core/services/listen_together_service.dart';
 import 'core/services/local_music_service.dart';
 import 'core/services/music_download_service.dart';
 import 'core/services/native_bridge.dart';
 import 'core/services/notification_bootstrap.dart';
 import 'core/services/playback_service.dart';
 import 'core/services/playlist_sync_service.dart';
+import 'core/services/presence_service.dart';
 import 'core/services/recommendation_service.dart';
 import 'core/services/recommendation_worker.dart';
 import 'core/services/settings_service.dart';
@@ -29,9 +31,10 @@ import 'core/theme/saxify_accents.dart';
 import 'core/theme/saxify_theme.dart';
 import 'core/theme/theme_controller.dart';
 import 'ui/onboarding/welcome_page.dart';
+import 'ui/shell/ifall_shell.dart';
 import 'ui/shell/mini_player_layer.dart';
-import 'ui/shell/saxify_shell.dart';
 import 'ui/shell/shell_controller.dart';
+import 'core/theme/ifall_ui.dart';
 
 Future<void> _restoreEqualizerForPlayback(
   SettingsService settings,
@@ -341,6 +344,13 @@ class _IfallMusicAppState extends State<IfallMusicApp>
         ChangeNotifierProvider<ShellController>(
           create: (_) => ShellController(),
         ),
+        ChangeNotifierProvider<JamService>(
+          create: (_) => JamService(settings: boot.settings),
+        ),
+        ChangeNotifierProvider<PresenceService>(
+          create: (_) => PresenceService(settings: boot.settings)
+            ..attach(boot.playback),
+        ),
       ],
       child: Provider<YoutubeService>.value(
         value: boot.youtube,
@@ -368,7 +378,7 @@ class IfallProfileGate extends StatelessWidget {
     if (settings.displayName.isEmpty) {
       return WelcomePage(onComplete: settings.setDisplayName);
     }
-    return const SaxifyShell();
+    return const IfallShell();
   }
 }
 
@@ -464,26 +474,36 @@ class IfallRecoveryApp extends StatelessWidget {
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 13,
-                    color: SaxifyColors.textMuted,
+                    color: IfallTokens.textMuted,
                     height: 1.5,
                   ),
                 ),
                 const SizedBox(height: 22),
-                GlassButton(
-                  label: 'Repair cache & retry',
-                  icon: Icons.refresh_rounded,
-                  expand: true,
-                  onPressed: () async {
-                    await NativeBridge.repairLocalCache();
-                    try {
-                      final AppBoot boot = await _initializeApp().timeout(
-                        const Duration(seconds: 20),
-                      );
-                      runApp(IfallMusicApp(boot: boot));
-                    } catch (error) {
-                      BootLog.write('retry failed: $error');
-                    }
-                  },
+                SizedBox(
+                  width: double.infinity,
+                  height: 50,
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      await NativeBridge.repairLocalCache();
+                      try {
+                        final AppBoot boot = await _initializeApp().timeout(
+                          const Duration(seconds: 20),
+                        );
+                        runApp(IfallMusicApp(boot: boot));
+                      } catch (error) {
+                        BootLog.write('retry failed: $error');
+                      }
+                    },
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      side: const BorderSide(color: Colors.white24),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(IfallUI.rPill),
+                      ),
+                    ),
+                    icon: const Icon(Icons.refresh_rounded),
+                    label: const Text('Repair cache & retry'),
+                  ),
                 ),
               ],
             ),

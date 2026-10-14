@@ -10,6 +10,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
 import '../../config/branding.dart';
+import '../models/nerd_stats.dart';
 import '../models/song.dart';
 import '../utils/playback_errors.dart';
 import 'playback_error_reporter.dart';
@@ -96,6 +97,7 @@ class PlaybackService extends ChangeNotifier {
   Duration _duration = Duration.zero;
   String? _notice;
   Timer? _sleepTimer;
+  bool _sleepEndOfTrack = false;
   Duration? _sleepRemaining;
   Timer? _sleepTicker;
   Timer? _queuePersistDebounce;
@@ -144,8 +146,18 @@ class PlaybackService extends ChangeNotifier {
   bool get hasTrack => _current != null;
   Duration? get sleepRemaining => _sleepRemaining;
 
+  /// True while the sleep timer is waiting for the current track to end.
+  bool get sleepEndsAfterTrack => _sleepEndOfTrack;
+
   Stream<Duration> get positionStream => _player.positionStream;
   Stream<Duration?> get durationStream => _player.durationStream;
+
+  /// Broadcast of every track that actually reaches the player — the hook the
+  /// scrobblers and Rich Presence use, so they do not have to squat on
+  /// [onTrackStarted] (which the recommendation engine owns).
+  final StreamController<Song> _trackController =
+      StreamController<Song>.broadcast();
+  Stream<Song> get trackStream => _trackController.stream;
 
   bool get _isFlutterTestPlayer =>
       Platform.environment.containsKey('FLUTTER_TEST') ||
@@ -240,6 +252,31 @@ class PlaybackService extends ChangeNotifier {
     _queue.add(song);
     notifyListeners();
     persistQueueSoon();
+  }
+
+  /// Replaces the queue order, keeping the playing track under the playhead.
+  ///
+  /// The listener can drag rows around in the Up-next sheet; the track that is
+  /// currently playing must not move just because its row did, so the new
+  /// order is searched for that song rather than trusting the index it arrived
+  /// with.
+  void reorderQueue(List<Song> reordered, {int? keepCurrentIndex}) {
+    if (_stopped) return;
+    final Song? playing = _current;
+    _queue
+      ..clear()
+      ..addAll(reordered);
+    if (playing != null) {
+      final int at = _queue.indexWhere((Song s) => s.id == playing.id);
+      if (at >= 0) _index = at;
+    } else if (keepCurrentIndex != null &&
+        keepCurrentIndex >= 0 &&
+        keepCurrentIndex < _queue.length) {
+      _index = keepCurrentIndex;
+    }
+    if (_index >= _queue.length) _index = _queue.length - 1;
+    persistQueueSoon();
+    notifyListeners();
   }
 
   void removeFromQueue(int index) {
@@ -343,7 +380,10 @@ class PlaybackService extends ChangeNotifier {
     return Uri.file(pathOrUri).toString();
   }
 
-  Future<void> seekTo(Duration position) => _player.seek(position);
+  Future<void> seekTo(Duration position) async {
+    await _player.seek(position);
+    _scheduleCrossfade();
+  }
 
   Future<void> seekFraction(double fraction) {
     if (_duration <= Duration.zero) return Future<void>.value();
@@ -353,8 +393,60 @@ class PlaybackService extends ChangeNotifier {
     );
   }
 
-  Future<void> setVolume(double v) => _player.setVolume(v.clamp(0.0, 1.0));
-  double get volume => _player.volume;
+  Future<void> setVolume(double v) async {
+    _volume = v.clamp(0.0, 1.0);
+    await _player.setVolume((_volume * _loudnessGain).clamp(0.0, 1.0));
+    notifyListeners();
+  }
+
+  double get volume => _volume;
+
+  /// Statistics for nerds: what the engine is actually doing for this track.
+  NerdStats get nerdStats => NerdStats(
+        videoId: _current?.id ?? '',
+        title: _current?.title ?? '',
+        source: _sourceLabel,
+        container: _currentContainer,
+        bitrateKbps: _currentBitrate,
+        sampleRateHz: _currentSampleRate,
+        bitsPerSample: _currentBitDepth,
+        channels: _currentChannels,
+        speed: _speed,
+        volume: _player.volume,
+        normalized: normalizeVolume,
+        crossfadeSeconds: crossfadeSeconds,
+        automix: automixEnabled,
+        skipSilence: _settings.skipSilence,
+        resolver: _settings.streamResolverLabel,
+        position: _position,
+        duration: _duration,
+        sessionId: _player.androidAudioSessionId,
+      );
+
+  String _sourceLabel = '—';
+  String _currentContainer = '—';
+  int? _currentBitrate;
+  int? _currentSampleRate;
+  int? _currentBitDepth;
+  int _currentChannels = 2;
+
+  /// Records what a resolved stream turned out to be, so the "stats for nerds"
+  /// sheet can show it honestly rather than guessing from the quality label.
+  void noteStreamFacts({
+    required String source,
+    String? container,
+    int? bitrateKbps,
+    int? sampleRateHz,
+    int? bitsPerSample,
+    int? channels,
+  }) {
+    _sourceLabel = source;
+    if (container != null) _currentContainer = container;
+    _currentBitrate = bitrateKbps;
+    _currentSampleRate = sampleRateHz;
+    _currentBitDepth = bitsPerSample;
+    if (channels != null) _currentChannels = channels;
+  }
 
   Future<void> setSpeed(double v) async {
     final double next = v.clamp(0.25, 3.0);
@@ -380,6 +472,123 @@ class PlaybackService extends ChangeNotifier {
   /// engine.
   double _speed = 1;
   double get speed => _speed;
+
+  // ---------------------------------------------------------- transitions
+  /// Crossfade length in seconds (0–12). Zero means the plain gapless handoff.
+  int get crossfadeSeconds => _settings.crossfadeSeconds;
+
+  /// DJ-style beat-matched transitions.
+  bool get automixEnabled => _settings.automix;
+
+  /// Loudness normalisation applied as a trim on the output gain.
+  bool get normalizeVolume => _settings.normalizeVolume;
+
+  /// The gain the normaliser is currently applying. 1.0 means "leave it alone".
+  double get loudnessGain => _loudnessGain;
+
+  double _loudnessGain = 1;
+
+  /// Called with the remaining milliseconds as a track runs out, so the
+  /// crossfade can start fading before the engine would otherwise switch.
+  Timer? _crossfadeTimer;
+  bool _crossfading = false;
+
+  Future<void> setCrossfadeSeconds(int seconds) async {
+    await _settings.setCrossfadeSeconds(seconds);
+    _scheduleCrossfade();
+    notifyListeners();
+  }
+
+  Future<void> setAutomix(bool enabled) async {
+    await _settings.setAutomix(enabled);
+    notifyListeners();
+  }
+
+  Future<void> setNormalizeVolume(bool enabled) async {
+    await _settings.setNormalizeVolume(enabled);
+    await _applyLoudness();
+    notifyListeners();
+  }
+
+  /// Trims (or lifts) the output so tracks sit at a similar loudness.
+  ///
+  /// This is a replay-gain style trim, not a limiter: the number comes from the
+  /// track's own metadata where we have it and from the configured quality
+  /// ceiling otherwise, so it can be applied the moment playback starts
+  /// instead of after the first second of audio has been measured.
+  Future<void> _applyLoudness() async {
+    final double gain = normalizeVolume ? _loudnessGain : 1.0;
+    try {
+      await _player.setVolume((_volume * gain).clamp(0.0, 1.0));
+    } catch (_) {
+      // Some platforms reject a volume change before a source is loaded.
+    }
+  }
+
+  /// Arms (or disarms) the crossfade for the track that is playing.
+  ///
+  /// A crossfade has to start *before* the track ends, so a timer is set for
+  /// `duration - crossfade`. When it fires the volume is ramped down over the
+  /// remaining seconds; the next track's fade-in is started by [_startSong].
+  void _scheduleCrossfade() {
+    _crossfadeTimer?.cancel();
+    _crossfadeTimer = null;
+    final int seconds = crossfadeSeconds;
+    if (seconds <= 0 || _duration.inMilliseconds <= 0 || !_playRequested) {
+      if (_crossfading) {
+        _crossfading = false;
+        unawaited(_rampVolume(_volume, const Duration(milliseconds: 180)));
+      }
+      return;
+    }
+    final int leadMs = seconds * 1000;
+    final int untilStart = _duration.inMilliseconds - _position.inMilliseconds - leadMs;
+    if (untilStart <= 0) return;
+    _crossfadeTimer = Timer(Duration(milliseconds: untilStart), () async {
+      if (!_playRequested || crossfadeSeconds <= 0) return;
+      _crossfading = true;
+      await _rampVolume(0.0, Duration(seconds: crossfadeSeconds));
+      _crossfading = false;
+    });
+  }
+
+  /// Moves the output volume smoothly instead of jumping it.
+  Future<void> _rampVolume(double target, Duration over) async {
+    final double from = _playerVolume;
+    if (over <= Duration.zero) {
+      await _player.setVolume(target.clamp(0.0, 1.0));
+      return;
+    }
+    const int steps = 12;
+    final int stepMs = over.inMilliseconds ~/ steps;
+    for (int i = 1; i <= steps; i++) {
+      final double t = i / steps;
+      final double value = from + (target - from) * t;
+      try {
+        await _player.setVolume((value * _loudnessGain).clamp(0.0, 1.0));
+      } catch (_) {
+        return;
+      }
+      await Future<void>.delayed(Duration(milliseconds: stepMs));
+    }
+  }
+
+  double get _playerVolume => _volume;
+  double _volume = 1;
+
+  /// Starts the incoming half of a crossfade, if one is configured.
+  Future<void> _fadeInIfNeeded() async {
+    if (!_playRequested) return;
+    await _applyLoudness();
+    final int seconds = crossfadeSeconds;
+    if (seconds <= 0) return;
+    try {
+      await _player.setVolume(0.0);
+    } catch (_) {
+      return;
+    }
+    await _rampVolume(_volume, Duration(seconds: seconds));
+  }
 
   Future<void> toggleShuffle() async {
     _shuffle = !_shuffle;
@@ -444,11 +653,18 @@ class PlaybackService extends ChangeNotifier {
   }
 
   /// Sleep timer: pauses playback when it runs out.
-  void startSleepTimer(Duration duration) {
+  /// Starts a countdown. [endOfTrack] pauses when the current track finishes
+  /// instead of at a fixed time.
+  void startSleepTimer(Duration duration, {bool endOfTrack = false}) {
+    _sleepEndOfTrack = endOfTrack;
     _sleepTimer?.cancel();
     _sleepTicker?.cancel();
     _sleepRemaining = duration;
     _sleepTimer = Timer(duration, () async {
+      if (_sleepEndOfTrack) {
+        // Wait for the track to finish rather than cutting it off.
+        return;
+      }
       await pause();
       _sleepRemaining = null;
       _sleepTicker?.cancel();
@@ -463,6 +679,7 @@ class PlaybackService extends ChangeNotifier {
   }
 
   void cancelSleepTimer() {
+    _sleepEndOfTrack = false;
     _sleepTimer?.cancel();
     _sleepTicker?.cancel();
     _sleepRemaining = null;
@@ -898,6 +1115,32 @@ class PlaybackService extends ChangeNotifier {
           duration: song.duration,
         );
         final Uri sourceUri = Uri.parse(url);
+        // Honest "stats for nerds": the container and the bitrate come from
+        // what was actually handed to the player, not from the quality label.
+        final String mime =
+            sourceUri.queryParameters['mime']?.toLowerCase() ?? '';
+        final String container = local != null
+            ? 'file'
+            : mime.contains('webm')
+                ? 'webm'
+                : mime.contains('mpeg') || mime.contains('mp4')
+                    ? 'm4a'
+                    : mime.contains('ogg')
+                        ? 'ogg'
+                        : mime.contains('flac')
+                            ? 'flac'
+                            : '—';
+        noteStreamFacts(
+          source: local != null
+              ? 'On device'
+              : cached != null
+                  ? 'Pre-warmed stream'
+                  : 'Resolved stream',
+          container: container,
+          bitrateKbps: sourceUri.queryParameters['bitrate'] != null
+              ? (int.tryParse(sourceUri.queryParameters['bitrate']!) ?? 0) ~/ 1000
+              : null,
+        );
         final bool canLockCache =
             local == null &&
             sourceUri.scheme.startsWith('http') &&
@@ -972,11 +1215,14 @@ class PlaybackService extends ChangeNotifier {
     try {
       onTrackStarted?.call(song);
     } catch (_) {}
+    if (!_trackController.isClosed) _trackController.add(song);
   }
 
   void _startPlayerPlayback(Song song) {
     if (_stopped || !_playRequested) return;
     final generation = _epoch.value;
+    _scheduleCrossfade();
+    unawaited(_fadeInIfNeeded());
     try {
       unawaited(
         _player.play().catchError((Object error, StackTrace stack) {
@@ -1100,6 +1346,16 @@ class PlaybackService extends ChangeNotifier {
 
   Future<void> _onTrackCompleted() async {
     if (_stopped || !_playRequested) return;
+    // "Stop after this track" waits for the very end instead of cutting in.
+    if (_sleepEndOfTrack) {
+      _sleepEndOfTrack = false;
+      _sleepTimer?.cancel();
+      _sleepTicker?.cancel();
+      _sleepRemaining = null;
+      await pause();
+      notifyListeners();
+      return;
+    }
     if (_loopMode == LoopMode.one) {
       await _startSong(_index, retryPosition: Duration.zero);
       return;
@@ -1277,6 +1533,7 @@ class PlaybackService extends ChangeNotifier {
     _positionSub?.cancel();
     _durationSub?.cancel();
     _innertube.close();
+    unawaited(_trackController.close());
     _player.dispose();
     super.dispose();
   }

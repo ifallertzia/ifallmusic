@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
@@ -8,14 +7,16 @@ import '../../core/models/song.dart';
 import '../../core/services/library_service.dart';
 import '../../core/services/playback_service.dart';
 import '../../core/services/youtube_service.dart';
-import '../../core/theme/saxify_accents.dart';
-import '../../core/theme/saxify_theme.dart';
+import '../../core/theme/ifall_ui.dart';
 import '../../core/utils/format.dart';
 import '../widgets/artwork.dart';
-import '../widgets/neon.dart';
 import '../widgets/song_tile.dart';
 
 /// The site's `/artist/<channelId>` route.
+///
+/// BitChord-style: the banner bleeds to the top edge, the circular portrait
+/// locks to the bottom-left of it, and Play all / Follow / Shuffle are the only
+/// three controls.
 class ArtistPage extends StatefulWidget {
   const ArtistPage({
     super.key,
@@ -55,9 +56,9 @@ class _ArtistPageState extends State<ArtistPage> {
 
   @override
   Widget build(BuildContext context) {
-    final SaxifyAccent accent = context.accent;
-
+    final IfallPalette c = IfallPalette.of(context);
     return Scaffold(
+      backgroundColor: c.background,
       body: FutureBuilder<_ArtistData>(
         future: _future,
         builder: (BuildContext context, AsyncSnapshot<_ArtistData> snapshot) {
@@ -66,207 +67,210 @@ class _ArtistPageState extends State<ArtistPage> {
           }
           if (snapshot.hasError || snapshot.data == null) {
             return SafeArea(
-              child: EmptyState(
+              child: IfallEmpty(
                 icon: Icons.person_off_rounded,
-                title: 'Artist unavailable',
                 message:
                     'We could not load this channel. Pull back and try again.',
                 actionLabel: 'Go back',
-                onAction: () => Navigator.of(context).maybePop(),
+                action: () => Navigator.of(context).maybePop(),
               ),
             );
           }
-
-          final _ArtistData data = snapshot.data!;
-          final LibraryService library = context.watch<LibraryService>();
-          final PlaybackService playback = context.read<PlaybackService>();
-
-          final ArtistRef ref = ArtistRef(
+          return _ArtistBody(
             channelId: widget.channelId,
-            name: data.channel.title,
-            imageUrl: data.channel.logoUrl,
-            subscribers: data.channel.subscribersCount?.toString(),
+            data: snapshot.data!,
           );
-          final bool following = library.isFollowing(widget.channelId);
+        },
+      ),
+    );
+  }
+}
 
-          return CustomScrollView(
-            slivers: <Widget>[
-              SliverAppBar(
-                expandedHeight: 300,
-                pinned: true,
-                backgroundColor: SaxifyColors.background,
-                foregroundColor: SaxifyColors.textPrimary,
-                flexibleSpace: FlexibleSpaceBar(
-                  background: Stack(
-                    fit: StackFit.expand,
+class _ArtistBody extends StatelessWidget {
+  const _ArtistBody({required this.channelId, required this.data});
+
+  final String channelId;
+  final _ArtistData data;
+
+  @override
+  Widget build(BuildContext context) {
+    final IfallPalette c = IfallPalette.of(context);
+    final LibraryService library = context.watch<LibraryService>();
+    final PlaybackService playback = context.read<PlaybackService>();
+
+    final ArtistRef ref = ArtistRef(
+      channelId: channelId,
+      name: data.channel.title,
+      imageUrl: data.channel.logoUrl,
+      subscribers: data.channel.subscribersCount?.toString(),
+    );
+    final bool following = library.isFollowing(channelId);
+    final List<Song> uploads = data.uploads;
+
+    return CustomScrollView(
+      slivers: <Widget>[
+        SliverAppBar(
+          expandedHeight: 300,
+          pinned: true,
+          backgroundColor: c.background,
+          foregroundColor: c.onSurface,
+          flexibleSpace: FlexibleSpaceBar(
+            background: Stack(
+              fit: StackFit.expand,
+              children: <Widget>[
+                Artwork(
+                  url: data.channel.bannerUrl,
+                  radius: 0,
+                  fit: BoxFit.cover,
+                ),
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: <Color>[
+                        Colors.black.withValues(alpha: 0.35),
+                        c.background.withValues(alpha: 0.92),
+                        c.background,
+                      ],
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: 18,
+                  right: 18,
+                  bottom: 18,
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
                     children: <Widget>[
-                      Artwork(
-                        url: data.channel.bannerUrl,
-                        radius: 0,
-                        fit: BoxFit.cover,
-                      ),
-                      DecoratedBox(
+                      Container(
+                        width: 84,
+                        height: 84,
                         decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                            colors: <Color>[
-                              Colors.black.withValues(alpha: 0.35),
-                              SaxifyColors.background.withValues(alpha: 0.92),
-                              SaxifyColors.background,
-                            ],
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: c.accent.withValues(alpha: 0.7),
+                            width: 2,
+                          ),
+                        ),
+                        child: ClipOval(
+                          child: Artwork(
+                            url: data.channel.logoUrl,
+                            size: 80,
+                            radius: 40,
+                            fallbackIcon: Icons.person_rounded,
                           ),
                         ),
                       ),
-                      Positioned(
-                        left: 20,
-                        right: 20,
-                        bottom: 18,
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.end,
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
                           children: <Widget>[
-                            Container(
-                              width: 84,
-                              height: 84,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                    color: accent.primary.withValues(alpha: 0.6),
-                                    width: 2),
+                            Text('ARTIST', style: IfallText.label(c.accent)),
+                            const SizedBox(height: 5),
+                            Text(
+                              data.channel.title,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: IfallText.style(
+                                25,
+                                weight: FontWeight.w800,
+                                letterSpacing: -0.8,
+                                height: 1.1,
+                                color: Colors.white,
                               ),
-                              child: ClipOval(
-                                child: Artwork(
-                                  url: data.channel.logoUrl,
-                                  size: 80,
-                                  radius: 40,
-                                  fallbackIcon: Icons.person_rounded,
+                            ),
+                            if (data.channel.subscribersCount != null) ...<Widget>[
+                              const SizedBox(height: 5),
+                              Text(
+                                '${Fmt.count(data.channel.subscribersCount)} followers',
+                                style: IfallText.caption(
+                                  Colors.white.withValues(alpha: 0.7),
                                 ),
                               ),
-                            ),
-                            const SizedBox(width: 16),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                mainAxisSize: MainAxisSize.min,
-                                children: <Widget>[
-                                  Text(
-                                    'ARTIST',
-                                    style: TextStyle(
-                                      fontSize: 10.5,
-                                      letterSpacing: 1.6,
-                                      fontWeight: FontWeight.w700,
-                                      color: accent.primary,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 5),
-                                  Text(
-                                    data.channel.title,
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: GoogleFonts.spaceGrotesk(
-                                      fontSize: 25,
-                                      fontWeight: FontWeight.w700,
-                                      height: 1.1,
-                                    ),
-                                  ),
-                                  if (data.channel.subscribersCount != null) ...<Widget>[
-                                    const SizedBox(height: 5),
-                                    Text(
-                                      '${Fmt.count(data.channel.subscribersCount)} followers',
-                                      style: const TextStyle(
-                                          fontSize: 12,
-                                          color: SaxifyColors.textSecondary),
-                                    ),
-                                  ],
-                                ],
-                              ),
-                            ),
+                            ],
                           ],
                         ),
                       ),
                     ],
                   ),
                 ),
-              ),
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 8),
-                  child: Row(
-                    children: <Widget>[
-                      NeonButton(
-                        label: 'Play all',
-                        icon: Icons.play_arrow_rounded,
-                        expand: true,
-                        onPressed: data.uploads.isEmpty
-                            ? null
-                            : () =>
-                                playback.playQueue(data.uploads, startIndex: 0),
-                      ),
-                      const SizedBox(width: 10),
-                      _IconButtonTile(
-                        icon: following
-                            ? Icons.check_rounded
-                            : Icons.person_add_alt_1_rounded,
-                        active: following,
-                        tooltip: following ? 'Following' : 'Follow',
-                        onTap: () => library.toggleFollow(ref),
-                      ),
-                      const SizedBox(width: 10),
-                      _IconButtonTile(
-                        icon: Icons.shuffle_rounded,
-                        tooltip: 'Shuffle',
-                        onTap: data.uploads.isEmpty
-                            ? null
-                            : () async {
-                                await playback.playQueue(data.uploads,
-                                    startIndex: 0);
-                                if (!playback.shuffleEnabled) {
-                                  await playback.toggleShuffle();
-                                }
-                              },
-                      ),
-                    ],
+              ],
+            ),
+          ),
+        ),
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+            child: Row(
+              children: <Widget>[
+                Expanded(
+                  child: _PillButton(
+                    label: 'Play all',
+                    icon: Icons.play_arrow_rounded,
+                    filled: true,
+                    enabled: uploads.isNotEmpty,
+                    onTap: () => playback.playQueue(uploads, startIndex: 0),
                   ),
                 ),
-              ),
-              SliverToBoxAdapter(
-                child: SectionHeader(
-                  title: 'Latest releases',
-                  subtitle: '${data.uploads.length} tracks',
-                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 6),
+                const SizedBox(width: 10),
+                _IconButtonTile(
+                  icon: following
+                      ? Icons.check_rounded
+                      : Icons.person_add_alt_1_rounded,
+                  active: following,
+                  tooltip: following ? 'Following' : 'Follow',
+                  onTap: () => library.toggleFollow(ref),
                 ),
-              ),
-              if (data.uploads.isEmpty)
-                const SliverToBoxAdapter(
-                  child: EmptyState(
-                    icon: Icons.music_off_rounded,
-                    title: 'No uploads found',
-                    message: 'This channel has not published anything we can read.',
-                  ),
-                )
-              else
-                SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(8, 0, 8, 140),
-                  sliver: SliverList(
-                    delegate: SliverChildBuilderDelegate(
-                      (BuildContext c, int i) {
-                        final Song song = data.uploads[i];
-                        return SongTile(
-                          song: song,
-                          rank: i + 1,
-                          showArtwork: true,
-                          onTap: () =>
-                              playback.playQueue(data.uploads, startIndex: i),
-                        );
-                      },
-                      childCount: data.uploads.length,
-                    ),
-                  ),
+                const SizedBox(width: 10),
+                _IconButtonTile(
+                  icon: Icons.shuffle_rounded,
+                  tooltip: 'Shuffle',
+                  onTap: uploads.isEmpty
+                      ? null
+                      : () async {
+                          await playback.playQueue(uploads, startIndex: 0);
+                          if (!playback.shuffleEnabled) {
+                            await playback.toggleShuffle();
+                          }
+                        },
                 ),
-            ],
-          );
-        },
-      ),
+              ],
+            ),
+          ),
+        ),
+        SliverToBoxAdapter(
+          child: IfallSectionHeader(
+            title: 'Latest releases',
+            subtitle: '${uploads.length} tracks',
+          ),
+        ),
+        if (uploads.isEmpty)
+          SliverToBoxAdapter(
+            child: IfallEmpty(
+              icon: Icons.music_off_rounded,
+              message:
+                  'This channel has not published anything we can read.',
+            ),
+          )
+        else
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(8, 0, 8, 140),
+            sliver: SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (BuildContext c, int i) => SongTile(
+                  song: uploads[i],
+                  rank: i + 1,
+                  showArtwork: true,
+                  onTap: () => playback.playQueue(uploads, startIndex: i),
+                ),
+                childCount: uploads.length,
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
@@ -286,28 +290,82 @@ class _IconButtonTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final SaxifyAccent accent = context.accent;
+    final IfallPalette c = IfallPalette.of(context);
     return Tooltip(
       message: tooltip,
       child: Material(
         color: Colors.transparent,
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(IfallUI.rMd),
           child: Container(
             width: 48,
             height: 48,
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(14),
-              color: SaxifyColors.surfaceAlt,
-              border: Border.all(
-                color: active ? accent.primary : SaxifyColors.border,
-              ),
+              borderRadius: BorderRadius.circular(IfallUI.rMd),
+              color: c.fill,
+              border: Border.all(color: active ? c.accent : c.outline),
             ),
             child: Icon(
               icon,
               size: 20,
-              color: active ? accent.primary : SaxifyColors.textSecondary,
+              color: active ? c.accent : c.onSurfaceVariant,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Full-width pill used for the page's primary actions.
+class _PillButton extends StatelessWidget {
+  const _PillButton({
+    required this.label,
+    required this.icon,
+    required this.onTap,
+    this.filled = false,
+    this.enabled = true,
+  });
+
+  final String label;
+  final IconData icon;
+  final VoidCallback onTap;
+  final bool filled;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    final IfallPalette c = IfallPalette.of(context);
+    final Color onAccent =
+        ThemeData.estimateBrightnessForColor(c.accent) == Brightness.dark
+            ? Colors.white
+            : Colors.black;
+    final Color fg = filled ? onAccent : c.onSurface;
+    return Opacity(
+      opacity: enabled ? 1 : 0.4,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: enabled ? onTap : null,
+          borderRadius: BorderRadius.circular(IfallUI.rPill),
+          child: Container(
+            height: 46,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(IfallUI.rPill),
+              color: filled ? c.accent : Colors.transparent,
+              border: filled ? null : Border.all(color: c.outline),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: <Widget>[
+                Icon(icon, size: 19, color: fg),
+                const SizedBox(width: 7),
+                Text(
+                  label,
+                  style: IfallText.body(fg).copyWith(fontWeight: FontWeight.w700),
+                ),
+              ],
             ),
           ),
         ),
@@ -328,15 +386,18 @@ class _ArtistSkeleton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
+    final IfallPalette c = IfallPalette.of(context);
+    return Scaffold(
+      backgroundColor: c.background,
       body: Column(
         children: <Widget>[
-          SizedBox(
-            height: 300,
-            child: ColoredBox(color: SaxifyColors.surfaceAlt),
-          ),
-          SizedBox(height: 20),
-          LoadingRail(itemCount: 6, height: 64),
+          SizedBox(height: 300, child: ColoredBox(color: c.surfaceVariant)),
+          const SizedBox(height: 20),
+          for (int i = 0; i < 6; i++)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: IfallShimmer(height: 58),
+            ),
         ],
       ),
     );

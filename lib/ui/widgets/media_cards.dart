@@ -10,6 +10,7 @@ import '../../core/utils/format.dart';
 import '../../widgets/quality_badge.dart';
 import 'artwork.dart';
 import 'song_download_button.dart';
+import '../../core/theme/ifall_ui.dart';
 
 /// Square card used by "Made for you" / "Recommended for you".
 class SongCard extends StatelessWidget {
@@ -96,7 +97,7 @@ class SongCard extends StatelessWidget {
                   fontSize: 13,
                   height: 1.25,
                   fontWeight: FontWeight.w600,
-                  color: isCurrent ? accent.primary : SaxifyColors.textPrimary,
+                  color: isCurrent ? accent.primary : IfallTokens.textPrimary,
                 ),
               ),
               const SizedBox(height: 3),
@@ -104,7 +105,7 @@ class SongCard extends StatelessWidget {
                 subtitle ?? song.artist,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 11.5, color: SaxifyColors.textMuted),
+                style: const TextStyle(fontSize: 11.5, color: IfallTokens.textMuted),
               ),
             ],
           ),
@@ -196,7 +197,7 @@ class RecommendationSongCard extends StatelessWidget {
                 fontSize: 10.5,
                 height: 1.14,
                 fontWeight: FontWeight.w600,
-                color: isCurrent ? accent.primary : SaxifyColors.textPrimary,
+                color: isCurrent ? accent.primary : IfallTokens.textPrimary,
               ),
             ),
             const SizedBox(height: 2),
@@ -207,7 +208,7 @@ class RecommendationSongCard extends StatelessWidget {
               style: const TextStyle(
                 fontSize: 9.5,
                 height: 1.1,
-                color: SaxifyColors.textMuted,
+                color: IfallTokens.textMuted,
               ),
             ),
           ],
@@ -294,7 +295,7 @@ class AlbumTile extends StatelessWidget {
                 style: SaxifyTheme.appleFont(
                   size: 13.5,
                   weight: FontWeight.w700,
-                  color: SaxifyColors.textPrimary,
+                  color: IfallTokens.textPrimary,
                 ),
               ),
               const SizedBox(height: 3),
@@ -302,7 +303,7 @@ class AlbumTile extends StatelessWidget {
                 artist,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 11.5, color: SaxifyColors.textMuted),
+                style: const TextStyle(fontSize: 11.5, color: IfallTokens.textMuted),
               ),
             ],
           ),
@@ -448,13 +449,13 @@ class ArtistBubble extends StatelessWidget {
                   style: SaxifyTheme.appleFont(
                     size: 12.5,
                     weight: FontWeight.w600,
-                    color: SaxifyColors.textPrimary,
+                    color: IfallTokens.textPrimary,
                   ),
                 ),
               ),
               Text(
                 caption,
-                style: const TextStyle(fontSize: 10.5, color: SaxifyColors.textFaint),
+                style: const TextStyle(fontSize: 10.5, color: IfallTokens.textFaint),
               ),
             ],
           ),

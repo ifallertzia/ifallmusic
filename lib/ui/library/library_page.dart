@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../config/branding.dart';
+
 import '../../core/models/artist.dart';
 import '../../core/models/playlist.dart';
 import '../../core/models/song.dart';
@@ -8,12 +10,10 @@ import '../../core/services/library_service.dart';
 import '../../core/services/local_music_service.dart';
 import '../../core/services/music_download_service.dart';
 import '../../core/services/playback_service.dart';
-import '../../core/theme/glass.dart';
-import '../../core/theme/saxify_accents.dart';
-import '../../core/theme/saxify_theme.dart';
+import '../../core/services/app_feedback.dart';
+import '../../core/theme/ifall_ui.dart';
 import '../../core/utils/format.dart';
 import '../../screens/lyrics_finder_screen.dart';
-import '../../widgets/quality_badge.dart';
 import '../artist/artist_router.dart';
 import '../settings/backup_sheet.dart';
 import '../settings/playlist_sync_sheet.dart';
@@ -22,6 +22,7 @@ import '../widgets/artwork.dart';
 import '../widgets/media_cards.dart';
 import '../widgets/song_tile.dart';
 import 'playlist_detail_page.dart';
+import '../shell/ifall_shell.dart';
 
 /// Number of sections the Library list can open. Regression guard:
 /// [buildLibraryTabCounts] must return exactly this many entries.
@@ -172,86 +173,144 @@ class _LibraryPageState extends State<LibraryPage> {
       ),
     ];
 
-    return AuroraBackdrop(
-      intensity: 0.75,
-      child: SafeArea(
-        bottom: false,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            _LibraryHeader(library: library),
-            Expanded(
-              child: ListView.separated(
-                padding: const EdgeInsets.fromLTRB(16, 7, 16, 190),
-                itemCount: sections.length + 1,
-                separatorBuilder: (_, __) => const Divider(
-                  height: 1,
-                  indent: 52,
-                ),
-                itemBuilder: (BuildContext context, int index) {
-                  if (index == 0) {
-                    return const Padding(
-                      padding: EdgeInsets.fromLTRB(2, 7, 2, 8),
-                      child: Text(
-                        'Your music, ready when you are.',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: SaxifyColors.textMuted,
-                        ),
-                      ),
-                    );
-                  }
-                  final section = sections[index - 1];
-                  // Each row gets its own Material: ListTile paints its
-                  // ink splash on the nearest Material, and the aurora
-                  // backdrop's ColoredBox would hide it.
-                  return Material(
-                    type: MaterialType.transparency,
-                    child: ListTile(
-                      dense: true,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 2,
-                        vertical: 1,
-                      ),
-                      leading: Container(
+    final List<({String title, String detail, IconData icon, int tab, Color tone})>
+    sections = <({String title, String detail, IconData icon, int tab, Color tone})>[
+      (
+        title: 'Liked songs',
+        detail: '${library.likedSongs.length} songs',
+        icon: Icons.favorite_rounded,
+        tab: LibraryTabs.liked,
+        tone: const Color(0xFFF43F5E),
+      ),
+      (
+        title: 'Playlists',
+        detail: '${library.playlists.length} playlists',
+        icon: Icons.queue_music_rounded,
+        tab: LibraryTabs.playlists,
+        tone: const Color(0xFF8B5CF6),
+      ),
+      (
+        title: 'Your songs',
+        detail: '${library.songs.length} saved songs',
+        icon: Icons.music_note_rounded,
+        tab: LibraryTabs.songs,
+        tone: const Color(0xFF3B82F6),
+      ),
+      (
+        title: 'Downloads',
+        detail: '${downloads.downloaded.length} offline songs',
+        icon: Icons.download_rounded,
+        tab: LibraryTabs.downloads,
+        tone: const Color(0xFFF59E0B),
+      ),
+      (
+        title: 'On this device',
+        detail: '${local.songs.length} songs',
+        icon: Icons.phone_android_rounded,
+        tab: LibraryTabs.onDevice,
+        tone: const Color(0xFF14B8A6),
+      ),
+      (
+        title: 'Recently played',
+        detail: '${library.history.length} songs',
+        icon: Icons.history_rounded,
+        tab: LibraryTabs.history,
+        tone: const Color(0xFFEC4899),
+      ),
+      (
+        title: 'Artists',
+        detail: '${library.artists.length} followed',
+        icon: Icons.mic_rounded,
+        tab: LibraryTabs.artists,
+        tone: const Color(0xFF10B981),
+      ),
+      (
+        title: 'Lyrics Finder',
+        detail: 'Find the words to any track',
+        icon: Icons.lyrics_outlined,
+        tab: LibraryTabs.lyrics,
+        tone: const Color(0xFF06B6D4),
+      ),
+    ];
+
+    final IfallPalette c = IfallPalette.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        _LibraryHeader(library: library),
+        Expanded(
+          child: ListView.builder(
+            padding: EdgeInsets.only(bottom: IfallInsets.bottom, top: 4),
+            itemCount: sections.length + 1,
+            itemBuilder: (BuildContext context, int index) {
+              if (index == 0) {
+                return Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 2, 18, 8),
+                  child: Text(
+                    'Your music, ready when you are.',
+                    style: IfallText.caption(c.onSurfaceVariant),
+                  ),
+                );
+              }
+              final section = sections[index - 1];
+              return Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 3),
+                child: IfallGlass(
+                  radius: IfallUI.rMd,
+                  blur: 0,
+                  onTap: () => _openSection(section.tab),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  child: Row(
+                    children: <Widget>[
+                      Container(
                         width: 38,
                         height: 38,
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(11),
-                          color: context.accent.primary.withValues(alpha: 0.12),
-                          border: Border.all(
-                            color: context.accent.primary.withValues(alpha: 0.20),
-                          ),
+                          color: section.tone.withValues(alpha: 0.18),
                         ),
-                        child: Icon(section.icon, size: 19),
+                        child: Icon(section.icon, size: 19, color: section.tone),
                       ),
-                      title: Text(
-                        section.title,
-                        style: const TextStyle(
-                          fontSize: 14.5,
-                          fontWeight: FontWeight.w700,
+                      const SizedBox(width: 13),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: <Widget>[
+                            Text(
+                              section.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: IfallText.body(c.onSurface)
+                                  .copyWith(fontWeight: FontWeight.w700),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              section.detail,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: IfallText.caption(c.onSurfaceVariant),
+                            ),
+                          ],
                         ),
                       ),
-                      subtitle: Text(
-                        section.detail,
-                        style: const TextStyle(
-                          fontSize: 11.5,
-                          color: SaxifyColors.textMuted,
-                        ),
-                      ),
-                      trailing: const Icon(
+                      Icon(
                         Icons.chevron_right_rounded,
                         size: 19,
+                        color: c.onSurfaceVariant,
                       ),
-                      onTap: () => _openSection(section.tab),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ],
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
         ),
-      ),
+      ],
     );
   }
 }
@@ -334,60 +393,51 @@ class LibrarySectionPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AuroraBackdrop(
-      intensity: 0.75,
-      // A section is pushed onto the APP navigator, which sits outside the
-      // shell's Scaffold, so nothing above it supplies a Material. Every
-      // Material widget in here (BackButton's InkWell, SongTile, the glass
-      // tiles) would otherwise throw "No Material widget found".
-      child: Material(
-        type: MaterialType.transparency,
-        child: SafeArea(
-          bottom: false,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Padding(
-                padding: const EdgeInsets.fromLTRB(6, 6, 12, 2),
-                child: Row(
-                  children: <Widget>[
-                    // A real BackButton: same behaviour and semantics as the
-                    // system back gesture, so it always pops to the list.
-                    const BackButton(),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: <Widget>[
+    final IfallPalette c = IfallPalette.of(context);
+    // A section is pushed onto the APP navigator, which sits outside the
+    // shell's Scaffold, so nothing above it supplies a Material. Every
+    // Material widget in here (BackButton's InkWell, SongTile, the glass
+    // tiles) would otherwise throw "No Material widget found".
+    return Material(
+      type: MaterialType.transparency,
+      child: SafeArea(
+        bottom: false,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(6, 6, 12, 2),
+              child: Row(
+                children: <Widget>[
+                  // A real BackButton: same behaviour and semantics as the
+                  // system back gesture, so it always pops to the list.
+                  const BackButton(),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: IfallText.title(c.onSurface),
+                        ),
+                        if (subtitle.isNotEmpty)
                           Text(
-                            title,
+                            subtitle,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: SaxifyTheme.appleFont(
-                              size: 22,
-                              weight: FontWeight.w800,
-                              letterSpacing: -0.8,
-                            ),
+                            style: IfallText.caption(c.onSurfaceVariant),
                           ),
-                          if (subtitle.isNotEmpty)
-                            Text(
-                              subtitle,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 11.5,
-                                color: SaxifyColors.textMuted,
-                              ),
-                            ),
-                        ],
-                      ),
+                      ],
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-              Expanded(child: child),
-            ],
-          ),
+            ),
+            Expanded(child: child),
+          ],
         ),
       ),
     );
@@ -401,44 +451,36 @@ class _LibraryHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final IfallPalette c = IfallPalette.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 14, 12, 4),
-      child: Row(
+      padding: const EdgeInsets.fromLTRB(18, 12, 12, 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                Text(
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: Text(
                   'Your Space',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: SaxifyTheme.appleFont(
-                    size: 28,
-                    weight: FontWeight.w800,
-                    letterSpacing: -1.0,
-                  ),
+                  style: IfallText.display(c.onSurface),
                 ),
-                const SizedBox(height: 3),
-                Text(
-                  '${library.likedSongs.length} liked · ${library.playlists.length} playlists · '
-                  '${library.songs.length} songs',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: SaxifyColors.textMuted,
-                  ),
-                ),
-              ],
-            ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.backup_outlined),
+                tooltip: 'Backup / import library JSON',
+                onPressed: () => showBackupSheet(context, library),
+                color: c.onSurface,
+              ),
+            ],
           ),
-          GlassIconButton(
-            icon: Icons.backup_outlined,
-            size: 42,
-            tooltip: 'Backup / import library JSON',
-            onPressed: () => showBackupSheet(context, library),
+          Text(
+            '${library.likedSongs.length} liked · ${library.playlists.length} playlists · '
+            '${library.songs.length} songs',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: IfallText.caption(c.onSurfaceVariant),
           ),
         ],
       ),
@@ -447,6 +489,9 @@ class _LibraryHeader extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------- Liked Songs
+
+/// Liked songs, presented as a playlist: big header, shuffle + play, then the
+/// tracks in the order they were liked.
 class LikedSongsPage extends StatelessWidget {
   const LikedSongsPage({super.key});
 
@@ -458,15 +503,12 @@ class LikedSongsPage extends StatelessWidget {
 
     return LibrarySectionPage(
       title: 'Liked Songs',
-      subtitle: '${songs.length} songs',
+      subtitle: songs.isEmpty ? 'Nothing liked yet' : '${songs.length} songs',
       child: songs.isEmpty
-          ? const SingleChildScrollView(
-              child: EmptyState(
-                icon: Icons.favorite_border_rounded,
-                title: 'No liked songs yet',
-                message:
-                    'Tap the heart on any track and it will live here, saved on this device.',
-              ),
+          ? const IfallEmpty(
+              icon: Icons.favorite_border_rounded,
+              message:
+                  'Tap the heart on any track and it will live here, saved on this device.',
             )
           : ListView(
               padding: const EdgeInsets.fromLTRB(12, 10, 12, 40),
@@ -497,6 +539,7 @@ class LikedSongsPage extends StatelessWidget {
 }
 
 // ------------------------------------------------------------------ Playlists
+
 class PlaylistsPage extends StatelessWidget {
   const PlaylistsPage({super.key});
 
@@ -540,244 +583,100 @@ class PlaylistsPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final LibraryService library = context.watch<LibraryService>();
-    final SaxifyAccent accent = context.accent;
+    final IfallPalette c = IfallPalette.of(context);
+    final List<Playlist> playlists = library.playlists;
 
     return LibrarySectionPage(
       title: 'Playlists',
-      subtitle: '${library.playlists.length} playlists',
+      subtitle: '${playlists.length} playlists',
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 40),
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 40),
         children: <Widget>[
-          GlassPanel(
-            glow: true,
-            onTap: () => _create(context, library),
-            child: Row(
-              children: <Widget>[
-                Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(14),
-                    gradient: accent.gradient,
-                  ),
-                  child: Icon(Icons.add_rounded, color: accent.onAccent),
-                ),
-                const SizedBox(width: 14),
-                const Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: <Widget>[
-                      Text(
-                        'Create playlist',
-                        style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      SizedBox(height: 3),
-                      Text(
-                        'Build your own universe of sound',
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: SaxifyColors.textMuted,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Icon(Icons.chevron_right_rounded, color: accent.primary),
-              ],
-            ),
-          ),
-          const SizedBox(height: 10),
-          Row(
+          IfallGroup(
             children: <Widget>[
-              Expanded(
-                child: GlassButton(
-                  label: 'Generate all',
-                  compact: true,
-                  filled: false,
-                  onPressed: () => shareAllPlaylistCodes(context),
-                ),
+              IfallRow(
+                icon: Icons.add_rounded,
+                title: 'Create playlist',
+                subtitle: 'Build your own universe of sound',
+                onTap: () => _create(context, library),
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: GlassButton(
-                  label: 'Import code',
-                  compact: true,
-                  filled: false,
-                  onPressed: () => showImportCodeSheet(context),
-                ),
+              IfallRow(
+                icon: Icons.qr_code_2_rounded,
+                title: 'Share playlists',
+                subtitle: 'Generate a code for every playlist',
+                onTap: () => shareAllPlaylistCodes(context),
+              ),
+              IfallRow(
+                icon: Icons.download_for_offline_rounded,
+                title: 'Import a code',
+                subtitle: 'Paste a playlist code you were sent',
+                onTap: () => showImportCodeSheet(context),
               ),
             ],
           ),
-          const SizedBox(height: 18),
-          if (library.playlists.isEmpty)
-            const EmptyState(
+          if (playlists.isEmpty)
+            const IfallEmpty(
               icon: Icons.queue_music_rounded,
-              title: 'No playlists yet',
               message:
-                  'Create one above, then use "Add to playlist" from any song menu.',
+                  'Create a playlist above, then use "Add to playlist" from any song menu.',
             )
-          else
-            for (final Playlist playlist in library.playlists)
-              GlassPanel(
-                padding: const EdgeInsets.all(12),
-                radius: SaxifyTheme.radiusMd,
-                onTap: () => _openPlaylist(context, playlist),
-                child: Row(
-                  children: <Widget>[
-                    Artwork(
-                      url: playlist.artwork,
-                      size: 58,
-                      radius: 12,
-                      fallbackIcon: Icons.queue_music_rounded,
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: <Widget>[
-                          Text(
-                            playlist.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 14.5,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          const SizedBox(height: 3),
-                          Text(
-                            '${playlist.count} songs · ${Fmt.date(playlist.createdAt)}',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 11.5,
-                              color: SaxifyColors.textMuted,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(
-                        Icons.more_vert_rounded,
-                        size: 20,
-                        color: SaxifyColors.textFaint,
-                      ),
-                      onPressed: () =>
-                          _playlistMenu(context, library, playlist),
-                    ),
-                  ],
-                ),
-              ),
-        ],
-      ),
-    );
-  }
-
-  void _playlistMenu(
-    BuildContext context,
-    LibraryService library,
-    Playlist playlist,
-  ) {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (BuildContext sheetContext) => GlassSheet(
-        title: playlist.name,
-        subtitle: '${playlist.count} songs',
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            ListTile(
-              leading: const Icon(Icons.drive_file_rename_outline_rounded),
-              title: const Text('Rename'),
-              onTap: () async {
-                Navigator.of(sheetContext).pop();
-                final TextEditingController controller = TextEditingController(
-                  text: playlist.name,
-                );
-                final String? name = await showDialog<String>(
-                  context: context,
-                  builder: (BuildContext dialogContext) => AlertDialog(
-                    title: const Text('Rename playlist'),
-                    content: TextField(
-                      controller: controller,
-                      autofocus: true,
-                      decoration: const InputDecoration(hintText: 'New name'),
-                      onSubmitted: (String v) =>
-                          Navigator.of(dialogContext).pop(v),
-                    ),
-                    actions: <Widget>[
-                      TextButton(
-                        onPressed: () => Navigator.of(dialogContext).pop(),
-                        child: const Text('Cancel'),
-                      ),
-                      TextButton(
-                        onPressed: () =>
-                            Navigator.of(dialogContext).pop(controller.text),
-                        child: const Text('Save'),
-                      ),
-                    ],
-                  ),
-                );
-                if (name != null && name.trim().isNotEmpty) {
-                  await library.renamePlaylist(playlist.id, name);
-                }
-              },
+          else ...<Widget>[
+            IfallSectionHeader(
+              title: 'Your playlists',
+              subtitle: '${playlists.length} saved on this device',
             ),
-            ListTile(
-              leading: const Icon(
-                Icons.delete_outline_rounded,
-                color: SaxifyColors.danger,
-              ),
-              title: const Text(
-                'Delete playlist',
-                style: TextStyle(color: SaxifyColors.danger),
-              ),
-              onTap: () async {
-                Navigator.of(sheetContext).pop();
-                final bool? confirmed = await showDialog<bool>(
-                  context: context,
-                  builder: (BuildContext dialogContext) => AlertDialog(
-                    title: const Text('Delete playlist?'),
-                    content: Text(
-                      '"${playlist.name}" and its ${playlist.count} songs will be removed.',
-                    ),
-                    actions: <Widget>[
-                      TextButton(
-                        onPressed: () =>
-                            Navigator.of(dialogContext).pop(false),
-                        child: const Text('Cancel'),
-                      ),
-                      TextButton(
-                        onPressed: () =>
-                            Navigator.of(dialogContext).pop(true),
-                        child: const Text('Delete'),
-                      ),
-                    ],
+            IfallGroup(
+              children: <Widget>[
+                for (final Playlist playlist in playlists)
+                  IfallRow(
+                    title: playlist.name,
+                    subtitle:
+                        '${playlist.count} songs · ${Fmt.date(playlist.createdAt)}',
+                    trailing: _PlaylistArtwork(playlist: playlist),
+                    onTap: () => _openPlaylist(context, playlist),
                   ),
-                );
-                if (confirmed == true) {
-                  await library.deletePlaylist(playlist.id);
-                }
-              },
+              ],
             ),
-            const SizedBox(height: 14),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
+              child: Text(
+                'Long-press is not needed — open a playlist and use the ⋮ menu '
+                'to rename, share or delete it.',
+                style: IfallText.caption(c.onSurfaceVariant),
+              ),
+            ),
           ],
-        ),
+        ],
       ),
     );
   }
 }
 
-// ------------------------------------------------------------------- Songs
+class _PlaylistArtwork extends StatelessWidget {
+  const _PlaylistArtwork({required this.playlist});
+
+  final Playlist playlist;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Artwork(
+          url: playlist.artwork,
+          size: 46,
+          radius: 10,
+          fallbackIcon: Icons.queue_music_rounded,
+        ),
+        const SizedBox(width: 4),
+        Icon(Icons.chevron_right_rounded, size: 18, color: IfallPalette.of(context).onSurfaceVariant),
+      ],
+    );
+  }
+}
+
+// --------------------------------------------------------------------- Songs
+
 class LibrarySongsPage extends StatelessWidget {
   const LibrarySongsPage({super.key});
 
@@ -791,37 +690,19 @@ class LibrarySongsPage extends StatelessWidget {
       title: 'Your songs',
       subtitle: '${songs.length} saved songs',
       child: songs.isEmpty
-          ? const SingleChildScrollView(
-              child: EmptyState(
-                icon: Icons.library_music_outlined,
-                title: 'No saved songs yet',
-                message:
-                    'Songs you add to the library from the song menu will collect here.',
-              ),
+          ? const IfallEmpty(
+              icon: Icons.library_music_outlined,
+              message:
+                  'Songs you add to the library from the song menu collect here.',
             )
           : ListView(
               padding: const EdgeInsets.fromLTRB(12, 10, 12, 40),
               children: <Widget>[
-                Row(
-                  children: <Widget>[
-                    Expanded(
-                      child: Text(
-                        '${songs.length} saved songs',
-                        style: const TextStyle(
-                          fontSize: 12.5,
-                          color: SaxifyColors.textMuted,
-                        ),
-                      ),
-                    ),
-                    GlassButton(
-                      label: 'Play all',
-                      icon: Icons.play_arrow_rounded,
-                      compact: true,
-                      onPressed: () => playback.playQueue(songs),
-                    ),
-                  ],
+                _PlayAllRow(
+                  label: '${songs.length} saved songs',
+                  onPlay: () => playback.playQueue(songs),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 8),
                 for (int i = 0; i < songs.length; i++)
                   SongTile(
                     song: songs[i],
@@ -833,11 +714,95 @@ class LibrarySongsPage extends StatelessWidget {
   }
 }
 
+class _PlayAllRow extends StatelessWidget {
+  const _PlayAllRow({required this.label, required this.onPlay, this.trailing});
+
+  final String label;
+  final VoidCallback onPlay;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final IfallPalette c = IfallPalette.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(6, 0, 6, 0),
+      child: Row(
+        children: <Widget>[
+          Expanded(
+            child: Text(label, style: IfallText.caption(c.onSurfaceVariant)),
+          ),
+          _PillButton(
+            label: 'Play all',
+            icon: Icons.play_arrow_rounded,
+            filled: true,
+            onTap: onPlay,
+          ),
+          if (trailing != null) trailing!,
+        ],
+      ),
+    );
+  }
+}
+
+class _PillButton extends StatelessWidget {
+  const _PillButton({
+    required this.label,
+    required this.icon,
+    required this.onTap,
+    this.filled = false,
+  });
+
+  final String label;
+  final IconData icon;
+  final VoidCallback onTap;
+  final bool filled;
+
+  @override
+  Widget build(BuildContext context) {
+    final IfallPalette c = IfallPalette.of(context);
+    final Color onAccent = ThemeData.estimateBrightnessForColor(c.accent) ==
+            Brightness.dark
+        ? Colors.white
+        : Colors.black;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(IfallUI.rPill),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(IfallUI.rPill),
+            color: filled ? c.accent : Colors.transparent,
+            border: filled ? null : Border.all(color: c.outline),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Icon(icon, size: 17, color: filled ? onAccent : c.onSurface),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: IfallText.body(
+                  filled ? onAccent : c.onSurface,
+                ).copyWith(fontWeight: FontWeight.w700),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // ------------------------------------------------------------------ Artists
+
 class LibraryArtistsPage extends StatelessWidget {
   const LibraryArtistsPage({super.key});
 
-  static const List<String> _indianArtists = <String>[
+  /// BitChord-style starter list: the artists people search for first, so an
+  /// empty library still has somewhere to go.
+  static const List<String> suggestedArtists = <String>[
     'Arijit Singh',
     'Shreya Ghoshal',
     'A. R. Rahman',
@@ -890,90 +855,67 @@ class LibraryArtistsPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final LibraryService library = context.watch<LibraryService>();
     final List<ArtistRef> followed = library.artists;
+    final IfallPalette c = IfallPalette.of(context);
 
     return LibrarySectionPage(
       title: 'Artists',
-      subtitle: '${followed.length} followed',
+      subtitle: followed.isEmpty
+          ? 'Start from the suggestions'
+          : '${followed.length} followed',
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 40),
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 40),
         children: <Widget>[
-          const SectionHeader(
-            title: 'Indian artists',
-            subtitle: 'Hindi and regional artists · tap a name for songs',
-            padding: EdgeInsets.fromLTRB(4, 8, 4, 10),
-          ),
-          for (final String name in _indianArtists)
-            GlassListTile(
-              margin: const EdgeInsets.only(bottom: 6),
-              onTap: () => openArtistByName(context, name: name),
-              leading: ArtistAvatar(name: name, size: 42, ring: false),
-              trailing: const Icon(
-                Icons.chevron_right_rounded,
-                size: 18,
-                color: SaxifyColors.textFaint,
-              ),
-              child: Text(
-                name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
           if (followed.isNotEmpty) ...<Widget>[
-            SectionHeader(
+            IfallSectionHeader(
               title: 'Followed artists',
               subtitle: '${followed.length} saved on this device',
-              padding: const EdgeInsets.fromLTRB(4, 22, 4, 10),
             ),
-            for (final ArtistRef artist in followed)
-              GlassListTile(
-                margin: const EdgeInsets.only(bottom: 6),
-                onTap: () => openArtistByName(
-                  context,
-                  name: artist.name,
-                  channelId: artist.channelId,
-                ),
-                leading: ArtistAvatar(
-                  name: artist.name,
-                  imageUrl: artist.imageUrl,
-                  size: 44,
-                  ring: false,
-                ),
-                trailing: const Icon(
-                  Icons.chevron_right_rounded,
-                  size: 18,
-                  color: SaxifyColors.textFaint,
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    Text(
-                      artist.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w600,
-                      ),
+            IfallGroup(
+              children: <Widget>[
+                for (final ArtistRef artist in followed)
+                  IfallRow(
+                    title: artist.name,
+                    subtitle: artist.subscribers ?? 'Artist',
+                    trailing: ArtistAvatar(
+                      name: artist.name,
+                      imageUrl: artist.imageUrl,
+                      size: 40,
+                      ring: false,
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      artist.subscribers ?? 'Artist',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 11.5,
-                        color: SaxifyColors.textMuted,
-                      ),
+                    onTap: () => openArtistByName(
+                      context,
+                      name: artist.name,
+                      channelId: artist.channelId,
                     ),
-                  ],
-                ),
-              ),
+                  ),
+              ],
+            ),
           ],
+          IfallSectionHeader(
+            title: 'Suggested artists',
+            subtitle: 'Hindi and regional · tap a name for songs',
+          ),
+          IfallGroup(
+            footer:
+                'Suggestions are alphabetical and never change what is saved on '
+                'your device.',
+            children: <Widget>[
+              for (final String name in suggestedArtists)
+                IfallRow(
+                  title: name,
+                  trailing: ArtistAvatar(name: name, size: 36, ring: false),
+                  onTap: () => openArtistByName(context, name: name),
+                ),
+            ],
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+            child: Text(
+              'Follow an artist from their page and they move to the top of '
+              'this list.',
+              style: IfallText.caption(c.onSurfaceVariant),
+            ),
+          ),
         ],
       ),
     );
@@ -981,6 +923,7 @@ class LibraryArtistsPage extends StatelessWidget {
 }
 
 // --------------------------------------------------------------- Downloads
+
 class LibraryDownloadsPage extends StatelessWidget {
   const LibraryDownloadsPage({super.key});
 
@@ -989,6 +932,8 @@ class LibraryDownloadsPage extends StatelessWidget {
     final MusicDownloadService downloads = context
         .watch<MusicDownloadService>();
     final PlaybackService playback = context.read<PlaybackService>();
+    final IfallPalette c = IfallPalette.of(context);
+
     final List<MusicDownloadJob> saved = downloads.downloaded;
     final List<Song> songs = saved
         .map((MusicDownloadJob job) => job.song)
@@ -1004,157 +949,134 @@ class LibraryDownloadsPage extends StatelessWidget {
               job.phase == MusicDownloadPhase.idle,
         )
         .toList();
-    final SaxifyAccent accent = context.accent;
 
     return LibrarySectionPage(
       title: 'Your Downloads',
       subtitle: '${saved.length} saved on this phone',
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 40),
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 40),
         children: <Widget>[
-          const SectionHeader(
-            title: 'Your Downloads',
-            subtitle: 'Saved on this phone · plays offline',
-            padding: EdgeInsets.fromLTRB(4, 8, 4, 10),
-          ),
-          // ---- live downloads, each with its own percentage ----------------
-          for (final MusicDownloadJob job in active)
-            GlassPanel(
-              radius: SaxifyTheme.radiusMd,
-              padding: const EdgeInsets.all(14),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Row(
-                    children: <Widget>[
-                      Artwork(url: job.song.thumbnailUrl, size: 44, radius: 10),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          job.song.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 13.5,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        tooltip: 'Cancel download',
-                        icon: const Icon(Icons.close_rounded, size: 18),
-                        onPressed: () => downloads.cancel(job),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  GlassProgress(
-                    fraction: job.fraction,
-                    indeterminate:
-                        job.phase == MusicDownloadPhase.idle ||
-                        job.fraction <= 0,
-                    label: job.phase == MusicDownloadPhase.running
-                        ? 'Downloading ${(job.fraction * 100).round()}%'
-                        : 'Waiting in queue',
-                  ),
-                ],
-              ),
+          // ---- live downloads, each with its own percentage -------------
+          if (active.isNotEmpty) ...<Widget>[
+            IfallSectionHeader(
+              title: 'In progress',
+              subtitle: '${active.length} working',
             ),
-          // A failed download never becomes a row here — it is announced with
-          // a notification instead, so this list only shows real, playable
-          // offline music.
-          if (saved.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(4, 4, 4, 10),
-              child: Row(
-                children: <Widget>[
-                  Expanded(
-                    child: Text(
-                      '${saved.length} songs saved',
-                      style: const TextStyle(
-                        fontSize: 12.5,
-                        color: SaxifyColors.textMuted,
-                      ),
-                    ),
-                  ),
-                  GlassButton(
-                    label: 'Play all',
-                    icon: Icons.play_arrow_rounded,
-                    compact: true,
-                    onPressed: () => playback.playOfflineQueue(songs, sources),
-                  ),
-                ],
-              ),
+            IfallGroup(
+              children: <Widget>[
+                for (final MusicDownloadJob job in active)
+                  _ActiveDownloadRow(job: job, downloads: downloads),
+              ],
             ),
+          ],
           if (saved.isEmpty && active.isEmpty)
-            const EmptyState(
+            const IfallEmpty(
               icon: Icons.download_outlined,
-              title: 'No songs downloaded yet',
               message:
                   'Tap the download icon beside any song. Your files stay on this device and play offline.',
             ),
-          for (final MusicDownloadJob job in saved)
-            GlassListTile(
-              margin: const EdgeInsets.only(bottom: 8),
-              onTap: job.offlinePath == null
-                  ? null
-                  : () => playback.playOfflineSong(
-                      job.song,
-                      job.offlinePath!,
+          if (saved.isNotEmpty) ...<Widget>[
+            _PlayAllRow(
+              label: '${saved.length} songs saved',
+              onPlay: () => playback.playOfflineQueue(songs, sources),
+            ),
+            const SizedBox(height: 8),
+            IfallGroup(
+              footer: 'Downloaded files play with no network at all.',
+              children: <Widget>[
+                for (final MusicDownloadJob job in saved)
+                  IfallRow(
+                    title: job.song.title,
+                    subtitle:
+                        '${job.song.artist}${job.song.album == null ? '' : ' · ${job.song.album}'} · ${(job.size / (1024 * 1024)).toStringAsFixed(1)} MB',
+                    trailing: Artwork(
+                      url: job.song.thumbnailUrl,
+                      size: 46,
+                      radius: 10,
                     ),
-              leading: Artwork(
-                url: job.song.thumbnailUrl,
-                size: 48,
-                radius: 12,
-              ),
-              trailing: IconButton(
-                tooltip: 'Delete download',
-                onPressed: () => downloads.delete(job, playback: playback),
-                icon: const Icon(
-                  Icons.delete_outline_rounded,
-                  color: SaxifyColors.danger,
-                ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  Text(
-                    job.song.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 3),
-                  QualityBadge(quality: job.song.quality),
-                  const SizedBox(height: 3),
-                  Row(
-                    children: <Widget>[
-                      Icon(
-                        Icons.offline_pin_rounded,
-                        size: 13,
-                        color: accent.primary,
-                      ),
-                      const SizedBox(width: 5),
-                      Flexible(
-                        child: Text(
-                          '${job.song.artist}${job.song.album == null ? '' : ' · ${job.song.album}'} · ${(job.size / (1024 * 1024)).toStringAsFixed(1)} MB',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 11.5,
-                            color: SaxifyColors.textMuted,
+                    onTap: job.offlinePath == null
+                        ? null
+                        : () => playback.playOfflineSong(
+                            job.song,
+                            job.offlinePath!,
                           ),
-                        ),
-                      ),
-                    ],
                   ),
-                ],
+                for (final MusicDownloadJob job in saved)
+                  IfallRow(
+                    danger: true,
+                    icon: Icons.delete_outline_rounded,
+                    title: 'Delete “${job.song.title}”',
+                    onTap: () => downloads.delete(job, playback: playback),
+                  ),
+              ],
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
+              child: Text(
+                'Audio is stored in the app’s private folder, so uninstalling '
+                '${IfallBranding.appName} removes it.',
+                style: IfallText.caption(c.onSurfaceVariant),
               ),
             ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _ActiveDownloadRow extends StatelessWidget {
+  const _ActiveDownloadRow({required this.job, required this.downloads});
+
+  final MusicDownloadJob job;
+  final MusicDownloadService downloads;
+
+  @override
+  Widget build(BuildContext context) {
+    final IfallPalette c = IfallPalette.of(context);
+    final bool running = job.phase == MusicDownloadPhase.running;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Artwork(url: job.song.thumbnailUrl, size: 40, radius: 9),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  job.song.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: IfallText.body(c.onSurface),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Cancel download',
+                icon: const Icon(Icons.close_rounded, size: 18),
+                color: c.onSurfaceVariant,
+                onPressed: () => downloads.cancel(job),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(3),
+            child: LinearProgressIndicator(
+              value: running && job.fraction > 0 ? job.fraction : null,
+              minHeight: 4,
+              backgroundColor: c.fill,
+              valueColor: AlwaysStoppedAnimation<Color>(c.accent),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            running
+                ? 'Downloading ${(job.fraction * 100).round()}%'
+                : 'Waiting in queue',
+            style: IfallText.caption(c.onSurfaceVariant),
+          ),
         ],
       ),
     );
@@ -1162,6 +1084,7 @@ class LibraryDownloadsPage extends StatelessWidget {
 }
 
 // ------------------------------------------------------------------ History
+
 class LibraryHistoryPage extends StatelessWidget {
   const LibraryHistoryPage({super.key});
 
@@ -1171,15 +1094,12 @@ class LibraryHistoryPage extends StatelessWidget {
     final PlaybackService playback = context.read<PlaybackService>();
 
     if (library.history.isEmpty) {
-      return LibrarySectionPage(
+      return const LibrarySectionPage(
         title: 'Recently played',
         subtitle: 'Nothing yet',
-        child: const SingleChildScrollView(
-          child: EmptyState(
-            icon: Icons.history_rounded,
-            title: 'No listening history',
-            message: 'Play something and it will show up here automatically.',
-          ),
+        child: IfallEmpty(
+          icon: Icons.history_rounded,
+          message: 'Play something and it will show up here automatically.',
         ),
       );
     }
@@ -1194,36 +1114,20 @@ class LibraryHistoryPage extends StatelessWidget {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(12, 10, 12, 40),
         children: <Widget>[
-          Row(
-            children: <Widget>[
-              Expanded(
-                child: Text(
-                  '${library.history.length} recently played',
-                  style: const TextStyle(
-                    fontSize: 12.5,
-                    color: SaxifyColors.textMuted,
-                  ),
-                ),
+          _PlayAllRow(
+            label: '${library.history.length} recently played',
+            onPlay: () => playback.playQueue(ordered),
+            trailing: IconButton(
+              tooltip: 'Clear history',
+              icon: Icon(
+                Icons.delete_sweep_rounded,
+                size: 20,
+                color: IfallPalette.of(context).onSurfaceVariant,
               ),
-              GlassButton(
-                label: 'Play all',
-                icon: Icons.play_arrow_rounded,
-                compact: true,
-                onPressed: () => playback.playQueue(ordered),
-              ),
-              const SizedBox(width: 8),
-              IconButton(
-                tooltip: 'Clear history',
-                icon: const Icon(
-                  Icons.delete_sweep_rounded,
-                  size: 20,
-                  color: SaxifyColors.textFaint,
-                ),
-                onPressed: library.clearHistory,
-              ),
-            ],
+              onPressed: library.clearHistory,
+            ),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           for (int i = 0; i < library.history.length; i++)
             SongTile(
               song: library.history[i].song,
@@ -1238,24 +1142,24 @@ class LibraryHistoryPage extends StatelessWidget {
 }
 
 // --------------------------------------------------------------- On device
+
 class OnDevicePage extends StatelessWidget {
   const OnDevicePage({super.key});
 
   @override
   Widget build(BuildContext context) {
     final LocalMusicService local = context.watch<LocalMusicService>();
+    final IfallPalette c = IfallPalette.of(context);
 
     if (!local.hasScanned && local.songs.isEmpty) {
       return LibrarySectionPage(
         title: 'On this device',
         subtitle: 'Not scanned yet',
-        child: EmptyState(
+        child: IfallEmpty(
           icon: Icons.perm_media_rounded,
-          title: 'On device',
           message: 'Show songs already saved on this phone.',
           actionLabel: 'Scan device music',
-          onAction: () =>
-              context.read<LocalMusicService>().scan(context: context),
+          action: () => context.read<LocalMusicService>().scan(context: context),
         ),
       );
     }
@@ -1267,7 +1171,7 @@ class OnDevicePage extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 40),
         children: <Widget>[
           Padding(
-            padding: const EdgeInsets.fromLTRB(4, 0, 4, 12),
+            padding: const EdgeInsets.fromLTRB(6, 0, 6, 4),
             child: Row(
               children: <Widget>[
                 Expanded(
@@ -1275,10 +1179,7 @@ class OnDevicePage extends StatelessWidget {
                     local.scanning
                         ? 'Scanning device music…'
                         : '${local.songs.length} songs on this device',
-                    style: const TextStyle(
-                      color: SaxifyColors.textSecondary,
-                      fontSize: 13,
-                    ),
+                    style: IfallText.caption(c.onSurfaceVariant),
                   ),
                 ),
                 TextButton.icon(
@@ -1287,24 +1188,17 @@ class OnDevicePage extends StatelessWidget {
                       : () => context.read<LocalMusicService>().scan(
                           context: context,
                         ),
-                  icon: const Icon(Icons.refresh_rounded, size: 18),
+                  icon: const Icon(Icons.refresh_rounded, size: 17),
                   label: const Text('Re-scan'),
                 ),
               ],
             ),
           ),
-          const SectionHeader(
-            title: 'Songs',
-            subtitle: 'Every audio file found on this phone',
-            padding: EdgeInsets.fromLTRB(4, 4, 4, 8),
-          ),
-          if (local.songs.isEmpty)
-            const EmptyState(
-              icon: Icons.music_off_rounded,
-              title: 'No local songs found',
-              message: 'Tap re-scan after adding music files to your phone.',
-            )
-          else
+          if (local.songs.isNotEmpty) ...<Widget>[
+            IfallSectionHeader(
+              title: 'Songs',
+              subtitle: 'Every audio file found on this phone',
+            ),
             for (int i = 0; i < local.songs.length; i++)
               SongTile(
                 song: local.songs[i],
@@ -1315,75 +1209,54 @@ class OnDevicePage extends StatelessWidget {
                   startIndex: i,
                 ),
               ),
+          ] else
+            const IfallEmpty(
+              icon: Icons.music_off_rounded,
+              message: 'Tap re-scan after adding music files to your phone.',
+            ),
           if (local.albums.isNotEmpty) ...<Widget>[
-            const SectionHeader(
+            IfallSectionHeader(
               title: 'Albums',
               subtitle: 'Grouped from your device tags',
-              padding: EdgeInsets.fromLTRB(4, 18, 4, 8),
             ),
-            for (final LocalAlbum album in local.albums)
-              GlassListTile(
-                margin: const EdgeInsets.only(bottom: 8),
-                leading: Artwork(url: album.artworkUri, size: 52, radius: 8),
-                trailing: const Icon(Icons.chevron_right_rounded, size: 18),
-                onTap: () =>
-                    context.read<PlaybackService>().playQueue(album.songs),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Text(
-                      album.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      '${album.artist} · ${album.songs.length} songs',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: SaxifyColors.textSecondary,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+            IfallGroup(
+              children: <Widget>[
+                for (final LocalAlbum album in local.albums)
+                  IfallRow(
+                    title: album.title,
+                    subtitle: '${album.artist} · ${album.songs.length} songs',
+                    trailing: Artwork(url: album.artworkUri, size: 46, radius: 8),
+                    onTap: () =>
+                        context.read<PlaybackService>().playQueue(album.songs),
+                  ),
+              ],
+            ),
           ],
           if (local.artists.isNotEmpty) ...<Widget>[
-            const SectionHeader(
+            IfallSectionHeader(
               title: 'Artists',
               subtitle: 'Who is on this phone',
-              padding: EdgeInsets.fromLTRB(4, 18, 4, 8),
             ),
-            for (final LocalArtist artist in local.artists)
-              GlassListTile(
-                margin: const EdgeInsets.only(bottom: 8),
-                leading: const CircleAvatar(child: Icon(Icons.person_rounded)),
-                trailing: const Icon(Icons.chevron_right_rounded, size: 18),
-                onTap: () =>
-                    context.read<PlaybackService>().playQueue(artist.songs),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Text(
-                      artist.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      '${artist.songs.length} songs · On device',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: SaxifyColors.textSecondary,
-                        fontSize: 12,
+            IfallGroup(
+              children: <Widget>[
+                for (final LocalArtist artist in local.artists)
+                  IfallRow(
+                    title: artist.name,
+                    subtitle: '${artist.songs.length} songs · On device',
+                    trailing: CircleAvatar(
+                      radius: 20,
+                      backgroundColor: c.fill,
+                      child: Icon(
+                        Icons.person_rounded,
+                        size: 18,
+                        color: c.onSurfaceVariant,
                       ),
                     ),
-                  ],
-                ),
-              ),
+                    onTap: () =>
+                        context.read<PlaybackService>().playQueue(artist.songs),
+                  ),
+              ],
+            ),
           ],
         ],
       ),
@@ -1413,7 +1286,7 @@ class _CollectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final SaxifyAccent accent = context.accent;
+    final IfallPalette c = IfallPalette.of(context);
     return Padding(
       padding: const EdgeInsets.fromLTRB(4, 8, 4, 18),
       child: Column(
@@ -1426,11 +1299,12 @@ class _CollectionHeader extends StatelessWidget {
                 width: 108,
                 height: 108,
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(8),
-                  gradient: accent.gradient,
+                  borderRadius: BorderRadius.circular(10),
+                  color: c.accent.withValues(alpha: 0.16),
+                  border: Border.all(color: c.accent.withValues(alpha: 0.35)),
                   boxShadow: <BoxShadow>[
                     BoxShadow(
-                      color: accent.primary.withValues(alpha: 0.35),
+                      color: c.accent.withValues(alpha: 0.28),
                       blurRadius: 30,
                       offset: const Offset(0, 12),
                       spreadRadius: -8,
@@ -1438,9 +1312,9 @@ class _CollectionHeader extends StatelessWidget {
                   ],
                 ),
                 child: coverUrl.isEmpty
-                    ? Icon(icon, size: 40, color: accent.onAccent)
+                    ? Icon(icon, size: 40, color: c.accent)
                     : ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
+                        borderRadius: BorderRadius.circular(10),
                         child: Stack(
                           fit: StackFit.expand,
                           children: <Widget>[
@@ -1449,11 +1323,7 @@ class _CollectionHeader extends StatelessWidget {
                               alignment: Alignment.bottomRight,
                               child: Padding(
                                 padding: const EdgeInsets.all(8),
-                                child: Icon(
-                                  icon,
-                                  size: 20,
-                                  color: Colors.white,
-                                ),
+                                child: Icon(icon, size: 20, color: Colors.white),
                               ),
                             ),
                           ],
@@ -1466,24 +1336,17 @@ class _CollectionHeader extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: <Widget>[
-                    Text(
-                      label,
-                      style: TextStyle(
-                        fontSize: 10,
-                        letterSpacing: 1.5,
-                        fontWeight: FontWeight.w800,
-                        color: accent.primary,
-                      ),
-                    ),
+                    Text(label, style: IfallText.label(c.accent)),
                     const SizedBox(height: 6),
                     Text(
                       title,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: SaxifyTheme.appleFont(
-                        size: 23,
+                      style: IfallText.style(
+                        23,
                         weight: FontWeight.w800,
                         letterSpacing: -0.7,
+                        color: c.onSurface,
                       ),
                     ),
                     const SizedBox(height: 5),
@@ -1491,10 +1354,7 @@ class _CollectionHeader extends StatelessWidget {
                       subtitle,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: SaxifyColors.textMuted,
-                      ),
+                      style: IfallText.caption(c.onSurfaceVariant),
                     ),
                   ],
                 ),
@@ -1505,25 +1365,82 @@ class _CollectionHeader extends StatelessWidget {
           Row(
             children: <Widget>[
               Expanded(
-                child: GlassButton(
+                child: _CollectionButton(
                   label: 'Play',
                   icon: Icons.play_arrow_rounded,
-                  onPressed: onPlay,
+                  filled: true,
+                  onTap: onPlay,
                 ),
               ),
               const SizedBox(width: 10),
               SizedBox(
                 width: 54,
-                height: 54,
-                child: GlassIconButton(
+                height: 46,
+                child: _CollectionButton(
+                  label: '',
                   icon: Icons.shuffle_rounded,
-                  size: 54,
-                  onPressed: onShuffle,
+                  onTap: onShuffle,
                 ),
               ),
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _CollectionButton extends StatelessWidget {
+  const _CollectionButton({
+    required this.label,
+    required this.icon,
+    required this.onTap,
+    this.filled = false,
+  });
+
+  final String label;
+  final IconData icon;
+  final VoidCallback onTap;
+  final bool filled;
+
+  @override
+  Widget build(BuildContext context) {
+    final IfallPalette c = IfallPalette.of(context);
+    final Color ink = filled
+        ? (ThemeData.estimateBrightnessForColor(c.accent) == Brightness.dark
+            ? Colors.white
+            : Colors.black)
+        : c.onSurface;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(IfallUI.rPill),
+        child: Container(
+          height: 46,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: filled ? c.accent : c.glass,
+            borderRadius: BorderRadius.circular(IfallUI.rPill),
+            border: Border.all(
+              color: filled ? c.accent : c.outline.withValues(alpha: 0.9),
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: <Widget>[
+              Icon(icon, size: 19, color: ink),
+              if (label.isNotEmpty) ...<Widget>[
+                const SizedBox(width: 7),
+                Text(
+                  label,
+                  style: IfallText.body(ink)
+                      .copyWith(fontWeight: FontWeight.w700),
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }

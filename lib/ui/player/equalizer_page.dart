@@ -10,6 +10,7 @@ import '../../core/theme/glass.dart';
 import '../../core/theme/saxify_accents.dart';
 import '../../core/theme/saxify_theme.dart';
 import '../widgets/search_fab.dart';
+import '../../core/theme/ifall_ui.dart';
 
 /// Studio equalizer with saved user presets.
 ///
@@ -203,7 +204,7 @@ class _EqualizerPageState extends State<EqualizerPage> {
   @override
   Widget build(BuildContext context) {
     final SettingsService settings = context.read<SettingsService>();
-    return AuroraBackdrop(
+    return IfallBackdrop(
       intensity: 0.7,
       child: Scaffold(
         backgroundColor: Colors.transparent,
@@ -215,7 +216,7 @@ class _EqualizerPageState extends State<EqualizerPage> {
           padding: const EdgeInsets.fromLTRB(16, 6, 16, 180),
           children: <Widget>[
             // ------------------------------------------------ bands
-            const SectionHeader(
+            const IfallSectionHeader(
               title: 'Studio equalizer',
               subtitle: 'Bound to the live player session',
               padding: EdgeInsets.fromLTRB(4, 6, 4, 10),
@@ -226,14 +227,13 @@ class _EqualizerPageState extends State<EqualizerPage> {
                 child: Center(child: CircularProgressIndicator()),
               )
             else if (_unsupported)
-              const EmptyState(
+              const IfallEmpty(
                 icon: Icons.graphic_eq_rounded,
-                title: 'Equalizer unavailable',
                 message:
-                    'This device does not expose an audio session equalizer. Playback is unchanged.',
+                    'Equalizer unavailable — this device does not expose an audio session equalizer. Playback is unchanged.',
               )
             else ...<Widget>[
-              GlassPanel(
+              IfallGlass(
                 radius: SaxifyTheme.radiusMd,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -243,7 +243,7 @@ class _EqualizerPageState extends State<EqualizerPage> {
                       title: const Text('Enable equalizer'),
                       subtitle: const Text(
                         'Connected to the current player session',
-                        style: TextStyle(color: SaxifyColors.textMuted, fontSize: 12),
+                        style: TextStyle(color: IfallTokens.textMuted, fontSize: 12),
                       ),
                       value: _enabled,
                       onChanged: (bool v) async {
@@ -365,7 +365,7 @@ class _BandSlider extends StatelessWidget {
                   _label,
                   style: const TextStyle(
                     fontSize: 12.5,
-                    color: SaxifyColors.textSecondary,
+                    color: IfallTokens.textSecondary,
                   ),
                 ),
               ),
