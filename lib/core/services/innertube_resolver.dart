@@ -192,6 +192,7 @@ class InnertubeResolver {
     bool preferDownload = false,
     bool validate = true,
     Set<String> skipClients = const <String>{},
+    int? maxBitrateKbps,
   }) async {
     final List<String> failures = <String>[];
     for (final _InnertubeClient client in _clients) {
@@ -238,6 +239,7 @@ class InnertubeResolver {
           json,
           client.clientName,
           preferDownload: preferDownload,
+          maxBitrateKbps: preferDownload ? null : maxBitrateKbps,
         );
         int probed = 0;
         for (final InnertubeResolvedStream stream in candidates) {
