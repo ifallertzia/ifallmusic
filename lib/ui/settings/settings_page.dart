@@ -37,40 +37,42 @@ import 'update_dialog.dart';
 import '../../core/theme/glass.dart';
 import '../widgets/neon.dart';
 
-/// One-line text prompt shared by the account pages. Kept at file scope so
-/// Last.fm, ListenBrainz, Spotify and Discord can all reach it.
+/// One-line text prompt shared by the account pages.
+///
+/// Kept at file scope so Last.fm, ListenBrainz, Spotify and Discord can all
+/// reach it — a private method on one page is invisible to the others.
 Future<String?> _prompt(
-    BuildContext context, {
-    required String title,
-    required String initial,
-    bool obscure = false,
-    String? hint,
-  }) {
-    final TextEditingController controller =
-        TextEditingController(text: initial);
-    return showDialog<String>(
-      context: context,
-      builder: (BuildContext dialogContext) => AlertDialog(
-        title: Text(title),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          obscureText: obscure,
-          decoration: InputDecoration(hintText: hint ?? title),
-          onSubmitted: (String v) => Navigator.of(dialogContext).pop(v),
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(controller.text),
-            child: const Text('Save'),
-          ),
-        ],
+  BuildContext context, {
+  required String title,
+  required String initial,
+  bool obscure = false,
+  String? hint,
+}) {
+  final TextEditingController controller = TextEditingController(text: initial);
+  return showDialog<String>(
+    context: context,
+    builder: (BuildContext dialogContext) => AlertDialog(
+      title: Text(title),
+      content: TextField(
+        controller: controller,
+        autofocus: true,
+        obscureText: obscure,
+        decoration: InputDecoration(hintText: hint ?? title),
+        onSubmitted: (String v) => Navigator.of(dialogContext).pop(v),
       ),
-    );
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(),
+          child: const Text('Cancel'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(controller.text),
+          child: const Text('Save'),
+        ),
+      ],
+    ),
+  );
+}
 
 /// The language choices offered in Settings. `system` follows the phone.
 const List<(String, String)> appLanguages = <(String, String)>[
@@ -1206,7 +1208,6 @@ class AccountsSettingsPage extends StatelessWidget {
     );
   }
 
-  }
 }
 
 // ------------------------------------------------------------------- discord
