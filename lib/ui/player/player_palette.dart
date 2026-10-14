@@ -166,39 +166,185 @@ class MeshPaletteService {
   }
 }
 
-/// The mesh itself: four blurred blobs at the corners over [MeshPalette.base],
-/// crossfading when the track changes. In Flutter the "blur" is a radial
-/// gradient per blob, which reads the same and costs no backdrop filter.
+/// The Now Playing background: the same artwork sampling as [MeshPalette],
+/// taken in the opposite direction. Where the mesh lit four corners, this
+/// keeps one deep, quiet colour — the sleeve's own hue pinned to a lightness
+/// where white type stays readable — plus a single gentle grade for depth.
+///
+/// It is derived once per sleeve, from the palette that is already cached for
+/// it, so a progress tick never costs a decode and a track change never costs
+/// a re-sample.
+@immutable
+class PlayerBackdrop {
+  const PlayerBackdrop({
+    required this.base,
+    required this.wash,
+    required this.tint,
+    required this.veil,
+  });
+
+  /// The screen's colour: the artwork's average hue, kept dark and desaturated
+  /// enough that a bright sleeve never turns into a glow.
+  final Color base;
+
+  /// The top of the screen, a shade off [base]. This is the only grading the
+  /// background is allowed.
+  final Color wash;
+
+  /// The sleeve's most luminous corner, at a whisper of alpha, drifting in
+  /// from the top-left. Colour variation for depth — never a spotlight.
+  final Color tint;
+
+  /// The shade the controls sit on, so the lower third stays stable whatever
+  /// the artwork is.
+  final Color veil;
+
+  /// Monochrome, missing or unreadable artwork lands here: graphite.
+  static const PlayerBackdrop fallback = PlayerBackdrop(
+    base: Color(0xFF121215),
+    wash: Color(0xFF191A1E),
+    tint: Color(0x0DFFFFFF),
+    veil: Color(0x58000000),
+  );
+
+  /// Turns a sampled sleeve into a background.
+  ///
+  /// The hue is whatever the artwork actually is — yellow-green sleeves come
+  /// out a deep muted olive, blues a navy-slate, reds a burgundy, purples a
+  /// plum, oranges a burnt amber — and only two things are decided by rule:
+  ///
+  ///  * **saturation** is cut to at most a third (and floored just above zero,
+  ///    so a grey cover still reads as its own grey), which is what stops a
+  ///    neon-yellow cover from painting a yellow screen;
+  ///  * **lightness** is pinned inside a narrow band under 0.17, which keeps
+  ///    white text at roughly 5:1 contrast on every hue, bright or dark.
+  ///
+  /// [tint] picks the brightest quadrant of the sleeve at 12% alpha, and [veil]
+  /// is the same hue taken almost black — a scrim, not a glow.
+  factory PlayerBackdrop.of(MeshPalette palette) {
+    // A palette can only ever come back with four colours, but a caller that
+    // built one by hand may not have: fall back rather than index into nothing.
+    final List<Color> sampled =
+        palette.colors.isEmpty ? MeshPalette.fallback.colors : palette.colors;
+    final HSLColor hue = HSLColor.fromColor(_averageOf(sampled));
+    final HSLColor base = hue
+        .withSaturation(hue.saturation.clamp(0.05, 0.34))
+        .withLightness((0.050 + hue.lightness * 0.105).clamp(0.045, 0.165));
+    final HSLColor wash = base
+        .withLightness((base.lightness + 0.05).clamp(0.0, 0.24))
+        .withSaturation((base.saturation * 0.85).clamp(0.0, 0.34));
+    Color hot = sampled.first;
+    for (final Color c in sampled) {
+      if (c.computeLuminance() > hot.computeLuminance()) hot = c;
+    }
+    final Color tint = HSLColor.fromColor(hot)
+        .withSaturation(hot.computeLuminance() > 0.7 ? 0.35 : 0.55)
+        .withLightness(0.66)
+        .toColor()
+        .withValues(alpha: 0.12);
+    return PlayerBackdrop(
+      base: base.toColor(),
+      wash: wash.toColor(),
+      tint: tint,
+      veil: base
+          .withLightness(base.lightness * 0.35)
+          .toColor()
+          .withValues(alpha: 0.42),
+    );
+  }
+
+  /// Channel average of the quadrant colours — the sleeve's overall hue,
+  /// without a second pass over the pixels.
+  static Color _averageOf(List<Color> colors) {
+    if (colors.isEmpty) return MeshPalette.fallback.base;
+    double r = 0, g = 0, b = 0;
+    for (final Color c in colors) {
+      r += c.r;
+      g += c.g;
+      b += c.b;
+    }
+    final int n = colors.length;
+    return Color.from(
+      alpha: 1.0,
+      red: (r / n).clamp(0.0, 1.0),
+      green: (g / n).clamp(0.0, 1.0),
+      blue: (b / n).clamp(0.0, 1.0),
+    );
+  }
+
+  static PlayerBackdrop lerp(
+    PlayerBackdrop a,
+    PlayerBackdrop b,
+    double t,
+  ) =>
+      PlayerBackdrop(
+        base: Color.lerp(a.base, b.base, t)!,
+        wash: Color.lerp(a.wash, b.wash, t)!,
+        tint: Color.lerp(a.tint, b.tint, t)!,
+        veil: Color.lerp(a.veil, b.veil, t)!,
+      );
+
+  @override
+  String toString() => 'PlayerBackdrop(${base.toARGB32()}, ${wash.toARGB32()})';
+}
+
+/// The background itself: one deep colour, one gentle top-to-bottom grade and
+/// a low-alpha corner wash. Deliberately **no** blurred blobs, no circle
+/// behind the artwork and no lit spot at the bottom of the screen — the four
+/// quadrant blobs this class used to paint are what made every sleeve look
+/// like a yellow spotlight.
 class MeshBackdrop extends StatelessWidget {
   const MeshBackdrop({
     super.key,
-    required this.palette,
+    required this.backdrop,
     this.scrim = true,
   });
 
-  final MeshPalette palette;
+  final PlayerBackdrop backdrop;
   final bool scrim;
 
   @override
   Widget build(BuildContext context) {
-    final List<Color> c = palette.colors;
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 800),
-      color: palette.base,
+    final PlayerBackdrop b = backdrop;
+    return DecoratedBox(
+      decoration: BoxDecoration(color: b.base),
       child: Stack(
         fit: StackFit.expand,
         children: <Widget>[
-          _blob(c[0], const Alignment(-0.75, -0.8)),
-          _blob(c[1], const Alignment(0.85, -0.7)),
-          _blob(c[2], const Alignment(0.7, 0.85)),
-          _blob(c[3], const Alignment(-0.85, 0.75)),
+          // Depth, quietly: the top third lifts by a few percent of lightness
+          // and then the screen holds one colour all the way down.
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: <Color>[b.wash, b.base, b.base],
+                stops: const <double>[0, 0.42, 1],
+              ),
+            ),
+          ),
+          // The sleeve's own colour, graded in from the top-left at 12%. A
+          // diagonal wash, not a radial glow: it can never read as a circle.
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: const Alignment(0.35, 0.85),
+                colors: <Color>[b.tint, b.tint.withValues(alpha: 0)],
+              ),
+            ),
+          ),
           if (scrim)
-            const DecoratedBox(
+            DecoratedBox(
+              // The lower half stays stable — the same hue, almost black — so
+              // the controls, the volume slider and the EQ never sit on top of
+              // the artwork's brightest colour.
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
-                  colors: <Color>[Color(0x1A000000), Color(0x61000000)],
+                  colors: <Color>[Colors.transparent, b.veil],
+                  stops: const <double>[0.42, 1],
                 ),
               ),
             ),
@@ -206,49 +352,43 @@ class MeshBackdrop extends StatelessWidget {
       ),
     );
   }
-
-  Widget _blob(Color color, Alignment alignment) {
-    return Align(
-      alignment: alignment,
-      child: Container(
-        width: 340,
-        height: 340,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          gradient: RadialGradient(
-            colors: <Color>[
-              color.withValues(alpha: 0.85),
-              color.withValues(alpha: 0),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
 }
 
-/// Resolves the palette for [artworkUrl] (or a neutral mesh when artwork
-/// tinting — "Colour from artwork" — is off, exactly like the web app).
+/// Resolves the palette for [artworkUrl] (or a neutral graphite backdrop when
+/// artwork tinting — "Colour from artwork" — is off, exactly like the web app)
+/// and cross-fades the screen colour when the track changes: the previous
+/// backdrop is handed to the new one as its starting point, so interrupting a
+/// fade mid-flight bends it towards the next colour instead of flashing.
 class MeshBackdropFor extends StatefulWidget {
   const MeshBackdropFor({
     super.key,
     required this.artworkUrl,
     required this.dynamicColor,
     this.scrim = true,
+    this.reduceMotion = false,
   });
 
   final String artworkUrl;
   final bool dynamicColor;
   final bool scrim;
 
+  /// "Reduce motion" jumps between colours instead of fading.
+  final bool reduceMotion;
+
   @override
   State<MeshBackdropFor> createState() => _MeshBackdropForState();
 }
 
-class _MeshBackdropForState extends State<MeshBackdropFor> {
-  MeshPalette _palette = MeshPalette.fallback;
+class _MeshBackdropForState extends State<MeshBackdropFor>
+    with SingleTickerProviderStateMixin {
+  static const Duration _fadeTime = Duration(milliseconds: 850);
+
+  PlayerBackdrop _from = PlayerBackdrop.fallback;
+  PlayerBackdrop _to = PlayerBackdrop.fallback;
   String _url = '';
   bool _dynamic = true;
+
+  late final AnimationController _fade;
 
   /// Monotonic token: a slower extraction for a previous sleeve must never
   /// overwrite the palette of the song that is playing now.
@@ -257,6 +397,7 @@ class _MeshBackdropForState extends State<MeshBackdropFor> {
   @override
   void initState() {
     super.initState();
+    _fade = AnimationController(vsync: this, duration: _fadeTime, value: 1);
     _sync();
   }
 
@@ -269,21 +410,51 @@ class _MeshBackdropForState extends State<MeshBackdropFor> {
     }
   }
 
+  @override
+  void dispose() {
+    _fade.dispose();
+    super.dispose();
+  }
+
   void _sync() {
     _url = widget.artworkUrl;
     _dynamic = widget.dynamicColor;
     final int generation = ++_generation;
     if (!widget.dynamicColor ||
         ArtworkCache.isPlaceholder(widget.artworkUrl)) {
-      _palette = MeshPalette.fallback;
+      _apply(MeshPalette.fallback);
       return;
     }
     final MeshPalette? hit = MeshPaletteService.cached(widget.artworkUrl);
-    if (hit != null) _palette = hit;
+    if (hit != null) _apply(hit);
     MeshPaletteService.extract(widget.artworkUrl).then((MeshPalette p) {
       if (!mounted || generation != _generation) return;
-      setState(() => _palette = p);
+      setState(() => _apply(p));
     });
+  }
+
+  /// One sampled sleeve in, one screen colour out — and the fade only starts
+  /// if the colour actually differs, so re-opening the same track is free.
+  void _apply(MeshPalette palette) {
+    final PlayerBackdrop next = widget.dynamicColor
+        ? PlayerBackdrop.of(palette)
+        : PlayerBackdrop.fallback;
+    if (next.base == _to.base &&
+        next.wash == _to.wash &&
+        next.tint == _to.tint) {
+      return;
+    }
+    // Start the new fade from wherever the old one currently is, so a fast
+    // double-skip never snaps through a colour it was still leaving.
+    _from = PlayerBackdrop.lerp(_from, _to, _fade.value);
+    _to = next;
+    if (widget.reduceMotion) {
+      _from = next;
+      if (_fade.isAnimating) _fade.stop();
+      _fade.value = 1;
+      return;
+    }
+    _fade.forward(from: 0);
   }
 
   @override
@@ -296,6 +467,18 @@ class _MeshBackdropForState extends State<MeshBackdropFor> {
         if (mounted) _sync();
       });
     }
-    return MeshBackdrop(palette: _palette, scrim: widget.scrim);
+    return RepaintBoundary(
+      child: AnimatedBuilder(
+        animation: _fade,
+        builder: (BuildContext context, Widget? _) => MeshBackdrop(
+          backdrop: PlayerBackdrop.lerp(
+            _from,
+            _to,
+            Curves.easeOutCubic.transform(_fade.value.clamp(0.0, 1.0)),
+          ),
+          scrim: widget.scrim,
+        ),
+      ),
+    );
   }
 }
