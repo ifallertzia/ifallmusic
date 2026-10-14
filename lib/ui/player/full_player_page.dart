@@ -19,8 +19,12 @@ import 'player_palette.dart';
 import 'player_sheets.dart';
 
 /// Now Playing — full screen, over everything (the web app's `NowPlaying`).
-/// The artwork's own colours make the backdrop; the artwork eases down when
-/// paused; lyrics and the queue take the artwork's place.
+///
+/// The composition is deliberately quiet: the sleeve, the track's name, one
+/// thin timeline, and the transport. The screen's colour is the artwork's own
+/// hue taken deep and desaturated ([PlayerBackdrop]) — no blurred glow behind
+/// the cover and no lit spot under the controls. Lyrics and the queue take the
+/// artwork's place, so nothing below the header has to move when they open.
 class FullPlayerPage extends StatefulWidget {
   const FullPlayerPage({super.key});
 
@@ -40,11 +44,14 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
     final SettingsService settings = context.watch<SettingsService>();
     final Song? song = playback.current;
     if (song == null) {
-      return const Scaffold(backgroundColor: Colors.black, body: SizedBox.shrink());
+      return const Scaffold(
+          backgroundColor: Colors.black, body: SizedBox.shrink());
     }
     final bool reduce = settings.reduceMotion;
 
     return Scaffold(
+      // The backdrop paints over this; black keeps the first frame honest
+      // before the sleeve's colours have been sampled.
       backgroundColor: Colors.black,
       body: Stack(
         fit: StackFit.expand,
@@ -52,6 +59,7 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
           MeshBackdropFor(
             artworkUrl: song.thumbnailUrl,
             dynamicColor: settings.dynamicColor,
+            reduceMotion: reduce,
           ),
           SafeArea(
             child: Column(
@@ -167,6 +175,8 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
     );
   }
 
+  /// The sleeve, square, on its own. One controlled shadow for separation —
+  /// no halo, no blurred copy, nothing behind it but the screen colour.
   Widget _artwork(
     BuildContext context,
     Song song,
@@ -175,25 +185,31 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
   ) {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 12),
-        child: AnimatedScale(
-          scale: playback.isPlaying || reduce ? 1 : 0.88,
-          duration: const Duration(milliseconds: 500),
-          curve: Curves.easeOut,
-          child: AspectRatio(
-            aspectRatio: 1,
-            child: Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: <BoxShadow>[
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.65),
-                    blurRadius: 50,
-                    offset: const Offset(0, 24),
-                  ),
-                ],
+        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+        child: ConstrainedBox(
+          // The same responsive rule as before — the sleeve takes the width it
+          // is given — with a ceiling so a tablet does not get a wall of art.
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: AnimatedScale(
+            scale: playback.isPlaying || reduce ? 1 : 0.9,
+            duration: const Duration(milliseconds: 500),
+            curve: Curves.easeOut,
+            child: AspectRatio(
+              aspectRatio: 1,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: <BoxShadow>[
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.42),
+                      blurRadius: 30,
+                      spreadRadius: -8,
+                      offset: const Offset(0, 16),
+                    ),
+                  ],
+                ),
+                child: Artwork(url: song.thumbnailUrl, radius: 14),
               ),
-              child: Artwork(url: song.thumbnailUrl, radius: 12),
             ),
           ),
         ),
@@ -208,7 +224,7 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
       padding: const EdgeInsets.fromLTRB(26, 10, 26, 4),
       child: Row(
         children: <Widget>[
-          Artwork(url: song.thumbnailUrl, size: 56, radius: 8),
+          Artwork(url: song.thumbnailUrl, size: 56, radius: 10),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -236,37 +252,32 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
               ],
             ),
           ),
-          _likeCircle(liked, () => library.toggleLike(song)),
+          _iconAction(
+            liked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+            liked ? 'Liked' : 'Like',
+            () => library.toggleLike(song),
+            color: liked ? Colors.white : Colors.white.withValues(alpha: 0.72),
+          ),
         ],
       ),
     );
   }
 
-  Widget _likeCircle(bool liked, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 34,
-        height: 34,
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: liked ? 0.34 : 0.18),
-          shape: BoxShape.circle,
-        ),
-        child: Icon(
-          liked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-          size: 17,
-          color: Colors.white,
-        ),
-      ),
-    );
-  }
-
+  /// Track title, artist and the two actions that belong to the track itself.
+  /// Plain icons rather than filled circles: the row is part of the screen's
+  /// typography, not a toolbar of buttons.
   Widget _titleRow(BuildContext context, Song song) {
     final LibraryService library = context.watch<LibraryService>();
+    final MusicDownloadService downloads = context.watch<MusicDownloadService>();
     final bool liked = library.isLiked(song.id);
+    final bool offline = downloads.isDownloaded(song.id);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(30, 12, 30, 0),
+      // 28 on the left lines the title up with the timeline and the volume
+      // slider; 18 on the right is what leaves the two bare icons the same
+      // 28px of air once their own 44px hit boxes are counted.
+      padding: const EdgeInsets.fromLTRB(28, 10, 18, 0),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: <Widget>[
           Expanded(
             child: Column(
@@ -275,148 +286,141 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
                 Text(
                   song.title,
                   maxLines: 1,
+                  softWrap: false,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    fontSize: 21,
-                    height: 1.15,
+                    fontSize: 20,
+                    height: 1.2,
                     fontWeight: FontWeight.w700,
                     letterSpacing: -0.3,
                     color: Colors.white,
                   ),
                 ),
-                GestureDetector(
-                  onTap: () {
-                    Navigator.of(context).pop();
-                    Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => ArtistPage(
-                          name: song.artist,
-                          channelId: song.channelId ?? song.artistId,
+                const SizedBox(height: 3),
+                Row(
+                  children: <Widget>[
+                    Flexible(
+                      child: GestureDetector(
+                        onTap: () {
+                          Navigator.of(context).pop();
+                          Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => ArtistPage(
+                                name: song.artist,
+                                channelId: song.channelId ?? song.artistId,
+                              ),
+                              settings:
+                                  const RouteSettings(name: SidifyRoutes.artist),
+                            ),
+                          );
+                        },
+                        child: Text(
+                          song.artist,
+                          maxLines: 1,
+                          softWrap: false,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 15.5,
+                            height: 1.2,
+                            color: Colors.white.withValues(alpha: 0.62),
+                          ),
                         ),
-                        settings: const RouteSettings(name: SidifyRoutes.artist),
                       ),
-                    );
-                  },
-                  child: Text(
-                    song.artist,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 18,
-                      height: 1.15,
-                      color: Colors.white.withValues(alpha: 0.6),
                     ),
-                  ),
+                    // The offline marker the timeline used to carry, kept as a
+                    // quiet word next to the name instead of a label under the
+                    // progress line.
+                    if (offline)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 8),
+                        child: Text(
+                          'OFFLINE',
+                          style: TextStyle(
+                            fontSize: 9.5,
+                            height: 1,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.06,
+                            color: Colors.white.withValues(alpha: 0.42),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               ],
             ),
           ),
-          const SizedBox(width: 8),
-          _likeCircle(liked, () => library.toggleLike(song)),
-          const SizedBox(width: 8),
-          GestureDetector(
-            onTap: () => showSongMenu(context, song),
-            child: Container(
-              width: 34,
-              height: 34,
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.18),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.more_horiz_rounded, size: 18, color: Colors.white),
-            ),
+          _iconAction(
+            liked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+            liked ? 'Liked' : 'Like',
+            () => library.toggleLike(song),
+            color: liked ? Colors.white : Colors.white.withValues(alpha: 0.78),
+          ),
+          _iconAction(
+            Icons.more_horiz_rounded,
+            'More',
+            () => showSongMenu(context, song),
           ),
         ],
       ),
     );
   }
 
-  Widget _scrubber(BuildContext context, Song song, PlaybackService playback) {
-    final MusicDownloadService downloads =
-        context.watch<MusicDownloadService>();
-    final bool downloaded = downloads.isDownloaded(song.id);
+  /// The playback timeline. Kept as thin as the reference and as functional as
+  /// the player it belongs to: [playback.positionStream] drives the fill, and
+  /// every tap or drag hands a fraction straight to [PlaybackService.seekTo].
+  /// The visible line is 2px; the gesture band around it is 26px, so it stays
+  /// easy to hit without turning into a card.
+  Widget _scrubber(
+    BuildContext context,
+    Song song,
+    PlaybackService playback,
+  ) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(30, 10, 30, 0),
-      child: StreamBuilder<Duration>(
-        stream: playback.positionStream,
-        initialData: playback.position,
-        builder: (BuildContext context, AsyncSnapshot<Duration> snap) {
-          final Duration pos = snap.data ?? playback.position;
-          final Duration dur = playback.duration.inMilliseconds > 0
-              ? playback.duration
-              : (song.duration ?? Duration.zero);
-          final double max = dur.inMilliseconds.toDouble();
-          return Column(
-            children: <Widget>[
-              _SidifySlider(
-                value: max > 0
-                    ? (pos.inMilliseconds / max).clamp(0.0, 1.0)
-                    : 0,
-                onSeek: (double f) =>
-                    playback.seekTo(Duration(milliseconds: (max * f).round())),
-              ),
-              Row(
-                children: <Widget>[
-                  SizedBox(
-                    width: 56,
-                    child: Text(Fmt.duration(pos), style: _timeStyle),
-                  ),
-                  Expanded(
-                    child: Text(
-                      downloaded ? 'OFFLINE' : 'SIDIFY',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 0.06,
-                        color: Colors.white.withValues(alpha: 0.6),
-                      ),
-                    ),
-                  ),
-                  SizedBox(
-                    width: 56,
-                    child: Text(
-                      '-${Fmt.duration(dur - pos)}',
-                      textAlign: TextAlign.right,
-                      style: _timeStyle,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          );
-        },
-      ),
+      padding: const EdgeInsets.fromLTRB(28, 8, 28, 0),
+      child: _Timeline(song: song, playback: playback),
     );
   }
 
-  static final TextStyle _timeStyle = TextStyle(
-    fontSize: 12,
-    fontWeight: FontWeight.w500,
-    color: Colors.white.withValues(alpha: 0.55),
-    fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
-  );
-
+  /// Transport: shuffle · previous · play · next · repeat. The primaries carry
+  /// the weight by size alone — no filled circles behind them.
   Widget _transport(BuildContext context, PlaybackService playback) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 6),
+      padding: const EdgeInsets.fromLTRB(22, 2, 22, 0),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: <Widget>[
+          _modeBtn(
+            Icons.shuffle_rounded,
+            'Shuffle',
+            playback.shuffleEnabled,
+            () => playback.toggleShuffle(),
+          ),
           _transportBtn(
             Icons.skip_previous_rounded,
-            42,
-            60,
+            34,
+            56,
             () => playback.previous(),
           ),
           _transportBtn(
-            playback.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-            58,
-            76,
+            playback.isPlaying
+                ? Icons.pause_rounded
+                : Icons.play_arrow_rounded,
+            52,
+            72,
             () => playback.togglePlayPause(),
             loading: playback.isLoading,
+            primary: true,
           ),
-          _transportBtn(Icons.skip_next_rounded, 42, 60, () => playback.next()),
+          _transportBtn(Icons.skip_next_rounded, 34, 56, () => playback.next()),
+          _modeBtn(
+            playback.loopMode == LoopMode.one
+                ? Icons.repeat_one_rounded
+                : Icons.repeat_rounded,
+            'Repeat',
+            playback.loopMode != LoopMode.off,
+            () => playback.cycleLoopMode(),
+          ),
         ],
       ),
     );
@@ -428,35 +432,95 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
     double box,
     VoidCallback onTap, {
     bool loading = false,
+    bool primary = false,
   }) {
     return GestureDetector(
       onTap: onTap,
-      child: Container(
+      // The whole 56 / 72px cell answers, not just the glyph inside it.
+      behavior: HitTestBehavior.opaque,
+      child: SizedBox(
         width: box,
-        height: box,
-        alignment: Alignment.center,
-        child: loading
-            ? const SizedBox(
-                width: 26,
-                height: 26,
-                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
-              )
-            : Icon(icon, size: iconSize, color: Colors.white),
+        height: 64,
+        child: Center(
+          child: loading
+              ? SizedBox(
+                  width: primary ? 30 : 24,
+                  height: primary ? 30 : 24,
+                  child: const CircularProgressIndicator(
+                    color: Colors.white,
+                    strokeWidth: 2.4,
+                  ),
+                )
+              : Icon(
+                  icon,
+                  size: iconSize,
+                  // The play button is the loudest thing in the row; the rest
+                  // sit a step back so the eye lands on it first.
+                  color: primary
+                      ? Colors.white
+                      : Colors.white.withValues(alpha: 0.88),
+                ),
+        ),
+      ),
+    );
+  }
+
+  /// A mode toggle next to the transport: the icon, and a dot when it is on.
+  Widget _modeBtn(
+    IconData icon,
+    String label,
+    bool on,
+    VoidCallback onTap,
+  ) {
+    return Semantics(
+      label: label,
+      selected: on,
+      button: true,
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: SizedBox(
+          width: 56,
+          height: 64,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: <Widget>[
+              Icon(
+                icon,
+                size: 21,
+                color: on
+                    ? Colors.white
+                    : Colors.white.withValues(alpha: 0.55),
+              ),
+              const SizedBox(height: 4),
+              Container(
+                width: 4,
+                height: 4,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: on
+                      ? Colors.white
+                      : Colors.white.withValues(alpha: 0.001),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
 
   Widget _volumeRow(BuildContext context, PlaybackService playback) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(30, 2, 30, 0),
+      padding: const EdgeInsets.fromLTRB(28, 6, 28, 0),
       child: Row(
         children: <Widget>[
           Icon(
             playback.volume == 0
                 ? Icons.volume_off_rounded
                 : Icons.volume_down_rounded,
-            size: 16,
-            color: Colors.white.withValues(alpha: 0.55),
+            size: 15,
+            color: Colors.white.withValues(alpha: 0.5),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -469,23 +533,28 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
           const SizedBox(width: 10),
           Icon(
             Icons.volume_up_rounded,
-            size: 16,
-            color: Colors.white.withValues(alpha: 0.55),
+            size: 15,
+            color: Colors.white.withValues(alpha: 0.5),
           ),
         ],
       ),
     );
   }
 
-  Widget _bottomRow(BuildContext context, Song song, PlaybackService playback) {
+  /// The secondary row: the sound panel on the left (speed, sleep, crossfade
+  /// and the equalizer live behind it), lyrics / download in the capsule, the
+  /// queue on the right. Same taps as ever, quieter surfaces.
+  Widget _bottomRow(
+    BuildContext context,
+    Song song,
+    PlaybackService playback,
+  ) {
     final bool isQueue = _view == 'queue';
     return Padding(
-      padding: const EdgeInsets.fromLTRB(30, 12, 30, 0),
+      padding: const EdgeInsets.fromLTRB(22, 10, 22, 0),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: <Widget>[
-          // Left: the playback panel (was the lyrics toggle) — swapped as
-          // asked so playback opens from here and lyrics lives in the capsule.
           _glyphToggle(
             Icons.spatial_audio_rounded,
             'Playback',
@@ -493,11 +562,15 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
             () => showPlaybackSheet(context),
           ),
           Container(
-            height: 44,
+            height: 40,
             padding: const EdgeInsets.symmetric(horizontal: 4),
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.12),
+              color: Colors.white.withValues(alpha: 0.09),
               borderRadius: BorderRadius.circular(999),
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.10),
+                width: 0.7,
+              ),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -523,9 +596,7 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
                         Icons.all_inclusive_rounded,
                         'AutoPlay',
                         context.watch<SettingsService>().autoplay,
-                        () => context
-                            .read<SettingsService>()
-                            .setAutoplay(
+                        () => context.read<SettingsService>().setAutoplay(
                               !context.read<SettingsService>().autoplay,
                             ),
                       ),
@@ -554,25 +625,39 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
     );
   }
 
+  /// A secondary action: a soft rounded pane that lights up only when it is on
+  /// or pressed — enough to read as glass, not enough to compete with the
+  /// transport above it.
   Widget _glyphToggle(
     IconData icon,
     String label,
     bool on,
     VoidCallback onTap,
   ) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 44,
-        height: 44,
-        decoration: BoxDecoration(
-          color: on ? Colors.white : Colors.transparent,
-          shape: BoxShape.circle,
-        ),
-        child: Icon(
-          icon,
-          size: 22,
-          color: on ? Colors.black : Colors.white.withValues(alpha: 0.85),
+    return Semantics(
+      label: label,
+      selected: on,
+      button: true,
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: on ? 0.94 : 0.07),
+            borderRadius: BorderRadius.circular(15),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: on ? 0 : 0.10),
+              width: 0.7,
+            ),
+          ),
+          child: Icon(
+            icon,
+            size: 21,
+            color: on ? Colors.black : Colors.white.withValues(alpha: 0.85),
+          ),
         ),
       ),
     );
@@ -588,7 +673,7 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        height: 36,
+        height: 32,
         constraints: BoxConstraints(minWidth: wide ? 44 : 44),
         padding: const EdgeInsets.symmetric(horizontal: 12),
         decoration: BoxDecoration(
@@ -611,9 +696,9 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
 
   Widget _capsuleDivider() => Container(
         width: 1,
-        height: 20,
+        height: 18,
         margin: const EdgeInsets.symmetric(horizontal: 2),
-        color: Colors.white.withValues(alpha: 0.15),
+        color: Colors.white.withValues(alpha: 0.14),
       );
 
   Widget _upNext(BuildContext context, PlaybackService playback) {
@@ -622,21 +707,21 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
     return GestureDetector(
       onTap: () => setState(() => _view = 'queue'),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(30, 10, 30, 0),
+        padding: const EdgeInsets.fromLTRB(28, 8, 28, 0),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
             Text(
               'UP NEXT',
               style: TextStyle(
-                fontSize: 11,
+                fontSize: 10.5,
                 fontWeight: FontWeight.w600,
                 letterSpacing: 0.06,
-                color: Colors.white.withValues(alpha: 0.45),
+                color: Colors.white.withValues(alpha: 0.42),
               ),
             ),
             const SizedBox(width: 8),
-            Artwork(url: next.thumbnailUrl, size: 20, radius: 4),
+            Artwork(url: next.thumbnailUrl, size: 20, radius: 5),
             const SizedBox(width: 6),
             Flexible(
               child: Text(
@@ -664,15 +749,288 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
   }) {
     return GestureDetector(
       onTap: onTap,
+      behavior: HitTestBehavior.opaque,
       child: Container(
         width: size,
         height: size,
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.18),
+          color: Colors.white.withValues(alpha: 0.14),
           shape: BoxShape.circle,
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.10),
+            width: 0.7,
+          ),
         ),
         child: Icon(icon, size: iconSize, color: Colors.white),
       ),
+    );
+  }
+
+  /// A bare icon action — the shape the track's own buttons take, so the row
+  /// they live in reads as typography with two affordances rather than a
+  /// strip of chips.
+  Widget _iconAction(
+    IconData icon,
+    String label,
+    VoidCallback onTap, {
+    Color? color,
+  }) {
+    return Semantics(
+      label: label,
+      button: true,
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: SizedBox(
+          width: 44,
+          height: 44,
+          child: Center(
+            child: Icon(icon, size: 21, color: color ?? Colors.white),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The timeline: a 2px hairline, a thumb that only exists while it is being
+/// held, and elapsed / remaining under it. The drag position is owned here
+/// rather than by the page, so scrubbing repaints this row alone and never
+/// rebuilds the artwork, the backdrop or the controls.
+class _Timeline extends StatefulWidget {
+  const _Timeline({required this.song, required this.playback});
+
+  final Song song;
+  final PlaybackService playback;
+
+  @override
+  State<_Timeline> createState() => _TimelineState();
+}
+
+class _TimelineState extends State<_Timeline> {
+  double? _drag;
+
+  static const TextStyle _time = TextStyle(
+    fontSize: 11.5,
+    height: 1.1,
+    fontWeight: FontWeight.w500,
+    color: Color(0x9AFFFFFF),
+    fontFeatures: <FontFeature>[FontFeature.tabularFigures()],
+  );
+
+  Duration get _duration {
+    final Duration d = widget.playback.duration;
+    return d.inMilliseconds > 0 ? d : (widget.song.duration ?? Duration.zero);
+  }
+
+  void _begin(double width, double dx) {
+    // Nothing to scrub into while the length is still unknown — a tap must not
+    // turn into "back to the start" while the stream is being resolved.
+    if (_duration.inMilliseconds <= 0) return;
+    setState(() => _drag = (dx / width).clamp(0.0, 1.0));
+  }
+
+  void _end(bool commit) {
+    final double? f = _drag;
+    if (f == null) return;
+    setState(() => _drag = null);
+    if (!commit) return;
+    final int ms = (_duration.inMilliseconds * f).round();
+    widget.playback.seekTo(Duration(milliseconds: ms));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final Duration dur = _duration;
+    final int durMs = dur.inMilliseconds;
+    return StreamBuilder<Duration>(
+      stream: widget.playback.positionStream,
+      initialData: widget.playback.position,
+      builder: (BuildContext context, AsyncSnapshot<Duration> snap) {
+        final Duration pos = snap.data ?? widget.playback.position;
+        final double shown = _drag ??
+            (durMs > 0 ? (pos.inMilliseconds / durMs).clamp(0.0, 1.0) : 0.0);
+        final Duration shownAt = durMs > 0
+            ? Duration(milliseconds: (durMs * shown).round())
+            : Duration.zero;
+        final bool held = _drag != null;
+        return Column(
+          children: <Widget>[
+            LayoutBuilder(
+              builder: (BuildContext context, BoxConstraints box) {
+                final double w = box.maxWidth;
+                return GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTapDown: (TapDownDetails d) {
+                    _begin(w, d.localPosition.dx);
+                    _end(true);
+                  },
+                  onHorizontalDragStart: (DragStartDetails d) =>
+                      _begin(w, d.localPosition.dx),
+                  onHorizontalDragUpdate: (DragUpdateDetails d) =>
+                      _begin(w, d.localPosition.dx),
+                  onHorizontalDragEnd: (DragEndDetails _) => _end(true),
+                  onHorizontalDragCancel: () => _end(false),
+                  // The painted line is 2px; this band is what the finger
+                  // actually hits, so a thin timeline is still easy to grab.
+                  child: SizedBox(
+                    height: 26,
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: <Widget>[
+                        // The unplayed rail, the full width of the line. While
+                        // the duration is still unknown it breathes instead of
+                        // lying flat about a position nobody has yet.
+                        if (durMs > 0)
+                          Container(
+                            height: 2,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.22),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                          )
+                        else
+                          const SizedBox(
+                            height: 2,
+                            child: LinearProgressIndicator(
+                              minHeight: 2,
+                              backgroundColor: Color(0x38FFFFFF),
+                              color: Color(0xBFFFFFFF),
+                            ),
+                          ),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: SizedBox(
+                            height: 2,
+                            width: (w * shown).clamp(0.0, w),
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: held
+                                    ? Colors.white
+                                    : Colors.white.withValues(alpha: 0.92),
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                            ),
+                          ),
+                        ),
+                        // The thumb: 9px, and it fades in only while held. The
+                        // Stack centers it, so the travel is measured from the
+                        // middle of the row.
+                        AnimatedOpacity(
+                          opacity: held ? 1 : 0,
+                          duration: const Duration(milliseconds: 120),
+                          child: Transform.translate(
+                            offset: Offset(
+                              (w * shown).clamp(0.0, w) - w / 2,
+                              0,
+                            ),
+                            child: Container(
+                              width: 9,
+                              height: 9,
+                              decoration: const BoxDecoration(
+                                color: Colors.white,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+            Row(
+              children: <Widget>[
+                Text(Fmt.duration(shownAt), style: _time),
+                const Spacer(),
+                if (durMs > 0)
+                  Text('-${Fmt.duration(dur - shownAt)}', style: _time)
+                else
+                  Text('--:--', style: _time),
+              ],
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// The player's volume slider: the same thin hairline as the timeline, no
+/// thumb — it is a level, not a position.
+class _SidifySlider extends StatefulWidget {
+  const _SidifySlider({
+    required this.value,
+    required this.onSeek,
+    this.live = false,
+  });
+
+  final double value;
+  final ValueChanged<double> onSeek;
+  final bool live;
+
+  @override
+  State<_SidifySlider> createState() => _SidifySliderState();
+}
+
+class _SidifySliderState extends State<_SidifySlider> {
+  double? _drag;
+
+  @override
+  Widget build(BuildContext context) {
+    final double v = (_drag ?? widget.value).clamp(0.0, 1.0);
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints c) {
+        void handle(double dx) {
+          final double f = (dx / c.maxWidth).clamp(0.0, 1.0);
+          setState(() => _drag = f);
+          if (widget.live) widget.onSeek(f);
+        }
+
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onHorizontalDragStart: (DragStartDetails d) =>
+              handle(d.localPosition.dx),
+          onHorizontalDragUpdate: (DragUpdateDetails d) =>
+              handle(d.localPosition.dx),
+          onHorizontalDragEnd: (_) {
+            if (_drag != null && !widget.live) widget.onSeek(_drag!);
+            setState(() => _drag = null);
+          },
+          onTapDown: (TapDownDetails d) {
+            handle(d.localPosition.dx);
+            if (!widget.live) widget.onSeek(_drag!);
+            setState(() => _drag = null);
+          },
+          child: SizedBox(
+            height: 18,
+            child: Stack(
+              alignment: Alignment.center,
+              children: <Widget>[
+                Container(
+                  height: 2,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.20),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Container(
+                    height: _drag != null ? 3 : 2,
+                    width: (c.maxWidth * v).clamp(0.0, c.maxWidth),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.82),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -687,7 +1045,7 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
 ///
 /// It reads the same [MusicDownloadService] the Downloads page does, so the
 /// ring stays honest when a download was started somewhere else, and it keeps
-/// the capsule's 36px height and 44px minimum cell width.
+/// the capsule's height and 44px minimum cell width.
 class _DownloadCapsule extends StatelessWidget {
   const _DownloadCapsule({required this.song});
 
@@ -730,7 +1088,7 @@ class _DownloadCapsule extends StatelessWidget {
     return GestureDetector(
       onTap: () => _tap(downloads, playback, job, active, done),
       child: Container(
-        height: 36,
+        height: 32,
         constraints: const BoxConstraints(minWidth: 44),
         padding: const EdgeInsets.symmetric(horizontal: 12),
         alignment: Alignment.center,
@@ -748,10 +1106,10 @@ class _DownloadCapsule extends StatelessWidget {
   }
 }
 
-/// The live ring: 24px inside the 36px capsule, arc filling with the download
-/// and the percentage counting up in the middle. While the stream is still
-/// being resolved there are no bytes to count, so the ring spins instead of
-/// sitting on a misleading 0%.
+/// The live ring: 24px inside the capsule, arc filling with the download and
+/// the percentage counting up in the middle. While the stream is still being
+/// resolved there are no bytes to count, so the ring spins instead of sitting
+/// on a misleading 0%.
 class _DownloadRing extends StatelessWidget {
   const _DownloadRing({required this.fraction});
 
@@ -787,89 +1145,20 @@ class _DownloadRing extends StatelessWidget {
                 fit: BoxFit.scaleDown,
                 child: Text(
                   '$pct%',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 9,
                     height: 1,
                     fontWeight: FontWeight.w700,
                     color: Colors.white,
-                    fontFeatures: <FontFeature>[FontFeature.tabularFigures()],
+                    fontFeatures: const <FontFeature>[
+                      FontFeature.tabularFigures(),
+                    ],
                   ),
                 ),
               ),
             ),
         ],
       ),
-    );
-  }
-}
-
-/// The player's own slider: a thin white bar that thickens while touched,
-/// like the web player's range inputs on artwork.
-class _SidifySlider extends StatefulWidget {
-  const _SidifySlider({required this.value, required this.onSeek, this.live = false});
-
-  final double value;
-  final ValueChanged<double> onSeek;
-  final bool live;
-
-  @override
-  State<_SidifySlider> createState() => _SidifySliderState();
-}
-
-class _SidifySliderState extends State<_SidifySlider> {
-  double? _drag;
-
-  @override
-  Widget build(BuildContext context) {
-    final double v = (_drag ?? widget.value).clamp(0.0, 1.0);
-    return LayoutBuilder(
-      builder: (BuildContext context, BoxConstraints c) {
-        void handle(double dx) {
-          final double f = (dx / c.maxWidth).clamp(0.0, 1.0);
-          setState(() => _drag = f);
-          if (widget.live) widget.onSeek(f);
-        }
-
-        return GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onHorizontalDragUpdate: (DragUpdateDetails d) =>
-              handle(d.localPosition.dx),
-          onHorizontalDragEnd: (_) {
-            if (_drag != null && !widget.live) widget.onSeek(_drag!);
-            setState(() => _drag = null);
-          },
-          onTapDown: (TapDownDetails d) {
-            handle(d.localPosition.dx);
-            if (!widget.live) widget.onSeek(_drag!);
-            setState(() => _drag = null);
-          },
-          child: Container(
-            height: 22,
-            alignment: Alignment.center,
-            child: Stack(
-              children: <Widget>[
-                Container(
-                  height: _drag != null ? 6 : 4,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.22),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                ),
-                FractionallySizedBox(
-                  widthFactor: v,
-                  child: Container(
-                    height: _drag != null ? 6 : 4,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.86),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
     );
   }
 }
@@ -982,7 +1271,7 @@ class _QueueRow extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(10),
         child: Container(
           height: 58,
           padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -990,14 +1279,14 @@ class _QueueRow extends StatelessWidget {
             children: <Widget>[
               Stack(
                 children: <Widget>[
-                  Artwork(url: song.thumbnailUrl, size: 44, radius: 6),
+                  Artwork(url: song.thumbnailUrl, size: 44, radius: 8),
                   if (current)
                     Container(
                       width: 44,
                       height: 44,
                       decoration: BoxDecoration(
                         color: Colors.black.withValues(alpha: 0.45),
-                        borderRadius: BorderRadius.circular(6),
+                        borderRadius: BorderRadius.circular(8),
                       ),
                       child: Center(
                         child: PlayingBars(
@@ -1024,7 +1313,8 @@ class _QueueRow extends StatelessWidget {
                         color: current
                             ? Colors.white
                             : Colors.white.withValues(alpha: 0.92),
-                        fontWeight: current ? FontWeight.w600 : FontWeight.w400,
+                        fontWeight:
+                            current ? FontWeight.w600 : FontWeight.w400,
                       ),
                     ),
                     Text(

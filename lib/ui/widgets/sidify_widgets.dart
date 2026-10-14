@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -137,13 +138,25 @@ class Artwork extends StatelessWidget {
 // Glass — the frosted chrome of the tab bar, mini player and menus.
 // ---------------------------------------------------------------------------
 
-/// Liquid glass: a frosted backdrop under a charcoal pane, lit along the top
-/// edge and finished with a hairline that catches the light. This is the
-/// surface the floating dock (mini player + tab bar) is made of.
+/// Liquid glass: the surface the floating dock (mini player + tab bar) is made
+/// of — a genuinely see-through pane rather than a tinted card. Three things
+/// sell it:
+///
+///  * **the backdrop is frosted, then re-lit.** One `BackdropFilter` blurs
+///    whatever is behind the pane and the pane itself is painted at a third of
+///    its opacity, so the page shows straight through the dock while text
+///    stays legible on the frost.
+///  * **light behaves like it does on glass.** A bright specular top edge, a
+///    quiet middle, bounce light along the bottom, a hairline rim, and a
+///    second rim 1.6px inside it — the two surfaces that make a thin pane read
+///    as a solid piece of glass.
+///  * **it moves.** [sheen] drags the specular streak across the pane while the
+///    dock folds, so the glass looks like it is flowing into place instead of
+///    being resized.
 ///
 /// Geometry is entirely the caller's — radius, padding and child are passed
 /// straight through, so this changes how a surface *looks*, never how much
-/// room it takes. Two details matter for the Apple-like finish:
+/// room it takes. Two structural details matter for the finish:
 ///
 ///  * the ambient shadow is painted **outside** the clip (a shadow inside a
 ///    [ClipRRect] is clipped away and never reaches the screen) and shadows
@@ -151,7 +164,8 @@ class Artwork extends StatelessWidget {
 ///  * the edge hairline is a gradient stroke painted *over* the content, so
 ///    it reads as the pane's lit rim instead of a border drawn underneath.
 ///
-/// Falls back to a flat surface when the user turns glass off in Settings.
+/// Falls back to a flat surface when the user turns glass off in Settings, and
+/// to a cheaper frost when high-performance mode is on.
 class GlassBox extends StatelessWidget {
   const GlassBox({
     super.key,
@@ -159,42 +173,62 @@ class GlassBox extends StatelessWidget {
     this.radius = 18,
     this.bar = false,
     this.padding,
+    this.sheen = 0,
+    this.borderRadius,
+    this.density,
   });
 
   final Widget child;
+
+  /// Corner radius for a pane with four equal corners. [borderRadius] wins
+  /// when it is given (a sheet, which is only round at the top).
   final double radius;
   final bool bar;
   final EdgeInsetsGeometry? padding;
+  final BorderRadius? borderRadius;
 
-  /// Frost strength. Restrained on purpose: enough to blur artwork behind the
-  /// dock into colour, cheap enough to stay smooth while the page scrolls.
-  double get _sigma => bar ? 28 : 22;
+  /// How much denser than a floating pill the pane is. The dock is left at 1
+  /// — thin enough to see the page straight through — while a sheet that holds
+  /// real controls asks for more glass over the frost (≈1.65 reads as frosted
+  /// rather than as clear).
+  final double? density;
+
+  /// 0 = at rest, 1 = folded into the bar's row. Shifts the highlight.
+  final double sheen;
+
+  /// Frost strength. High enough that a page scrolling behind the dock turns
+  /// into soft colour instead of noise; one filter per pane, on a surface the
+  /// size of a pill, is what keeps it affordable.
+  double _sigma(bool eco) => eco ? (bar ? 14 : 10) : (bar ? 36 : 28);
 
   /// Wide, soft shadow that lifts the pane off the page.
   BoxShadow _ambient(SidifyTokens t) => BoxShadow(
-        color: Colors.black.withValues(alpha: t.isDark ? 0.46 : 0.16),
-        blurRadius: bar ? 28 : 22,
+        color: Colors.black.withValues(alpha: t.isDark ? 0.52 : 0.18),
+        blurRadius: bar ? 30 : 24,
         spreadRadius: -6,
-        offset: const Offset(0, 12),
+        offset: const Offset(0, 14),
       );
 
   /// Tight contact shadow right under the edge — what makes it float rather
   /// than hover.
   BoxShadow _contact(SidifyTokens t) => BoxShadow(
-        color: Colors.black.withValues(alpha: t.isDark ? 0.34 : 0.10),
+        color: Colors.black.withValues(alpha: t.isDark ? 0.38 : 0.12),
         blurRadius: 8,
         spreadRadius: -4,
         offset: const Offset(0, 2),
       );
 
+  static double _mix(double a, double b, double t) => a + (b - a) * t;
+
   @override
   Widget build(BuildContext context) {
     final SidifyTokens t = context.sidify;
-    final bool glass = context.watch<SettingsService>().liquidGlass;
-    final BorderRadius corners = BorderRadius.circular(radius);
+    final SettingsService settings = context.watch<SettingsService>();
+    final BorderRadius corners =
+        borderRadius ?? BorderRadius.circular(radius);
     final Widget content = Container(padding: padding, child: child);
 
-    if (!glass) {
+    if (!settings.liquidGlass) {
       return DecoratedBox(
         decoration: BoxDecoration(
           color: t.raised,
@@ -209,8 +243,11 @@ class GlassBox extends StatelessWidget {
     // The pane: charcoal glass, a touch deeper towards the bottom so it still
     // reads as a surface when pure-black artwork sits behind it.
     final Color pane = bar ? t.bar : t.glass;
-    final double paneTop = t.isDark ? 0.84 : 0.88;
-    final double paneBottom = t.isDark ? 0.70 : 0.78;
+    final double d = (density ?? 1.0).clamp(0.4, 2.4);
+    final double paneTop = ((t.isDark ? 0.44 : 0.58) * d).clamp(0.0, 1.0);
+    final double paneBottom = ((t.isDark ? 0.28 : 0.46) * d).clamp(0.0, 1.0);
+    final double sigma = _sigma(settings.highPerformance);
+    final double glow = Curves.easeInOutSine.transform(sheen.clamp(0.0, 1.0));
 
     return DecoratedBox(
       // The shadow sits outside the clip: inside a ClipRRect it would be cut
@@ -225,7 +262,13 @@ class GlassBox extends StatelessWidget {
         // bleed past the rounded silhouette.
         borderRadius: corners,
         child: BackdropFilter(
-          filter: ui.ImageFilter.blur(sigmaX: _sigma, sigmaY: _sigma),
+          // `clamp` keeps the blur from eating a dark fringe out of the pixels
+          // just outside the pane's own silhouette.
+          filter: ui.ImageFilter.blur(
+            sigmaX: sigma,
+            sigmaY: sigma,
+            tileMode: ui.TileMode.clamp,
+          ),
           child: DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
@@ -237,26 +280,40 @@ class GlassBox extends StatelessWidget {
                 ],
               ),
             ),
-            child: DecoratedBox(
-              // Specular: a lit top rim, a quiet middle, and the faint bounce
-              // light along the bottom edge — restrained, never neon.
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: <Color>[
-                    Colors.white.withValues(alpha: t.isDark ? 0.17 : 0.42),
-                    Colors.white.withValues(alpha: t.isDark ? 0.05 : 0.14),
-                    Colors.white.withValues(alpha: 0),
-                    Colors.black.withValues(alpha: t.isDark ? 0.10 : 0.05),
-                  ],
-                  stops: const <double>[0, 0.14, 0.55, 1],
+            child: Stack(
+              children: <Widget>[
+                Positioned.fill(
+                  child: DecoratedBox(
+                    // Specular: a lit top rim travelling towards the left as
+                    // the surface folds, a quiet middle, and the faint bounce
+                    // light along the bottom edge — restrained, never neon.
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment(_mix(-0.30, 0.55, glow), -1),
+                        end: Alignment(_mix(0.65, -0.15, glow), 1),
+                        colors: <Color>[
+                          Colors.white.withValues(
+                              alpha: t.isDark ? 0.22 : 0.50),
+                          Colors.white.withValues(
+                              alpha: t.isDark ? 0.07 : 0.18),
+                          Colors.white.withValues(alpha: 0),
+                          Colors.black.withValues(
+                              alpha: t.isDark ? 0.14 : 0.06),
+                        ],
+                        stops: const <double>[0, 0.15, 0.56, 1],
+                      ),
+                    ),
+                  ),
                 ),
-              ),
-              child: CustomPaint(
-                foregroundPainter: _GlassEdgePainter(radius, t),
-                child: content,
-              ),
+                content,
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: CustomPaint(
+                      foregroundPainter: _GlassEdgePainter(corners, t, glow),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ),
@@ -265,14 +322,29 @@ class GlassBox extends StatelessWidget {
   }
 }
 
-/// The hairline that finishes a glass pane: bright where the light hits the
-/// top edge, all but gone along the bottom. Drawn inside the clip so it never
-/// adds a pixel to the surface.
+/// The two rims of a glass pane plus the streak of light riding along the
+/// leading edge. Painted inside the clip so it never adds a pixel to the
+/// surface.
 class _GlassEdgePainter extends CustomPainter {
-  const _GlassEdgePainter(this.radius, this.tokens);
+  const _GlassEdgePainter(this.corners, this.tokens, this.sheen);
 
-  final double radius;
+  final BorderRadius corners;
   final SidifyTokens tokens;
+  final double sheen;
+
+  /// A caller asks for a capsule with a radius of 999 — bigger than any pane.
+  /// Brought back to the largest radius the box can actually hold, so the
+  /// second rim sits *inside* the first instead of on top of it.
+  static Radius _fit(Radius r, double limit) => Radius.elliptical(
+        math.min(r.x, limit),
+        math.min(r.y, limit),
+      );
+
+  /// The same corner, one sheet-thickness in.
+  static Radius _inner(Radius r) => Radius.elliptical(
+        math.max(r.x - 1.1, 0.0),
+        math.max(r.y - 1.1, 0.0),
+      );
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -281,29 +353,92 @@ class _GlassEdgePainter extends CustomPainter {
     final Color light = dark ? Colors.white : Colors.black;
     // Half a pixel in, so the stroke straddles the pane's own silhouette.
     final Rect rect = (Offset.zero & size).deflate(0.5);
-    final double corner = radius.clamp(0.0, rect.shortestSide / 2);
-    final Paint paint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1
-      ..shader = ui.Gradient.linear(
-        rect.topCenter,
-        rect.bottomCenter,
-        <Color>[
-          light.withValues(alpha: dark ? 0.30 : 0.18),
-          light.withValues(alpha: dark ? 0.10 : 0.08),
-          light.withValues(alpha: dark ? 0.05 : 0.04),
-        ],
-        <double>[0, 0.45, 1],
-      );
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(rect, Radius.circular(corner)),
-      paint,
+    final double limit = rect.shortestSide / 2;
+    final BorderRadius c = BorderRadius.only(
+      topLeft: _fit(corners.topLeft, limit),
+      topRight: _fit(corners.topRight, limit),
+      bottomLeft: _fit(corners.bottomLeft, limit),
+      bottomRight: _fit(corners.bottomRight, limit),
     );
+    final RRect rrect = c.toRRect(rect);
+
+    // The rim: bright where the light hits the top edge, all but gone along
+    // the bottom.
+    canvas.drawRRect(
+      rrect,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1
+        ..shader = ui.Gradient.linear(
+          rect.topCenter,
+          rect.bottomCenter,
+          <Color>[
+            light.withValues(alpha: dark ? 0.44 : 0.22),
+            light.withValues(alpha: dark ? 0.13 : 0.09),
+            light.withValues(alpha: dark ? 0.06 : 0.05),
+          ],
+          <double>[0, 0.45, 1],
+        ),
+    );
+
+    // The inner surface, 1.6px in and lit from underneath: the second edge
+    // that reads as thickness.
+    final Rect inner = (Offset.zero & size).deflate(1.6);
+    if (inner.shortestSide > 3) {
+      canvas.drawRRect(
+        RRect.fromRectAndCorners(
+          inner,
+          topLeft: _inner(c.topLeft),
+          topRight: _inner(c.topRight),
+          bottomLeft: _inner(c.bottomLeft),
+          bottomRight: _inner(c.bottomRight),
+        ),
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 0.7
+          ..shader = ui.Gradient.linear(
+            rect.bottomCenter,
+            rect.topCenter,
+            <Color>[
+              light.withValues(alpha: dark ? 0.22 : 0.12),
+              light.withValues(alpha: 0),
+            ],
+            <double>[0, 0.6],
+          ),
+      );
+    }
+
+    // A soft specular streak along the leading edge. Only on wide panes — a
+    // round button is already nothing but edge.
+    final double w = size.width;
+    final double h = size.height;
+    if (w > h * 1.4 && h > 12) {
+      final Rect halo = Rect.fromLTWH(
+        -w * 0.18 + sheen * w * 0.26,
+        -h * 0.62,
+        w * 0.86,
+        h * 1.9,
+      );
+      canvas.drawArc(
+        halo,
+        math.pi * 1.02,
+        math.pi * 0.40,
+        false,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.4
+          ..strokeCap = StrokeCap.round
+          ..maskFilter = ui.MaskFilter.blur(ui.BlurStyle.normal, 3.5)
+          ..color = Colors.white.withValues(alpha: dark ? 0.34 : 0.55),
+      );
+    }
   }
 
   @override
   bool shouldRepaint(_GlassEdgePainter oldDelegate) =>
-      oldDelegate.radius != radius || oldDelegate.tokens != tokens;
+      oldDelegate.corners != corners ||
+      oldDelegate.tokens != tokens ||
+      oldDelegate.sheen != sheen;
 }
 
 // ---------------------------------------------------------------------------

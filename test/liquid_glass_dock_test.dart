@@ -1,6 +1,7 @@
 /// The floating dock, measured: the liquid-glass mini player and tab bar must
-/// keep the geometry they have always had, keep driving the real services, and
-/// must not grow Flutter's yellow double underline under their labels.
+/// keep the geometry they have always had at rest, fold into one row on the way
+/// down a page and unfold on the way back up, keep driving the real services,
+/// and must not grow Flutter's yellow double underline under their labels.
 ///
 /// The dock is painted by `MaterialApp.builder`, above the navigator and
 /// outside any `Material` — which is exactly where a `Text` with no inherited
@@ -276,6 +277,85 @@ void main() {
 
     // Each floating surface is still real glass: one frosted backdrop each.
     expect(find.byType(BackdropFilter), findsNWidgets(3));
+  });
+
+  testWidgets('a page scrolled down folds the bar into the mini player',
+      (WidgetTester tester) async {
+    await pumpDock(tester);
+
+    // The row the page's scroll writes, driven directly — the dock reads this
+    // notifier and nothing else.
+    SidifyDockScroll.barHidden.value = true;
+    await settle(tester);
+    expect(tester.takeException(), isNull);
+
+    // Home keeps its seat on the left, but the bar is now that seat alone:
+    // one round 62px button, not a row of three cells.
+    final Rect home = tester.getRect(glassAround(find.text('Home')));
+    expect(home.size, const Size(62, 62), reason: 'the bar did not fold to Home');
+    expect(home.left, 12);
+    expect(home.bottom, screenH - 10);
+
+    // The mini player came down into the row the bar vacated and slimmed to
+    // match it — same pill, now sitting between Home and Search.
+    final Rect mini = tester.getRect(glassAround(find.text('Glass Track')));
+    expect(mini.height, 46, reason: 'the player did not slim down');
+    expect(mini.left, 84, reason: '12 + 62 (Home) + 10 (gap)');
+    expect(mini.right, screenW - 84, reason: 'Search keeps its own 72px');
+    expect(mini.center.dy, closeTo(screenH - 41, 0.5),
+        reason: 'the pill is centred in the 62px row');
+
+    // Search never moved: it had the right-hand seat in both rows.
+    final Rect search =
+        tester.getRect(glassAround(find.byIcon(Icons.search_rounded)));
+    expect(search.size, const Size(62, 62));
+    expect(search.right, screenW - 12);
+    expect(search.bottom, screenH - 10);
+
+    // Explore and Library are only out of the way, not gone: their cells
+    // closed, so the same three glass panes are all that is painted.
+    expect(find.text('Explore'), findsOneWidget);
+    expect(find.byType(BackdropFilter), findsNWidgets(3));
+
+    // Transport still works from the folded pill.
+    await tester.tap(find.byIcon(Icons.pause_rounded));
+    await settle(tester);
+    expect(find.byIcon(Icons.play_arrow_rounded), findsOneWidget);
+
+    // And scrolling back up walks the same path in reverse.
+    SidifyDockScroll.barHidden.value = false;
+    await settle(tester);
+    final Rect rest = tester.getRect(glassAround(find.text('Glass Track')));
+    expect(rest.height, 58);
+    expect(rest.left, 12);
+    expect(rest.width, screenW - 24);
+    expect(
+      tester.getRect(glassAround(find.text('Explore'))).width,
+      screenW - 24 - 10 - 62,
+      reason: 'the bar unfolded back to a row of cells',
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('tapping the folded Home button brings the bar back',
+      (WidgetTester tester) async {
+    final _Dock dock = await pumpDock(tester);
+    SidifyDockScroll.barHidden.value = true;
+    await settle(tester);
+    expect(SidifyDockScroll.barHidden.value, isTrue);
+
+    // `select` is synchronous void — awaiting it is an analyzer error.
+    dock.shell.select(SidifyTab.explore);
+    await settle(tester);
+    expect(SidifyDockScroll.barHidden.value, isTrue);
+
+    // Tapping a tab is a deliberate act on the dock itself: the bar unfolds.
+    // (Reachable only through Home, whose cell is the one that survived.)
+    await tester.tap(find.byIcon(Icons.home_rounded));
+    await settle(tester);
+    expect(SidifyDockScroll.barHidden.value, isFalse);
+    expect(dock.shell.tab, SidifyTab.home);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('no yellow underline survives under the dock labels',

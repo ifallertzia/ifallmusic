@@ -15,8 +15,8 @@ import '../player/lyrics_view.dart';
 import 'add_to_playlist_sheet.dart';
 import 'sidify_widgets.dart';
 
-/// A bottom sheet in the site's `menu-glass` style: rounded top, hairline
-/// edge, blurred raised colour.
+/// A bottom sheet in the site's `menu-glass` style, in Flutter: rounded top,
+/// lit hairline rim, and a frosted pane that the page behind shows through.
 Future<void> showSidifySheet(
   BuildContext context, {
   required Widget child,
@@ -30,63 +30,68 @@ Future<void> showSidifySheet(
     isScrollControlled: true,
     builder: (BuildContext sheetContext) {
       return SafeArea(
-        child: Container(
+        child: ConstrainedBox(
           constraints: BoxConstraints(
             maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.88,
           ),
-          decoration: BoxDecoration(
-            color: t.raised.withValues(alpha: 0.94),
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
-            border: Border.all(color: t.edge, width: 0.5),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              const SizedBox(height: 8),
-              Container(
-                width: 36,
-                height: 5,
-                decoration: BoxDecoration(
-                  color: t.fill3,
-                  borderRadius: BorderRadius.circular(999),
-                ),
-              ),
-              if (title != null)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
-                  child: Row(
-                    children: <Widget>[
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: <Widget>[
-                            Text(
-                              title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: SidifyText.title(t.text),
-                            ),
-                            if (subtitle != null)
-                              Text(
-                                subtitle,
-                                style: TextStyle(fontSize: 13, color: t.text2),
-                              ),
-                          ],
-                        ),
-                      ),
-                      SidifyIconButton(
-                        icon: Icons.close_rounded,
-                        label: 'Close',
-                        tone: 'fill',
-                        size: 30,
-                        iconSize: 16,
-                        onTap: () => Navigator.of(sheetContext).pop(),
-                      ),
-                    ],
+          // The same liquid-glass recipe the floating dock wears — frosted
+          // backdrop, lit top edge, hairline rim — only with a denser pane,
+          // since a sheet carries real controls rather than a glance.
+          child: GlassBox(
+            radius: 0,
+            borderRadius:
+                const BorderRadius.vertical(top: Radius.circular(22)),
+            density: 1.65,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                const SizedBox(height: 8),
+                Container(
+                  width: 36,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: t.fill3,
+                    borderRadius: BorderRadius.circular(999),
                   ),
                 ),
-              Flexible(child: child),
-            ],
+                if (title != null)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+                    child: Row(
+                      children: <Widget>[
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: <Widget>[
+                              Text(
+                                title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: SidifyText.title(t.text),
+                              ),
+                              if (subtitle != null)
+                                Text(
+                                  subtitle,
+                                  style:
+                                      TextStyle(fontSize: 13, color: t.text2),
+                                ),
+                            ],
+                          ),
+                        ),
+                        SidifyIconButton(
+                          icon: Icons.close_rounded,
+                          label: 'Close',
+                          tone: 'fill',
+                          size: 30,
+                          iconSize: 16,
+                          onTap: () => Navigator.of(sheetContext).pop(),
+                        ),
+                      ],
+                    ),
+                  ),
+                Flexible(child: child),
+              ],
+            ),
           ),
         ),
       );
