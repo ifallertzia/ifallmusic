@@ -39,7 +39,10 @@ class _PlaybackSheetBody extends StatelessWidget {
           _row(
             context,
             Icons.speed_rounded,
-            'Speed',
+            // No "Speed" word: on narrow screens the label and the rate chips
+            // fight for the same line and the word ends up squeezed. The icon
+            // carries it — the chips are the control.
+            '',
             trailing: Wrap(
               spacing: 6,
               children: <Widget>[
@@ -188,24 +191,29 @@ class _PlaybackSheetBody extends StatelessWidget {
       child: Row(
         children: <Widget>[
           Icon(icon, size: 19, color: t.text),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  title,
-                  style: TextStyle(fontSize: 15.5, color: t.text),
-                ),
-                if (subtitle != null)
+          // An empty title means the icon is the whole label (Speed): no
+          // text column, so the trailing controls get the full width.
+          if (title.isNotEmpty) ...<Widget>[
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
                   Text(
-                    subtitle,
-                    style: TextStyle(fontSize: 12.5, color: t.text2),
+                    title,
+                    style: TextStyle(fontSize: 15.5, color: t.text),
                   ),
-              ],
+                  if (subtitle != null)
+                    Text(
+                      subtitle,
+                      style: TextStyle(fontSize: 12.5, color: t.text2),
+                    ),
+                ],
+              ),
             ),
-          ),
-          if (trailing != null) trailing,
+          ] else
+            const SizedBox(width: 10),
+          if (trailing != null) Flexible(child: trailing),
           if (chevron)
             Icon(Icons.chevron_right_rounded, size: 18, color: t.text3),
         ],

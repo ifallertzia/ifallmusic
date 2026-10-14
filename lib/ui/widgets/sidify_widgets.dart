@@ -114,7 +114,9 @@ class Artwork extends StatelessWidget {
       child: SizedBox(
         width: w,
         height: h,
-        child: url.isEmpty
+        // On-device songs carry `content://`/`file://` album-art URIs we cannot
+        // decode here — show a plain music note, never the app logo.
+        child: ArtworkCache.isPlaceholder(url)
             ? fallback
             : Image(
                 image: ArtworkCache.providerFor(url),
@@ -155,27 +157,68 @@ class GlassBox extends StatelessWidget {
   Widget build(BuildContext context) {
     final SidifyTokens t = context.sidify;
     final bool glass = context.watch<SettingsService>().liquidGlass;
+    final Widget content = Container(padding: padding, child: child);
     final Widget inner = Container(
-      padding: padding,
       decoration: BoxDecoration(
-        color: glass ? (bar ? t.bar : t.glass) : t.raised,
+        // The site's `bar-glass`/`glass`: a translucent tint under a soft
+        // diagonal sheen, edged by a 0.5px hairline and a lit top rim.
+        gradient: glass
+            ? LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: <Color>[
+                  (bar ? t.bar : t.glass),
+                  (bar ? t.bar : t.glass).withValues(alpha: 0.82),
+                ],
+              )
+            : null,
+        color: glass ? null : t.raised,
         borderRadius: BorderRadius.circular(radius),
-        border: Border.all(color: t.edge, width: 0.5),
+        border: Border.all(color: t.edge, width: 0.75),
         boxShadow: <BoxShadow>[
           BoxShadow(
             color: Colors.black.withValues(alpha: t.isDark ? 0.45 : 0.12),
-            blurRadius: 24,
+            blurRadius: bar ? 32 : 24,
             offset: const Offset(0, 10),
           ),
+          if (bar)
+            BoxShadow(
+              color: Colors.black.withValues(alpha: t.isDark ? 0.28 : 0.08),
+              blurRadius: 16,
+              offset: const Offset(0, 4),
+            ),
         ],
       ),
-      child: child,
+      child: glass && bar
+          ? DecoratedBox(
+              // The site's 135° white sheen that makes the bar read as glass.
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: <Color>[
+                    Colors.white.withValues(alpha: 0.14),
+                    Colors.white.withValues(alpha: 0.04),
+                    Colors.white.withValues(alpha: 0.02),
+                    Colors.white.withValues(alpha: 0.08),
+                  ],
+                  stops: const <double>[0, 0.42, 0.68, 1],
+                ),
+              ),
+              child: content,
+            )
+          : content,
     );
     if (!glass) return inner;
     return ClipRRect(
       borderRadius: BorderRadius.circular(radius),
       child: BackdropFilter(
-        filter: ui.ImageFilter.blur(sigmaX: 28, sigmaY: 28),
+        // Heavy frosted glass — 44px for the floating bar, 30px elsewhere,
+        // matching the site's `bar-glass` / `chrome-glass` blur.
+        filter: ui.ImageFilter.blur(
+          sigmaX: bar ? 44 : 30,
+          sigmaY: bar ? 44 : 30,
+        ),
         child: inner,
       ),
     );
@@ -1136,7 +1179,7 @@ class HeroCard extends StatelessWidget {
         child: Stack(
           fit: StackFit.expand,
           children: <Widget>[
-            if (artwork.isNotEmpty)
+            if (ArtworkCache.isNetworkArtwork(artwork))
               Image(
                 image: ArtworkCache.providerFor(artwork),
                 fit: BoxFit.cover,
@@ -1523,6 +1566,7 @@ class MoodCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final Color base = parse(colorHex);
     final Color dark = Color.lerp(base, Colors.black, 0.08) ?? base;
+    final bool hasArt = artwork.isNotEmpty && ArtworkCache.isNetworkArtwork(artwork);
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -1534,20 +1578,26 @@ class MoodCard extends StatelessWidget {
         child: Stack(
           fit: StackFit.expand,
           children: <Widget>[
-            if (artwork.isNotEmpty)
-              Positioned(
-                right: 0,
-                top: 0,
-                bottom: 0,
-                width: 130,
-                child: Opacity(
-                  opacity: 0.55,
-                  child: Image(
-                    image: ArtworkCache.providerFor(artwork),
-                    fit: BoxFit.cover,
-                    color: Color.lerp(base, Colors.white, 0.3),
-                    colorBlendMode: BlendMode.modulate,
-                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+            if (hasArt)
+              // The site's mood tile: a duotone sleeve filling the right 72% of
+              // the card, tinted toward the mood colour.
+              Align(
+                alignment: Alignment.centerRight,
+                child: FractionallySizedBox(
+                  widthFactor: 0.72,
+                  heightFactor: 1,
+                  child: Container(
+                    color: Color.lerp(base, Colors.black, 0.55),
+                    child: Opacity(
+                      opacity: 0.9,
+                      child: Image(
+                        image: ArtworkCache.providerFor(artwork),
+                        fit: BoxFit.cover,
+                        color: Color.lerp(base, Colors.white, 0.7),
+                        colorBlendMode: BlendMode.modulate,
+                        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                      ),
+                    ),
                   ),
                 ),
               ),

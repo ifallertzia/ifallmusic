@@ -305,7 +305,7 @@ class HomeCatalog extends ChangeNotifier {
       ];
 
       final List<List<Song>> rails = await Future.wait(<Future<List<Song>>>[
-        _rail(queries[0], 6, musicOnly: true),
+        _rail(queries[0], 6),
         _rail(queries[1], 10),
         _rail(queries[2], 8),
       ]);
@@ -333,22 +333,20 @@ class HomeCatalog extends ChangeNotifier {
 
   /// Fetches a few stations at a time to avoid firing twenty YouTube requests
   /// simultaneously on slower phones or mobile connections.
-  Future<List<Song>> _rail(
-    List<String> queries,
-    int limit, {
-    bool musicOnly = false,
-  }) async {
+  ///
+  /// Every rail is YouTube **Music** only: the songs filter, never the plain
+  /// YouTube fallback — Top picks, Trending and Recommended stay real songs
+  /// and albums instead of surfacing ordinary YT videos.
+  Future<List<Song>> _rail(List<String> queries, int limit) async {
     final List<Song> songs = <Song>[];
     final List<String> selected = queries.take(limit).toList();
     for (int start = 0; start < selected.length; start += 4) {
       final List<String> batch = selected.skip(start).take(4).toList();
       final List<Song?> results = await Future.wait(<Future<Song?>>[
         for (final String query in batch)
-          musicOnly
-              ? _youtube
-                    .musicSongs(query, limit: 1)
-                    .then((songs) => songs.isEmpty ? null : songs.first)
-              : _youtube.topSong(query),
+          _youtube
+              .musicSongs(query, limit: 1)
+              .then((songs) => songs.isEmpty ? null : songs.first),
       ]);
       songs.addAll(results.whereType<Song>());
     }

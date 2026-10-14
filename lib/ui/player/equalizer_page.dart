@@ -198,7 +198,7 @@ class _EqualizerPageState extends State<EqualizerPage> {
                       'attaches to the playing audio.',
                 )
               : ListView(
-                  padding: const EdgeInsets.only(top: 8, bottom: 40),
+                  padding: const EdgeInsets.only(top: 8, bottom: 190),
                   children: <Widget>[
                     SidifyGroup(
                       children: <Widget>[

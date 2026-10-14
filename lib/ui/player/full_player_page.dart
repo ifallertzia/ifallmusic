@@ -485,11 +485,13 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: <Widget>[
+          // Left: the playback panel (was the lyrics toggle) — swapped as
+          // asked so playback opens from here and lyrics lives in the capsule.
           _glyphToggle(
-            Icons.lyrics_rounded,
-            'Lyrics',
-            _view == 'lyrics',
-            () => _toggleView('lyrics'),
+            Icons.spatial_audio_rounded,
+            'Playback',
+            false,
+            () => showPlaybackSheet(context),
           ),
           Container(
             height: 44,
@@ -531,10 +533,10 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
                     ]
                   : <Widget>[
                       _capsuleBtn(
-                        Icons.spatial_audio_rounded,
-                        'Playback options',
-                        false,
-                        () => showPlaybackSheet(context),
+                        Icons.lyrics_rounded,
+                        'Lyrics',
+                        _view == 'lyrics',
+                        () => _toggleView('lyrics'),
                         wide: true,
                       ),
                       _capsuleDivider(),

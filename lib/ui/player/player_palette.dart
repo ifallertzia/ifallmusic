@@ -52,7 +52,12 @@ class MeshPaletteService {
   }
 
   static Future<MeshPalette> extract(String url) {
-    if (url.isEmpty) return Future<MeshPalette>.value(MeshPalette.fallback);
+    // No decodable artwork (empty, `content://`, `file://`) — the neutral mesh.
+    // Never sample the logo: the palette must follow the song's cover, and a
+    // local song without one gets graphite, not brand colours.
+    if (!ArtworkCache.isNetworkArtwork(url)) {
+      return Future<MeshPalette>.value(MeshPalette.fallback);
+    }
     final MeshPalette? hit = _cache[url];
     if (hit != null) return Future<MeshPalette>.value(hit);
     final Future<MeshPalette>? inFlight = _pending[url];
@@ -242,11 +247,17 @@ class MeshBackdropFor extends StatefulWidget {
 
 class _MeshBackdropForState extends State<MeshBackdropFor> {
   MeshPalette _palette = MeshPalette.fallback;
+  String _url = '';
+  bool _dynamic = true;
+
+  /// Monotonic token: a slower extraction for a previous sleeve must never
+  /// overwrite the palette of the song that is playing now.
+  int _generation = 0;
 
   @override
   void initState() {
     super.initState();
-    _load();
+    _sync();
   }
 
   @override
@@ -254,25 +265,37 @@ class _MeshBackdropForState extends State<MeshBackdropFor> {
     super.didUpdateWidget(old);
     if (old.artworkUrl != widget.artworkUrl ||
         old.dynamicColor != widget.dynamicColor) {
-      _load();
+      _sync();
     }
   }
 
-  void _load() {
-    if (!widget.dynamicColor || widget.artworkUrl.isEmpty) {
+  void _sync() {
+    _url = widget.artworkUrl;
+    _dynamic = widget.dynamicColor;
+    final int generation = ++_generation;
+    if (!widget.dynamicColor ||
+        ArtworkCache.isPlaceholder(widget.artworkUrl)) {
       _palette = MeshPalette.fallback;
       return;
     }
-    _palette = MeshPaletteService.cached(widget.artworkUrl) ?? _palette;
+    final MeshPalette? hit = MeshPaletteService.cached(widget.artworkUrl);
+    if (hit != null) _palette = hit;
     MeshPaletteService.extract(widget.artworkUrl).then((MeshPalette p) {
-      if (mounted && widget.artworkUrl.isNotEmpty) {
-        setState(() => _palette = p);
-      }
+      if (!mounted || generation != _generation) return;
+      setState(() => _palette = p);
     });
   }
 
   @override
   Widget build(BuildContext context) {
+    // Stay glued to the track: if a rebuild ever hands in a new sleeve without
+    // didUpdateWidget seeing it, resync on the next frame instead of painting
+    // the previous song's colours until the player is reopened.
+    if (widget.artworkUrl != _url || widget.dynamicColor != _dynamic) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _sync();
+      });
+    }
     return MeshBackdrop(palette: _palette, scrim: widget.scrim);
   }
 }

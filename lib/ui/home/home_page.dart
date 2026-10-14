@@ -11,6 +11,7 @@ import '../../core/services/playback_service.dart';
 import '../../core/services/settings_service.dart';
 import '../../core/services/youtube_service.dart';
 import '../../core/theme/sidify_theme.dart';
+import '../../services/yt_music_parser.dart';
 import '../artist/artist_page.dart';
 import '../library/history_page.dart';
 import '../library/liked_page.dart';
@@ -161,7 +162,7 @@ class _HomePageState extends State<HomePage> {
                   for (final AlbumCard a in HomeCatalog.newReleases)
                     AlbumCardWidget(
                       album: a,
-                      onTap: () => openAlbum(context, a),
+                      onTap: () => openAlbum(context, a, musicOnly: true),
                     ),
                 ],
               ),
@@ -410,16 +411,31 @@ class _HomePageState extends State<HomePage> {
         ),
       );
     }
-    for (final AlbumCard a in HomeCatalog.newReleases.take(2)) {
-      heroes.add(
-        HeroCard(
-          eyebrow: 'New music',
-          title: a.title,
-          subtitle: a.artist,
-          artwork: a.coverUrl,
-          onTap: () => openAlbum(context, a),
-        ),
-      );
+    // New music: YouTube Music releases only — never plain YT video results.
+    if (catalog.freshReleases.isNotEmpty) {
+      for (final MusicBrowseItem item in catalog.freshReleases.take(2)) {
+        heroes.add(
+          HeroCard(
+            eyebrow: 'New music',
+            title: item.title,
+            subtitle: 'New release',
+            artwork: item.artwork,
+            onTap: () => openBrowse(context, item),
+          ),
+        );
+      }
+    } else {
+      for (final AlbumCard a in HomeCatalog.newReleases.take(2)) {
+        heroes.add(
+          HeroCard(
+            eyebrow: 'New music',
+            title: a.title,
+            subtitle: a.artist,
+            artwork: a.coverUrl,
+            onTap: () => openAlbum(context, a, musicOnly: true),
+          ),
+        );
+      }
     }
     if (heroes.isEmpty) return const SizedBox.shrink();
     return Padding(
@@ -471,15 +487,43 @@ class _HomePageState extends State<HomePage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
-                    Text(
-                      'Listen together',
-                      style: TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -0.2,
-                        color: t.text,
-                      ),
+                    Row(
+                      children: <Widget>[
+                        Flexible(
+                          child: Text(
+                            'Listen together',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: -0.2,
+                              color: t.text,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: t.fill2,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            'Coming soon',
+                            style: TextStyle(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w700,
+                              color: t.text2,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
+                    const SizedBox(height: 3),
                     Text(
                       'Start a room, share the code, and everyone hears the '
                       'same song at the same moment.',

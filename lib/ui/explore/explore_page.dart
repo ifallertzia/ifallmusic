@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/models/song.dart';
+import '../../core/services/artwork_cache.dart';
 import '../../core/services/home_catalog.dart';
 import '../../core/services/playback_service.dart';
 import '../../core/services/youtube_service.dart';
@@ -50,6 +51,57 @@ const List<SidifyMood> kSidifyGenres = <SidifyMood>[
   SidifyMood('Ghazals & Sufi', '#9a7a8a', 'ghazal sufi songs', genre: true),
 ];
 
+/// Cover sleeves behind the mood / genre tiles — the top YouTube Music result
+/// for each tile's seed, exactly like the site's `/api/explore`. Fetched a few
+/// at a time and kept for the session so the grid paints colours instantly and
+/// the photos fill in behind them.
+class MoodCoverCatalog extends ChangeNotifier {
+  MoodCoverCatalog._();
+
+  static final MoodCoverCatalog instance = MoodCoverCatalog._();
+
+  final Map<String, String> covers = <String, String>{};
+  bool _loading = false;
+
+  String coverFor(SidifyMood mood) => covers[mood.title] ?? '';
+
+  Future<void> ensure(YoutubeService youtube) async {
+    if (_loading) return;
+    final List<SidifyMood> all = <SidifyMood>[
+      ...kSidifyMoods,
+      ...kSidifyGenres,
+    ];
+    if (covers.length >= all.length) return;
+    _loading = true;
+    try {
+      for (int start = 0; start < all.length; start += 4) {
+        final List<SidifyMood> batch = all.skip(start).take(4).toList();
+        await Future.wait(<Future<void>>[
+          for (final SidifyMood mood in batch)
+            () async {
+              if (covers.containsKey(mood.title)) return;
+              try {
+                final List<Song> songs = await youtube.musicSongs(
+                  mood.query,
+                  limit: 1,
+                );
+                if (songs.isNotEmpty &&
+                    ArtworkCache.isNetworkArtwork(songs.first.thumbnailUrl)) {
+                  covers[mood.title] = songs.first.thumbnailUrl;
+                }
+              } catch (_) {
+                /* leave the tile without a photo */
+              }
+            }(),
+        ]);
+        notifyListeners();
+      }
+    } finally {
+      _loading = false;
+    }
+  }
+}
+
 /// Explore: New releases, Top songs (charts), Moods & moments, Genres —
 /// the site's Explore, tile for tile.
 class ExplorePage extends StatefulWidget {
@@ -63,9 +115,22 @@ class _ExplorePageState extends State<ExplorePage> {
   @override
   void initState() {
     super.initState();
+    MoodCoverCatalog.instance.addListener(_coversChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<HomeCatalog>().load();
+      // Photos behind the mood / genre tiles, like the site's Explore.
+      MoodCoverCatalog.instance.ensure(context.read<YoutubeService>());
     });
+  }
+
+  @override
+  void dispose() {
+    MoodCoverCatalog.instance.removeListener(_coversChanged);
+    super.dispose();
+  }
+
+  void _coversChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
@@ -136,6 +201,7 @@ class _ExplorePageState extends State<ExplorePage> {
                 return MoodCard(
                   title: m.title,
                   colorHex: m.color,
+                  artwork: MoodCoverCatalog.instance.coverFor(m),
                   onTap: () => Navigator.of(context).push(
                     MaterialPageRoute<void>(
                       builder: (_) => ExploreMoodPage(mood: m),

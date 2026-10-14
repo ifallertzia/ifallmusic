@@ -416,7 +416,13 @@ class _SidifyRoot extends StatelessWidget {
           child: Stack(
             fit: StackFit.expand,
             children: <Widget>[
-              child ?? const SizedBox.shrink(),
+              // Every page's vertical scroll feeds the dock: scrolling down
+              // tucks the tab bar away and slides the mini player into its
+              // slot; the smallest scroll up brings the bar straight back.
+              NotificationListener<ScrollNotification>(
+                onNotification: SidifyDockScroll.handle,
+                child: child ?? const SizedBox.shrink(),
+              ),
               SidifyDock(
                 observer: routeObserver,
                 navigatorKey: navigatorKey,
