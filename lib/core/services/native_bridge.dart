@@ -42,6 +42,26 @@ class NativeBridge {
     return const BootSnapshot(safeMode: false, fails: 0, sdk: 0);
   }
 
+  /// The current network transport: 'wifi', 'mobile', 'other' or 'none'.
+  ///
+  /// Only used to pick the per-network audio-quality ceiling. Non-Android
+  /// platforms report 'wifi' (treated as unmetered) and any bridge failure
+  /// reports 'other', which the settings layer also treats as unmetered —
+  /// a failed probe must never silently downgrade anyone's audio.
+  static Future<String> networkType() async {
+    if (kIsWeb || !Platform.isAndroid) return 'wifi';
+    try {
+      final Object? raw = await _channel
+          .invokeMethod<Object>('networkType')
+          .timeout(const Duration(seconds: 1));
+      final String value = raw?.toString() ?? '';
+      return value.isEmpty ? 'other' : value;
+    } catch (e) {
+      debugPrint('[IfallMusic][Net] networkType failed: $e');
+      return 'other';
+    }
+  }
+
   static Future<void> markLaunchSuccess() async {
     if (kIsWeb || !Platform.isAndroid) return;
     try {

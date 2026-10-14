@@ -199,6 +199,22 @@ class SettingsService extends ChangeNotifier {
   Future<void> setQualityMobile(String v) =>
       _prefs.setString(kQualityMobile, v).then((_) => notifyListeners());
 
+  /// The bitrate ceiling (kbps) the per-network quality settings imply for
+  /// [networkType] ('wifi' / 'mobile' / anything else, from
+  /// `NativeBridge.networkType`). `null` means "no ceiling" — 'high', and
+  /// the default for unknown transports, because a failed network probe must
+  /// never silently downgrade anyone's audio. Downloads ignore this: a file
+  /// outlives the connection it was fetched on.
+  int? qualityCapKbps(String networkType) {
+    final String quality =
+        networkType == 'mobile' ? qualityMobile : qualityWifi;
+    return switch (quality) {
+      'low' => 96,
+      'medium' => 160,
+      _ => null,
+    };
+  }
+
   bool get gapless => _prefs.getBool(kGapless) ?? true;
   Future<void> setGapless(bool v) =>
       _prefs.setBool(kGapless, v).then((_) => notifyListeners());

@@ -17,6 +17,7 @@ import 'playback_error_reporter.dart';
 import 'radio_queue.dart';
 import 'innertube_resolver.dart';
 import 'module_source_resolver.dart';
+import 'native_bridge.dart';
 import 'library_service.dart';
 import 'notification_bootstrap.dart';
 import 'settings_service.dart';
@@ -67,6 +68,21 @@ class PlaybackService extends ChangeNotifier {
   final AudioPlayer _player;
   final InnertubeResolver _innertube = InnertubeResolver();
   final ModuleSourceResolver _modules = ModuleSourceResolver();
+
+  /// Per-network quality ceiling support: the transport is probed at most
+  /// once a minute, and only the cap it implies travels into the resolvers.
+  String _networkType = 'wifi';
+  DateTime _networkTypeAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  Future<int?> _streamCapKbps({required bool forDownload}) async {
+    if (forDownload) return null; // a kept file outlives the connection
+    if (DateTime.now().difference(_networkTypeAt) >
+        const Duration(minutes: 1)) {
+      _networkType = await NativeBridge.networkType();
+      _networkTypeAt = DateTime.now();
+    }
+    return _settings.qualityCapKbps(_networkType);
+  }
   final Random _random = Random();
 
   StreamSubscription<PlaybackEvent>? _eventSub;
@@ -890,11 +906,16 @@ class PlaybackService extends ChangeNotifier {
   }) async {
     final StreamResolverMode mode = _settings.streamResolverMode;
     Object? primaryError;
+    final int? capKbps = await _streamCapKbps(forDownload: preferDownload);
 
     if (mode != StreamResolverMode.legacyOnly) {
       try {
         return (await _innertube
-                .resolve(videoId, preferDownload: preferDownload)
+                .resolve(
+                  videoId,
+                  preferDownload: preferDownload,
+                  maxBitrateKbps: capKbps,
+                )
                 .timeout(_innertubeBudget))
             .url
             .toString();
@@ -908,7 +929,8 @@ class PlaybackService extends ChangeNotifier {
     Object? legacyError;
     if (mode != StreamResolverMode.innertubeOnly) {
       try {
-        return await _resolveWithExplode(videoId).timeout(_legacyBudget);
+        return await _resolveWithExplode(videoId, maxBitrateKbps: capKbps)
+            .timeout(_legacyBudget);
       } catch (error) {
         legacyError = error;
         debugPrint('[resolver] Legacy explode failed: $error');
@@ -946,7 +968,10 @@ class PlaybackService extends ChangeNotifier {
     throw Exception('No playable stream found: $primaryError');
   }
 
-  Future<String> _resolveWithExplode(VideoId videoId) async {
+  Future<String> _resolveWithExplode(
+    VideoId videoId, {
+    int? maxBitrateKbps,
+  }) async {
     // Hard internal deadline so we always fail with a useful message well
     // before the outer timeout would swallow the cause.
     final DateTime deadline = DateTime.now().add(const Duration(seconds: 10));
@@ -969,11 +994,11 @@ class PlaybackService extends ChangeNotifier {
 
           final StreamInfo? playable =
               await _firstPlayable(
-                _sortByBitrateDesc(manifest.audioOnly),
+                _sortForCap(manifest.audioOnly, maxBitrateKbps),
                 deadline,
               ) ??
               await _firstPlayable(
-                _sortByBitrateDesc(manifest.muxed),
+                _sortForCap(manifest.muxed, maxBitrateKbps),
                 deadline,
               );
 
@@ -1020,6 +1045,24 @@ class PlaybackService extends ChangeNotifier {
 
   List<T> _sortByBitrateDesc<T extends StreamInfo>(Iterable<T> streams) =>
       streams.toList()..sort((StreamInfo a, StreamInfo b) => b.bitrate.compareTo(a.bitrate));
+
+  /// Orders candidates for a per-network bitrate ceiling: best at-or-under
+  /// the cap first, then cheapest above it (nothing is dropped, so probing
+  /// can still climb if the capped streams are dead). No cap, no change.
+  List<T> _sortForCap<T extends StreamInfo>(Iterable<T> streams, int? capKbps) {
+    if (capKbps == null) return _sortByBitrateDesc(streams);
+    final List<T> list = streams.toList();
+    final int cap = capKbps * 1000;
+    list.sort((StreamInfo a, StreamInfo b) {
+      final bool aIn = a.bitrate.bitsPerSecond <= cap;
+      final bool bIn = b.bitrate.bitsPerSecond <= cap;
+      if (aIn != bIn) return aIn ? -1 : 1;
+      return aIn
+          ? b.bitrate.compareTo(a.bitrate)
+          : a.bitrate.compareTo(b.bitrate);
+    });
+    return list;
+  }
 
   /// Returns the first stream whose URL is actually fetchable right now.
   ///

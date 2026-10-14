@@ -123,7 +123,8 @@ void main() {
         LyricsStatus.unavailable,
       );
       await unavailable.find(title: 'Song');
-      expect(outages, 4);
+      // An outage is never cached, so both finds run the full 3-call chain.
+      expect(outages, 6);
     },
   );
   test('instrumental and synced-only payloads', () async {
