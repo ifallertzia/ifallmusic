@@ -69,7 +69,7 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.only(top: 8, bottom: 60),
+        padding: const EdgeInsets.only(top: 8, bottom: 190),
         physics: const BouncingScrollPhysics(),
         children: <Widget>[
           SidifyGroup(

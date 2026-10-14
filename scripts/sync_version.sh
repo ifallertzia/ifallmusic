@@ -30,7 +30,7 @@ before="$(sha256sum "$BRANDING" | cut -d' ' -f1)"
 sed -i \
   -e "s|^\(\s*static const String versionLabel = \)'.*';|\1'${VERSION}';|" \
   -e "s|^\(\s*static const String buildLabel = \)'.*';|\1'${BUILD}';|" \
-  -e "s|^\(\s*static const String userAgent = \)'IfallMusic/[^ ]*\(.*\)';|\1'IfallMusic/${VERSION}\2';|" \
+  -e "s|^\(\s*static const String userAgent = \)'\([^/]*\)/[^ ]*\(.*\)';|\1'\2/${VERSION}\3';|" \
   "$BRANDING"
 
 after="$(sha256sum "$BRANDING" | cut -d' ' -f1)"

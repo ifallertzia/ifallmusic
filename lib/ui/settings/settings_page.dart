@@ -49,7 +49,7 @@ class SettingsPage extends StatelessWidget {
         title: Text('Settings', style: SidifyText.titleM(t.text)),
       ),
       body: ListView(
-        padding: const EdgeInsets.only(top: 8, bottom: 80),
+        padding: const EdgeInsets.only(top: 8, bottom: 190),
         physics: const BouncingScrollPhysics(),
         children: <Widget>[
           // ---------------------------------------------------------- Profile
@@ -250,26 +250,8 @@ class SettingsPage extends StatelessWidget {
           SidifyGroup(
             header: 'Sound',
             children: <Widget>[
-              SidifyGroupRow(
-                icon: Icons.wifi_rounded,
-                title: 'Streaming quality · Wi-Fi',
-                trailing: SidifyChips(
-                  small: true,
-                  value: settings.qualityWifi,
-                  options: _qualityOptions,
-                  onChanged: settings.setQualityWifi,
-                ),
-              ),
-              SidifyGroupRow(
-                icon: Icons.signal_cellular_alt_rounded,
-                title: 'Streaming quality · Mobile',
-                trailing: SidifyChips(
-                  small: true,
-                  value: settings.qualityMobile,
-                  options: _qualityOptions,
-                  onChanged: settings.setQualityMobile,
-                ),
-              ),
+              // Streaming quality · Wi-Fi / Mobile are gone for good — those
+              // rows drove nothing and only crowded this group.
               SidifyGroupRow(
                 icon: Icons.volume_up_rounded,
                 title: 'Volume normalization',
@@ -560,12 +542,6 @@ class SettingsPage extends StatelessWidget {
       ),
     );
   }
-
-  static const List<(String, String)> _qualityOptions = <(String, String)>[
-    ('low', 'Data saver'),
-    ('medium', 'Standard'),
-    ('high', 'High'),
-  ];
 
   SliderThemeData _sliderTheme(SidifyTokens t) => SliderThemeData(
         trackHeight: 4,

@@ -12,16 +12,19 @@ import 'sidify_routes.dart';
 import 'sidify_shell_controller.dart';
 
 /// Watches the root navigator so the dock knows when to step aside: the full
-/// player and any sheet/dialog cover it; on a pushed page only the tab bar
-/// steps aside (there is no tab bar under a pushed page).
+/// player and any sheet/dialog cover it.
 class SidifyRouteObserver extends NavigatorObserver {
   final List<Route<dynamic>> _stack = <Route<dynamic>>[];
   final ValueNotifier<bool> hidden = ValueNotifier<bool>(false);
-  final ValueNotifier<bool> pageOnTop = ValueNotifier<bool>(false);
+
+  /// True while any page is pushed over the shell (album, artist, settings…).
+  final ValueNotifier<bool> pushed = ValueNotifier<bool>(false);
 
   @override
   void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
     _stack.add(route);
+    // A fresh page starts scrolled to the top — its chrome starts shown.
+    SidifyDockScroll.barHidden.value = false;
     _sync();
   }
 
@@ -47,21 +50,54 @@ class SidifyRouteObserver extends NavigatorObserver {
   void _sync() {
     if (_stack.isEmpty) {
       if (hidden.value) hidden.value = false;
-      if (pageOnTop.value) pageOnTop.value = false;
+      if (pushed.value) pushed.value = false;
       return;
     }
     final Route<dynamic> top = _stack.last;
     final bool covering = top is PopupRoute ||
         (top is PageRoute<dynamic> &&
             top.settings.name == SidifyRoutes.fullPlayer);
-    final bool pushed = _stack.length > 1;
+    final bool over = _stack.length > 1;
     if (hidden.value != covering) hidden.value = covering;
-    if (pageOnTop.value != pushed) pageOnTop.value = pushed;
+    if (pushed.value != over) pushed.value = over;
+  }
+}
+
+/// Scroll-driven chrome: scrolling down tucks the tab bar away and lets the
+/// mini player slide into its slot; the smallest upward nudge brings the bar
+/// back with the mini player riding above it.
+class SidifyDockScroll {
+  SidifyDockScroll._();
+
+  /// True while the tab bar is tucked away.
+  static final ValueNotifier<bool> barHidden = ValueNotifier<bool>(false);
+
+  /// Wired to the root [NotificationListener]; never consumes notifications.
+  static bool handle(ScrollNotification notification) {
+    if (notification.metrics.axis != Axis.vertical) return false;
+    if (notification is ScrollUpdateNotification) {
+      final double delta = notification.scrollDelta ?? 0;
+      if (notification.metrics.pixels <= notification.metrics.minScrollExtent + 2) {
+        // At (or bouncing at) the very top the bar is always present.
+        if (barHidden.value) barHidden.value = false;
+      } else if (delta >= 1) {
+        if (!barHidden.value) barHidden.value = true;
+      } else if (delta <= -1) {
+        if (barHidden.value) barHidden.value = false;
+      }
+    } else if (notification is ScrollEndNotification) {
+      if (notification.metrics.pixels <=
+              notification.metrics.minScrollExtent + 2 &&
+          barHidden.value) {
+        barHidden.value = false;
+      }
+    }
+    return false;
   }
 }
 
 /// The floating chrome, painted above the navigator in `MaterialApp.builder`:
-/// the glass pill mini player and the glass pill tab bar — the site's
+/// the glass pill mini player and the glass tab bar — the site's
 /// `MobileChrome`, in Flutter. Present on every screen; only the full player
 /// (and sheets) cover it.
 class SidifyDock extends StatelessWidget {
@@ -89,16 +125,20 @@ class SidifyDock extends StatelessWidget {
       valueListenable: observer.hidden,
       builder: (BuildContext context, bool hidden, Widget? _) {
         if (hidden) return const SizedBox.shrink();
+        // Bar slot geometry: 50px pill + 6px glass padding top and bottom.
+        final double tabBottom = safe > 0 ? safe + 6 : 10;
+        const double barSlot = 62;
         return ValueListenableBuilder<bool>(
-          valueListenable: observer.pageOnTop,
-          builder: (BuildContext context, bool pageOnTop, Widget? _) {
-            final double tabBottom = safe > 0 ? safe + 6 : 10;
+          valueListenable: SidifyDockScroll.barHidden,
+          builder: (BuildContext context, bool barHidden, Widget? _) {
             final double miniBottom =
-                pageOnTop ? tabBottom : tabBottom + 72;
+                barHidden ? tabBottom : tabBottom + barSlot + 10;
             return Stack(
               children: <Widget>[
                 if (playback.hasTrack)
-                  Positioned(
+                  AnimatedPositioned(
+                    duration: const Duration(milliseconds: 280),
+                    curve: Curves.easeOutCubic,
                     left: 12,
                     right: 12,
                     bottom: miniBottom,
@@ -125,19 +165,28 @@ class SidifyDock extends StatelessWidget {
                       ),
                     ),
                   ),
-                if (!pageOnTop)
-                  Positioned(
-                    left: 12,
-                    right: 12,
-                    bottom: tabBottom,
-                    child: Align(
-                      alignment: Alignment.center,
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 440),
-                        child: _TabBar(shell: shell),
+                AnimatedPositioned(
+                  duration: const Duration(milliseconds: 280),
+                  curve: Curves.easeOutCubic,
+                  left: 12,
+                  right: 12,
+                  bottom: barHidden ? tabBottom - barSlot - 40 : tabBottom,
+                  child: Align(
+                    alignment: Alignment.center,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 440),
+                      child: AnimatedOpacity(
+                        duration: const Duration(milliseconds: 200),
+                        opacity: barHidden ? 0 : 1,
+                        child: _TabBar(
+                          shell: shell,
+                          observer: observer,
+                          navigatorKey: navigatorKey,
+                        ),
                       ),
                     ),
                   ),
+                ),
               ],
             );
           },
@@ -186,50 +235,57 @@ class _MiniPlayer extends StatelessWidget {
                     child: GestureDetector(
                       onTap: onOpen,
                       behavior: HitTestBehavior.opaque,
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          Text(
-                            track.title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 14.5,
-                              fontWeight: FontWeight.w600,
-                              color: t.text,
-                            ),
-                          ),
-                          Row(
-                            children: <Widget>[
-                              if (jam.isConnected) ...<Widget>[
-                                Icon(Icons.people_rounded,
-                                    size: 12, color: t.playing),
-                                const SizedBox(width: 3),
-                                Text(
-                                  '${jam.members.length}',
-                                  style: TextStyle(
-                                    fontSize: 12.5,
-                                    fontWeight: FontWeight.w600,
-                                    color: t.playing,
-                                  ),
-                                ),
-                                const SizedBox(width: 5),
-                              ],
-                              Flexible(
-                                child: Text(
-                                  track.artist,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontSize: 12.5,
-                                    color: t.text2,
-                                  ),
-                                ),
+                      // Clamped scaling keeps the two text lines inside the
+                      // 58px pill on every font scale — no overflow stripes.
+                      child: MediaQuery.withClampedTextScaling(
+                        maxScaleFactor: 1.15,
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Text(
+                              track.title,
+                              maxLines: 1,
+                              softWrap: false,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 14.5,
+                                fontWeight: FontWeight.w600,
+                                color: t.text,
                               ),
-                            ],
-                          ),
-                        ],
+                            ),
+                            Row(
+                              children: <Widget>[
+                                if (jam.isConnected) ...<Widget>[
+                                  Icon(Icons.people_rounded,
+                                      size: 12, color: t.playing),
+                                  const SizedBox(width: 3),
+                                  Text(
+                                    '${jam.members.length}',
+                                    style: TextStyle(
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w600,
+                                      color: t.playing,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 5),
+                                ],
+                                Flexible(
+                                  child: Text(
+                                    track.artist,
+                                    maxLines: 1,
+                                    softWrap: false,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 12.5,
+                                      color: t.text2,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -326,107 +382,141 @@ class _MiniPlayer extends StatelessWidget {
   }
 }
 
-/// The floating glass tab bar: five destinations, the selection carried by a
-/// soft filled pill behind the icon + label.
+/// The floating glass chrome row: one pill with Home · Explore · Library
+/// (the selection carried by a soft filled pill), a small gap, and a separate
+/// round glass button for Search. Together is gone from the bar for now.
 class _TabBar extends StatelessWidget {
-  const _TabBar({required this.shell});
+  const _TabBar({
+    required this.shell,
+    required this.observer,
+    required this.navigatorKey,
+  });
 
   final SidifyShellController shell;
+  final SidifyRouteObserver observer;
+  final GlobalKey<NavigatorState> navigatorKey;
 
   static const List<(SidifyTab, String, IconData)> _tabs =
       <(SidifyTab, String, IconData)>[
     (SidifyTab.home, 'Home', Icons.home_rounded),
     (SidifyTab.explore, 'Explore', Icons.explore_rounded),
-    (SidifyTab.search, 'Search', Icons.search_rounded),
     (SidifyTab.library, 'Library', Icons.library_music_rounded),
-    (SidifyTab.together, 'Together', Icons.people_rounded),
   ];
+
+  void _go(SidifyTab tab) {
+    // Tapping a tab from a pushed page lands on that tab's root.
+    if (observer.pushed.value) {
+      navigatorKey.currentState?.popUntil((Route<dynamic> r) => r.isFirst);
+    }
+    shell.select(tab);
+  }
+
+  void _goSearch() {
+    if (observer.pushed.value) {
+      navigatorKey.currentState?.popUntil((Route<dynamic> r) => r.isFirst);
+    }
+    shell.goSearch();
+  }
 
   @override
   Widget build(BuildContext context) {
     final SidifyTokens t = context.sidify;
-    final JamService jam = context.watch<JamService>();
-    return GlassBox(
-      bar: true,
-      radius: 999,
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-      child: SizedBox(
-        height: 50,
-        child: Row(
-          children: <Widget>[
-            for (final (SidifyTab tab, String label, IconData icon) in _tabs)
-              Expanded(
-                child: GestureDetector(
-                  onTap: () => shell.select(tab),
-                  behavior: HitTestBehavior.opaque,
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 180),
-                    height: 50,
-                    decoration: BoxDecoration(
-                      color: shell.tab == tab ? t.fill3 : Colors.transparent,
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: <Widget>[
-                        Stack(
-                          clipBehavior: Clip.none,
-                          children: <Widget>[
-                            Icon(
-                              icon,
-                              size: 22,
-                              color: shell.tab == tab
-                                  ? t.text
-                                  : t.text.withValues(alpha: 0.6),
-                            ),
-                            if (tab == SidifyTab.together && jam.isConnected)
-                              Positioned(
-                                top: -4,
-                                right: -8,
-                                child: Container(
-                                  constraints:
-                                      const BoxConstraints(minWidth: 15),
-                                  height: 15,
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 3,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: t.brand,
-                                    borderRadius: BorderRadius.circular(999),
-                                  ),
-                                  child: Text(
-                                    '${jam.members.length}',
-                                    textAlign: TextAlign.center,
-                                    style: const TextStyle(
-                                      fontSize: 9,
-                                      fontWeight: FontWeight.w700,
-                                      color: Colors.white,
+    return Row(
+      children: <Widget>[
+        Expanded(
+          child: GlassBox(
+            bar: true,
+            radius: 999,
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+            child: SizedBox(
+              height: 50,
+              child: Row(
+                children: <Widget>[
+                  for (final (SidifyTab tab, String label, IconData icon)
+                      in _tabs)
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () => _go(tab),
+                        behavior: HitTestBehavior.opaque,
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 180),
+                          height: 50,
+                          decoration: BoxDecoration(
+                            color: shell.tab == tab ? t.fill3 : Colors.transparent,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: MediaQuery.withClampedTextScaling(
+                            maxScaleFactor: 1.1,
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: <Widget>[
+                                Icon(
+                                  icon,
+                                  size: 22,
+                                  color: shell.tab == tab
+                                      ? t.text
+                                      : t.text.withValues(alpha: 0.6),
+                                ),
+                                const SizedBox(height: 3),
+                                // Scale-down fit: the label shrinks rather
+                                // than overflowing its cell (the yellow
+                                // overflow stripes are gone for good).
+                                Flexible(
+                                  child: FittedBox(
+                                    fit: BoxFit.scaleDown,
+                                    child: Text(
+                                      label,
+                                      maxLines: 1,
+                                      softWrap: false,
+                                      overflow: TextOverflow.clip,
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        height: 1,
+                                        fontWeight: FontWeight.w600,
+                                        color: shell.tab == tab
+                                            ? t.text
+                                            : t.text.withValues(alpha: 0.6),
+                                      ),
                                     ),
                                   ),
                                 ),
-                              ),
-                          ],
-                        ),
-                        const SizedBox(height: 3),
-                        Text(
-                          label,
-                          style: TextStyle(
-                            fontSize: 10,
-                            height: 1,
-                            fontWeight: FontWeight.w600,
-                            color: shell.tab == tab
-                                ? t.text
-                                : t.text.withValues(alpha: 0.6),
+                              ],
+                            ),
                           ),
                         ),
-                      ],
+                      ),
                     ),
-                  ),
-                ),
+                ],
               ),
-          ],
+            ),
+          ),
         ),
-      ),
+        const SizedBox(width: 10),
+        GlassBox(
+          bar: true,
+          radius: 999,
+          padding: const EdgeInsets.all(6),
+          child: GestureDetector(
+            onTap: _goSearch,
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              width: 50,
+              height: 50,
+              decoration: BoxDecoration(
+                color: shell.tab == SidifyTab.search ? t.fill3 : Colors.transparent,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.search_rounded,
+                size: 22,
+                color: shell.tab == SidifyTab.search
+                    ? t.text
+                    : t.text.withValues(alpha: 0.72),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

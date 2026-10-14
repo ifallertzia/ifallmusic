@@ -31,10 +31,10 @@ void openFullPlayer(BuildContext context) {
   );
 }
 
-void openAlbum(BuildContext context, AlbumCard album) {
+void openAlbum(BuildContext context, AlbumCard album, {bool musicOnly = false}) {
   Navigator.of(context).push(
     MaterialPageRoute<void>(
-      builder: (_) => AlbumPage(album: album),
+      builder: (_) => AlbumPage(album: album, musicOnly: musicOnly),
       settings: const RouteSettings(name: SidifyRoutes.album),
     ),
   );

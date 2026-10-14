@@ -14,7 +14,8 @@ import '../widgets/sidify_widgets.dart';
 /// resolved by the engine from the card's query (or by browsing a real
 /// album/playlist id), exactly as before.
 class AlbumPage extends StatefulWidget {
-  const AlbumPage({super.key, required this.album}) : browseItem = null;
+  const AlbumPage({super.key, required this.album, this.musicOnly = false})
+      : browseItem = null;
 
   AlbumPage.fromBrowse({super.key, required MusicBrowseItem item})
       : album = AlbumCard(
@@ -23,10 +24,15 @@ class AlbumPage extends StatefulWidget {
           artist: item.kind,
           coverVideoId: null,
         ),
-        browseItem = item;
+        browseItem = item,
+        musicOnly = true;
 
   final AlbumCard album;
   final MusicBrowseItem? browseItem;
+
+  /// Resolve the query through YouTube **Music** only — no plain-YouTube
+  /// fallback. Used for the New releases shelves, which must stay real songs.
+  final bool musicOnly;
 
   @override
   State<AlbumPage> createState() => _AlbumPageState();
@@ -41,7 +47,9 @@ class _AlbumPageState extends State<AlbumPage> {
     final YoutubeService youtube = context.read<YoutubeService>();
     _tracks = widget.browseItem != null
         ? youtube.browseTracks(widget.browseItem!)
-        : youtube.searchSongs(widget.album.query, limit: 24);
+        : widget.musicOnly
+            ? youtube.musicSongs(widget.album.query, limit: 24)
+            : youtube.searchSongs(widget.album.query, limit: 24);
   }
 
   @override
