@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -1020,6 +1021,40 @@ class SourcesSettingsPage extends StatelessWidget {
   }
 }
 
+Future<String?> _prompt(
+  BuildContext context, {
+  required String title,
+  required String initial,
+  bool obscure = false,
+  String? hint,
+}) {
+  final TextEditingController controller =
+      TextEditingController(text: initial);
+  return showDialog<String>(
+    context: context,
+    builder: (BuildContext dialogContext) => AlertDialog(
+      title: Text(title),
+      content: TextField(
+        controller: controller,
+        autofocus: true,
+        obscureText: obscure,
+        decoration: InputDecoration(hintText: hint ?? title),
+        onSubmitted: (String v) => Navigator.of(dialogContext).pop(v),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(),
+          child: const Text('Cancel'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(controller.text),
+          child: const Text('Save'),
+        ),
+      ],
+    ),
+  );
+}
+
 // ------------------------------------------------------------------ accounts
 
 /// Scrobbling and account-linked imports.
@@ -1168,39 +1203,6 @@ class AccountsSettingsPage extends StatelessWidget {
     );
   }
 
-  Future<String?> _prompt(
-    BuildContext context, {
-    required String title,
-    required String initial,
-    bool obscure = false,
-    String? hint,
-  }) {
-    final TextEditingController controller =
-        TextEditingController(text: initial);
-    return showDialog<String>(
-      context: context,
-      builder: (BuildContext dialogContext) => AlertDialog(
-        title: Text(title),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          obscureText: obscure,
-          decoration: InputDecoration(hintText: hint ?? title),
-          onSubmitted: (String v) => Navigator.of(dialogContext).pop(v),
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(controller.text),
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 // ------------------------------------------------------------------- discord
@@ -2311,6 +2313,12 @@ class _ContactSection extends StatelessWidget {
         _SettingTile(
           icon: Icons.mail_outline_rounded,
           title: 'Contact / Report / Feedback',
+          subtitle: 'Mail, bug reports and ideas',
+          trailing: const Icon(
+            Icons.open_in_new_rounded,
+            size: 18,
+            color: IfallTokens.textFaint,
+          ),
           onTap: () => _showReportDialog(context),
         ),
       ],

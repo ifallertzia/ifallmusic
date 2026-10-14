@@ -153,8 +153,7 @@ class IfallText {
       color: color,
       letterSpacing: letterSpacing,
       height: height,
-      overflow: overflow,
-    ).copyWith(fontFamilyFallback: fallback);
+    ).copyWith(fontFamilyFallback: fallback, overflow: overflow);
   }
 
   /// The big page title (Home, Search, Library…).

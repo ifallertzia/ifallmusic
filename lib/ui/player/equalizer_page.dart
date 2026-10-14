@@ -6,7 +6,6 @@ import 'package:provider/provider.dart';
 import '../../core/services/native_bridge.dart';
 import '../../core/services/playback_service.dart';
 import '../../core/services/settings_service.dart';
-import '../../core/theme/glass.dart';
 import '../../core/theme/saxify_accents.dart';
 import '../../core/theme/saxify_theme.dart';
 import '../widgets/search_fab.dart';
