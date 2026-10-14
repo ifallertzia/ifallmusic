@@ -7,6 +7,7 @@ import '../config/branding.dart';
 import '../core/services/settings_service.dart';
 import 'lrc_parser.dart';
 import 'lyrics_query.dart';
+import 'lyrics_translator.dart';
 
 export 'lrc_parser.dart';
 export 'lyrics_query.dart';
@@ -81,7 +82,36 @@ class LyricsService {
   List<String> providers;
 
   final _memory = <String, ({DateTime at, LyricsResult result})>{};
+
+  /// Settings → Lyrics → "Translate lyrics into", synced at boot and when
+  /// the sheet changes it. Empty means translation is off. Only the lookup
+  /// result is translated — the on-device cache always keeps the original
+  /// words, so turning translation off is instant and free.
+  static String translateTarget = '';
+
   Future<LyricsResult> find({
+    required String title,
+    String artist = '',
+    int durationSecs = 0,
+    String? videoId,
+    bool refresh = false,
+    CancelToken? cancelToken,
+    List<String>? useProviders,
+  }) async {
+    final LyricsResult raw = await _find(
+      title: title,
+      artist: artist,
+      durationSecs: durationSecs,
+      videoId: videoId,
+      refresh: refresh,
+      cancelToken: cancelToken,
+      useProviders: useProviders,
+    );
+    if (translateTarget.isEmpty) return raw;
+    return LyricsTranslator.translate(raw, translateTarget);
+  }
+
+  Future<LyricsResult> _find({
     required String title,
     String artist = '',
     int durationSecs = 0,

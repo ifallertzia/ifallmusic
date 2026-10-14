@@ -11,7 +11,7 @@ void main() {
         '37i9dQZF1DXcBWIGoYBM5M',
       );
       expect(
-        SpotifyImportService.playlistId('spotify:playlist/37i9dQZF1DXcBWIGoYBM5M'),
+        SpotifyImportService.playlistId('spotify:playlist:37i9dQZF1DXcBWIGoYBM5M'),
         '37i9dQZF1DXcBWIGoYBM5M',
       );
       expect(

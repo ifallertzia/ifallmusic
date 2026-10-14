@@ -1428,6 +1428,7 @@ void showTranslationSheet(BuildContext context) {
                 title: Text(target.isEmpty ? 'Off' : target),
                 onChanged: (String? v) {
                   settings.setLyricsTranslateTo(v ?? '');
+                  LyricsService.translateTarget = v ?? '';
                   Navigator.of(sheetContext).pop();
                 },
               ),
