@@ -21,6 +21,11 @@ See `docs/RELEASE_SIGNING.md`.
 
 ## Features
 
+- **Folding dock** — scroll down and the tab bar folds into the mini player:
+  Home stays as a small round button on the left, the player slimmed into the
+  bar's row beside it, Search keeping its seat on the right. Scroll up and it
+  unfolds through the same path. One driven animation, on liquid glass you can
+  see straight through.
 - **Home** — greeting with your name, Top picks, Quick picks, Recently
   played, New releases, Top artists with real faces, and picks from your
   Liked Songs.
@@ -28,10 +33,11 @@ See `docs/RELEASE_SIGNING.md`.
   Romance, Party, Sleep…) and genre stations.
 - **Search** — recent searches, browse categories, and Top results / Songs /
   Albums / Artists filters.
-- **Player** — full-screen Now Playing: artwork-mesh backdrop, artwork that
-  breathes with the music (and eases down when paused), karaoke lyrics that
+- **Player** — full-screen Now Playing: a background coloured by the sleeve
+  itself (deep, quiet, no glow), square artwork that eases down when paused,
+  a 2px timeline you can tap or drag anywhere along it, karaoke lyrics that
   follow the line, queue with Play next / shuffle, AutoPlay, crossfade,
-  equalizer, sleep timer, speed, and a glass mini-player + floating tab bar.
+  equalizer, sleep timer, speed, volume and the live download ring.
 - **Library** — Your Replay stats, Liked Songs, History, Downloads, the
   Lyrics finder, on-device music, playlists you can pin, and followed artists.
 - **Listen Together** — start a room, share the six-character code, and

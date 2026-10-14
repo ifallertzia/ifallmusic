@@ -1,5 +1,42 @@
 # Sidify 2.10.0
 
+## Unreleased — the dock folds, the player goes quiet
+
+### Bottom bar & mini player
+
+- **The bar folds into the player instead of vanishing.** Scrolling down now
+  slides the tab bar's cells away one by one: Home remains as a small round
+  glass button on the left, the mini player slimmed drops into the row the bar
+  just gave up, and Search keeps its seat on the right of both. Scrolling up
+  walks the exact same path back. It is one animation driving three surfaces —
+  the pieces look like they come out of each other, because they do.
+- **Liquid glass, for real.** The panes dropped most of their opacity and got a
+  stronger frost, a second inner rim, and a specular streak that travels while
+  the dock folds — the page shows straight through the chrome. Settings ›
+  Liquid glass turns it off; high-performance mode thins the blur.
+- **Sheets wear the same glass** — playback, queue menus and the track menu are
+  frosted panes now, not flat cards.
+
+### Now Playing
+
+- **The oversized glow is gone.** The backdrop used to light four 340px radial
+  blobs from the sleeve's quadrants, which turned any yellow cover into a
+  spotlight behind the artwork and a second one under the controls. It is now
+  one deep colour sampled from the actual artwork — hue kept, saturation cut to
+  a third, lightness pinned under 0.17 so white type stays readable — plus a
+  single low-alpha wash for depth.
+- **A real timeline.** The progress card became a 2px line: soft white played,
+  translucent unplayed, a thumb that only exists while you hold it, elapsed and
+  remaining under it. Tap or drag anywhere along the 26px band to seek; the
+  line is still driven by the player's own position stream and nothing else.
+- **Transport, re-weighted.** Shuffle and repeat moved up beside the primaries
+  (same toggles as before, marked with a dot when on), like and "…" are bare
+  icons on the title row, and the "OFFLINE" word moved from under the timeline
+  to the artist line. Every existing action — queue, lyrics, download, speed,
+  equalizer, sleep, crossfade, playlist, share — is still one tap away.
+- **Colour cross-fades between tracks** instead of flashing, and missing or
+  unreadable artwork lands on a neutral graphite screen rather than a brand
+  colour.
 The floating chrome got a proper glass pass — and a pile of polish underneath.
 Same package (`com.ifallmusic.app`), same release key: install straight over
 your current app, no conflict. Your library, settings, playlists and downloads
