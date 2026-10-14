@@ -1,3 +1,31 @@
+# IfallMusic 2.8.0
+
+The BitChord-look release: the whole app now wears the frosted-glass,
+true-black design with the sliding-pill tab bar, and the chubby motu
+mascot is the logo in every slot. Same package (`com.ifallmusic.app`),
+same release key — install it straight over 2.7.0, no conflict.
+
+## New
+- **Listen Together rooms** — create or join a room and listen in sync.
+- **Animated album canvas** on Now Playing, dynamic artwork colours.
+- **True crossfade 0–12 s, Automix, volume normalization**, skip
+  silence, playback speed and a sleep timer (presets + stop-after-track).
+- **Stats for nerds** and Replay / on-device listening stats.
+- **Lyrics from more places** (LRCLIB → lrc.red / KuGou / Megalobiz →
+  lyrics.ovh), **plus translation** that keeps the synced timings.
+- **Last.fm + ListenBrainz scrobbling** and Discord Rich Presence.
+- **Spotify playlist import** — paste a public playlist link; it is
+  matched and rebuilt as a local playlist.
+- **Extra module sources** are now a real final fallback rung in the
+  stream resolver, after the built-in engine.
+- **Per-network audio quality** (Wi-Fi / mobile) now actually caps the
+  stream bitrate on both resolvers; downloads stay uncapped.
+
+## Fixes
+- Settings no longer claims "0 downloads active" forever.
+- Lyrics provider order and translation choice apply from first launch.
+- The whole build is CI-green again (analyze, tests, signed APK + AAB).
+
 # IfallMusic 2.6.0 (build 22)
 
 Rebuilt on **build 17** — the layout everybody liked — with only the build-21
