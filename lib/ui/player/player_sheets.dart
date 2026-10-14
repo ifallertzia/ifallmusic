@@ -7,6 +7,7 @@ import '../../core/services/settings_service.dart';
 import '../../core/theme/ifall_ui.dart';
 import '../../core/utils/format.dart';
 import '../widgets/artwork.dart';
+import '../../core/models/nerd_stats.dart';
 
 // ------------------------------------------------------------------- queue
 
@@ -428,7 +429,6 @@ class _TrackDetailsSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final IfallPalette c = IfallPalette.of(context);
     final NerdStats stats = context.read<PlaybackService>().nerdStats;
     return IfallSheet(
       title: song.title,

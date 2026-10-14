@@ -4,6 +4,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import '../../config/branding.dart';
 import 'saxify_accents.dart';
 
 /// The IfallMusic design language.

@@ -22,6 +22,7 @@ import '../widgets/artwork.dart';
 import '../widgets/media_cards.dart';
 import '../widgets/song_tile.dart';
 import 'playlist_detail_page.dart';
+import '../shell/ifall_shell.dart';
 
 /// Number of sections the Library list can open. Regression guard:
 /// [buildLibraryTabCounts] must return exactly this many entries.

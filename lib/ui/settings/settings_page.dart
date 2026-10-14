@@ -33,6 +33,8 @@ import 'background_guide_sheet.dart';
 import 'backup_sheet.dart';
 import 'playlist_sync_sheet.dart';
 import 'update_dialog.dart';
+import '../../core/theme/glass.dart';
+import '../widgets/neon.dart';
 
 /// The language choices offered in Settings. `system` follows the phone.
 const List<(String, String)> appLanguages = <(String, String)>[
