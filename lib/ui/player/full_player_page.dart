@@ -3,6 +3,7 @@ import 'package:just_audio/just_audio.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/models/song.dart';
+import '../../core/services/app_feedback.dart';
 import '../../core/services/library_service.dart';
 import '../../core/services/listen_together_service.dart';
 import '../../core/services/music_download_service.dart';
@@ -10,7 +11,6 @@ import '../../core/services/playback_service.dart';
 import '../../core/services/settings_service.dart';
 import '../../core/utils/format.dart';
 import '../artist/artist_page.dart';
-import '../rooms/listen_together_page.dart';
 import '../shell/sidify_routes.dart';
 import '../widgets/sidify_widgets.dart';
 import '../widgets/song_menu.dart';
@@ -128,7 +128,7 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
                 _scrubber(context, song, playback),
                 _transport(context, playback),
                 _volumeRow(context, playback),
-                _bottomRow(context, playback),
+                _bottomRow(context, song, playback),
                 _upNext(context, playback),
                 const SizedBox(height: 6),
               ],
@@ -477,8 +477,7 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
     );
   }
 
-  Widget _bottomRow(BuildContext context, PlaybackService playback) {
-    final JamService jam = context.watch<JamService>();
+  Widget _bottomRow(BuildContext context, Song song, PlaybackService playback) {
     final bool isQueue = _view == 'queue';
     return Padding(
       padding: const EdgeInsets.fromLTRB(30, 12, 30, 0),
@@ -540,24 +539,7 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
                         wide: true,
                       ),
                       _capsuleDivider(),
-                      _capsuleBtn(
-                        Icons.people_rounded,
-                        'Listen Together',
-                        jam.isConnected,
-                        () {
-                          Navigator.of(context).pop();
-                          Navigator.of(context).push(
-                            MaterialPageRoute<void>(
-                              builder: (_) => const ListenTogetherPage(),
-                              settings: const RouteSettings(
-                                name: SidifyRoutes.together,
-                              ),
-                            ),
-                          );
-                        },
-                        wide: true,
-                        badge: jam.isConnected ? '${jam.members.length}' : null,
-                      ),
+                      _DownloadCapsule(song: song),
                     ],
             ),
           ),
@@ -602,7 +584,6 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
     bool on,
     VoidCallback onTap, {
     bool wide = false,
-    String? badge,
   }) {
     return GestureDetector(
       onTap: onTap,
@@ -622,17 +603,6 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
               size: 19,
               color: on ? Colors.black : Colors.white.withValues(alpha: 0.85),
             ),
-            if (badge != null) ...<Widget>[
-              const SizedBox(width: 5),
-              Text(
-                badge,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  color: on ? Colors.black : Colors.white,
-                ),
-              ),
-            ],
           ],
         ),
       ),
@@ -702,6 +672,132 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
           shape: BoxShape.circle,
         ),
         child: Icon(icon, size: iconSize, color: Colors.white),
+      ),
+    );
+  }
+}
+
+/// The capsule's download cell — the seat the Listen Together icon used to
+/// have (the room is still one tap away from Home, Library and Settings).
+///
+/// Tap it and the song is saved for offline listening: the arrow becomes a
+/// ring, the percentage counts up in the middle while the ring fills, and a
+/// tick lands when the file is on the device. Tapping again while it is still
+/// coming down cancels it, exactly like the "…" menu does.
+///
+/// It reads the same [MusicDownloadService] the Downloads page does, so the
+/// ring stays honest when a download was started somewhere else, and it keeps
+/// the capsule's 36px height and 44px minimum cell width.
+class _DownloadCapsule extends StatelessWidget {
+  const _DownloadCapsule({required this.song});
+
+  final Song song;
+
+  Future<void> _tap(
+    MusicDownloadService downloads,
+    PlaybackService playback,
+    MusicDownloadJob? job,
+    bool active,
+    bool done,
+  ) async {
+    if (done) {
+      showAppNotice('Saved on this device');
+      return;
+    }
+    if (active) {
+      downloads.cancel(job);
+      showAppNotice('Download cancelled');
+      return;
+    }
+    final MusicDownloadJob result = await downloads.enqueue(song, playback);
+    if (result.phase == MusicDownloadPhase.done) {
+      showAppNotice('Saved for offline listening');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final MusicDownloadService downloads =
+        context.watch<MusicDownloadService>();
+    final PlaybackService playback = context.read<PlaybackService>();
+    final MusicDownloadJob? job = downloads.jobFor(song.id);
+    final bool done = downloads.isDownloaded(song.id);
+    final bool active = job != null &&
+        (job.phase == MusicDownloadPhase.running ||
+            job.phase == MusicDownloadPhase.idle);
+    final double fraction = (job?.fraction ?? 0.0).clamp(0.0, 1.0);
+
+    return GestureDetector(
+      onTap: () => _tap(downloads, playback, job, active, done),
+      child: Container(
+        height: 36,
+        constraints: const BoxConstraints(minWidth: 44),
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        alignment: Alignment.center,
+        child: done
+            ? const Icon(Icons.check_rounded, size: 19, color: Colors.white)
+            : active
+                ? _DownloadRing(fraction: fraction)
+                : Icon(
+                    Icons.download_rounded,
+                    size: 19,
+                    color: Colors.white.withValues(alpha: 0.85),
+                  ),
+      ),
+    );
+  }
+}
+
+/// The live ring: 24px inside the 36px capsule, arc filling with the download
+/// and the percentage counting up in the middle. While the stream is still
+/// being resolved there are no bytes to count, so the ring spins instead of
+/// sitting on a misleading 0%.
+class _DownloadRing extends StatelessWidget {
+  const _DownloadRing({required this.fraction});
+
+  final double fraction;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool measured = fraction > 0;
+    // 100% belongs to the tick, not to the ring.
+    final int pct = (fraction * 100).round().clamp(0, 99);
+    return SizedBox(
+      width: 24,
+      height: 24,
+      child: Stack(
+        alignment: Alignment.center,
+        children: <Widget>[
+          SizedBox.expand(
+            child: CircularProgressIndicator(
+              value: measured ? fraction : null,
+              strokeWidth: 2.2,
+              strokeCap: StrokeCap.round,
+              color: Colors.white,
+              backgroundColor: Colors.white.withValues(alpha: 0.18),
+            ),
+          ),
+          if (measured)
+            SizedBox(
+              width: 18,
+              height: 18,
+              // Scaled down rather than clipped: the number can never push the
+              // ring wider, whatever the system font scale is.
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  '$pct%',
+                  style: const TextStyle(
+                    fontSize: 9,
+                    height: 1,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                    fontFeatures: <FontFeature>[FontFeature.tabularFigures()],
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }

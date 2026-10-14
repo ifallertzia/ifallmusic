@@ -229,9 +229,15 @@ class SettingsPage extends StatelessWidget {
               ),
               SidifyGroupRow(
                 icon: Icons.speed_rounded,
-                title: 'Speed',
+                // No "Speed" word: the icon is the whole label, so the rate
+                // chips get the row to themselves instead of fighting the word
+                // for one line on a narrow phone — the same call the Playback
+                // sheet already makes.
+                title: '',
                 trailing: Wrap(
                   spacing: 6,
+                  runSpacing: 6,
+                  alignment: WrapAlignment.end,
                   children: <Widget>[
                     for (final double v in <double>[0.75, 1, 1.25, 1.5, 2])
                       _miniChip(

@@ -96,6 +96,16 @@ class SidifyDockScroll {
   }
 }
 
+/// The base text style for everything the dock paints. The dock lives above
+/// the navigator, outside any `Material`, so it has to name its own style —
+/// otherwise `Text` falls back to Flutter's debug style (yellow monospace,
+/// double-underlined) and every label grows a yellow line under it.
+TextStyle _dockTextStyle(BuildContext context) {
+  final SidifyTokens t = context.sidify;
+  return (Theme.of(context).textTheme.bodyMedium ?? SidifyText.bodyS(t.text))
+      .copyWith(decoration: TextDecoration.none);
+}
+
 /// The floating chrome, painted above the navigator in `MaterialApp.builder`:
 /// the glass pill mini player and the glass tab bar — the site's
 /// `MobileChrome`, in Flutter. Present on every screen; only the full player
@@ -133,61 +143,71 @@ class SidifyDock extends StatelessWidget {
           builder: (BuildContext context, bool barHidden, Widget? _) {
             final double miniBottom =
                 barHidden ? tabBottom : tabBottom + barSlot + 10;
-            return Stack(
-              children: <Widget>[
-                if (playback.hasTrack)
+            // The dock is painted above the navigator (MaterialApp.builder),
+            // so it has no Material ancestor. Without one, every Text here
+            // inherits Flutter's *fallback* text style — yellow monospace with
+            // a double yellow underline — which is exactly what used to draw
+            // yellow lines under the song title, the artist name and the tab
+            // labels. Supplying the app's own body style removes them at the
+            // source: no per-widget decoration overrides, no global change.
+            return DefaultTextStyle(
+              style: _dockTextStyle(context),
+              child: Stack(
+                children: <Widget>[
+                  if (playback.hasTrack)
+                    AnimatedPositioned(
+                      duration: const Duration(milliseconds: 280),
+                      curve: Curves.easeOutCubic,
+                      left: 12,
+                      right: 12,
+                      bottom: miniBottom,
+                      child: Align(
+                        alignment: Alignment.center,
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 440),
+                          child: _MiniPlayer(
+                            onOpen: () {
+                              final NavigatorState? nav =
+                                  navigatorKey.currentState;
+                              if (nav == null) return;
+                              nav.push(
+                                MaterialPageRoute<void>(
+                                  builder: (_) => const FullPlayerPage(),
+                                  settings: const RouteSettings(
+                                    name: SidifyRoutes.fullPlayer,
+                                  ),
+                                  fullscreenDialog: true,
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+                    ),
                   AnimatedPositioned(
                     duration: const Duration(milliseconds: 280),
                     curve: Curves.easeOutCubic,
                     left: 12,
                     right: 12,
-                    bottom: miniBottom,
+                    bottom: barHidden ? tabBottom - barSlot - 40 : tabBottom,
                     child: Align(
                       alignment: Alignment.center,
                       child: ConstrainedBox(
                         constraints: const BoxConstraints(maxWidth: 440),
-                        child: _MiniPlayer(
-                          onOpen: () {
-                            final NavigatorState? nav =
-                                navigatorKey.currentState;
-                            if (nav == null) return;
-                            nav.push(
-                              MaterialPageRoute<void>(
-                                builder: (_) => const FullPlayerPage(),
-                                settings: const RouteSettings(
-                                  name: SidifyRoutes.fullPlayer,
-                                ),
-                                fullscreenDialog: true,
-                              ),
-                            );
-                          },
+                        child: AnimatedOpacity(
+                          duration: const Duration(milliseconds: 200),
+                          opacity: barHidden ? 0 : 1,
+                          child: _TabBar(
+                            shell: shell,
+                            observer: observer,
+                            navigatorKey: navigatorKey,
+                          ),
                         ),
                       ),
                     ),
                   ),
-                AnimatedPositioned(
-                  duration: const Duration(milliseconds: 280),
-                  curve: Curves.easeOutCubic,
-                  left: 12,
-                  right: 12,
-                  bottom: barHidden ? tabBottom - barSlot - 40 : tabBottom,
-                  child: Align(
-                    alignment: Alignment.center,
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 440),
-                      child: AnimatedOpacity(
-                        duration: const Duration(milliseconds: 200),
-                        opacity: barHidden ? 0 : 1,
-                        child: _TabBar(
-                          shell: shell,
-                          observer: observer,
-                          navigatorKey: navigatorKey,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
+                ],
+              ),
             );
           },
         );
@@ -196,8 +216,10 @@ class SidifyDock extends StatelessWidget {
   }
 }
 
-/// The pill mini player (58px, radius 18): artwork, title/artist, play and
-/// next, and a 2px progress hairline along the bottom.
+/// The pill mini player — liquid glass, 58px tall, radius 18: artwork,
+/// title/artist, play and next, and a 2px progress hairline along the bottom.
+/// Every measurement here is the one the pill has always had; only the surface
+/// it is painted on changed.
 class _MiniPlayer extends StatelessWidget {
   const _MiniPlayer({required this.onOpen});
 
@@ -307,39 +329,48 @@ class _MiniPlayer extends StatelessWidget {
                 ],
               ),
             ),
+            // Its own layer: the hairline ticks with playback, and this keeps
+            // those repaints off the glass underneath. Same 2px, same insets.
             Positioned(
               left: 16,
               right: 16,
               bottom: 0,
-              child: StreamBuilder<Duration>(
-                stream: playback.positionStream,
-                initialData: playback.position,
-                builder: (BuildContext context, AsyncSnapshot<Duration> s) {
-                  final Duration pos = s.data ?? playback.position;
-                  final int durMs = playback.duration.inMilliseconds;
-                  final double pct = durMs > 0
-                      ? (pos.inMilliseconds / durMs).clamp(0.0, 1.0)
-                      : 0;
-                  return Container(
-                    height: 2,
-                    decoration: BoxDecoration(
-                      color: t.fill2,
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: FractionallySizedBox(
-                        widthFactor: pct,
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: t.text.withValues(alpha: 0.7),
-                            borderRadius: BorderRadius.circular(999),
+              child: RepaintBoundary(
+                child: StreamBuilder<Duration>(
+                  stream: playback.positionStream,
+                  initialData: playback.position,
+                  builder: (BuildContext context, AsyncSnapshot<Duration> s) {
+                    final Duration pos = s.data ?? playback.position;
+                    final int durMs = playback.duration.inMilliseconds;
+                    final double pct = durMs > 0
+                        ? (pos.inMilliseconds / durMs).clamp(0.0, 1.0)
+                        : 0;
+                    return Container(
+                      height: 2,
+                      decoration: BoxDecoration(
+                        color: t.fill2,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: FractionallySizedBox(
+                          widthFactor: pct,
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(999),
+                              gradient: LinearGradient(
+                                colors: <Color>[
+                                  t.text.withValues(alpha: 0.55),
+                                  t.text.withValues(alpha: 0.78),
+                                ],
+                              ),
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                  );
-                },
+                    );
+                  },
+                ),
               ),
             ),
           ],
@@ -382,9 +413,14 @@ class _MiniPlayer extends StatelessWidget {
   }
 }
 
-/// The floating glass chrome row: one pill with Home · Explore · Library
-/// (the selection carried by a soft filled pill), a small gap, and a separate
-/// round glass button for Search. Together is gone from the bar for now.
+/// The floating liquid-glass chrome row: one pill with Home · Explore ·
+/// Library (the selection carried by a soft translucent pill), a small gap,
+/// and a separate round glass button for Search. Together is gone from the bar
+/// for now.
+///
+/// Geometry is untouched: 50px cells inside 6px of glass padding (a 62px
+/// slot), radius 999, 22px icons, 10px labels, 10px gap to the round Search
+/// button.
 class _TabBar extends StatelessWidget {
   const _TabBar({
     required this.shell,
@@ -402,6 +438,19 @@ class _TabBar extends StatelessWidget {
     (SidifyTab.explore, 'Explore', Icons.explore_rounded),
     (SidifyTab.library, 'Library', Icons.library_music_rounded),
   ];
+
+  /// The selected destination: a soft translucent pill, a shade brighter along
+  /// the top so it reads as glass resting on glass. Legible for the icon and
+  /// the label on top of it, and quiet enough that the unselected cells stay
+  /// clear against the pane.
+  static LinearGradient _selection(SidifyTokens t) => LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: <Color>[
+          t.text.withValues(alpha: t.isDark ? 0.18 : 0.12),
+          t.text.withValues(alpha: t.isDark ? 0.09 : 0.06),
+        ],
+      );
 
   void _go(SidifyTab tab) {
     // Tapping a tab from a pushed page lands on that tab's root.
@@ -442,8 +491,10 @@ class _TabBar extends StatelessWidget {
                           duration: const Duration(milliseconds: 180),
                           height: 50,
                           decoration: BoxDecoration(
-                            color: shell.tab == tab ? t.fill3 : Colors.transparent,
                             borderRadius: BorderRadius.circular(999),
+                            // Same pill, same size — now a lit translucent
+                            // pane sitting on the glass instead of a flat fill.
+                            gradient: shell.tab == tab ? _selection(t) : null,
                           ),
                           child: MediaQuery.withClampedTextScaling(
                             maxScaleFactor: 1.1,
@@ -458,9 +509,8 @@ class _TabBar extends StatelessWidget {
                                       : t.text.withValues(alpha: 0.6),
                                 ),
                                 const SizedBox(height: 3),
-                                // Scale-down fit: the label shrinks rather
-                                // than overflowing its cell (the yellow
-                                // overflow stripes are gone for good).
+                                // Scale-down fit: a long label shrinks inside
+                                // its cell instead of overflowing the pill.
                                 Flexible(
                                   child: FittedBox(
                                     fit: BoxFit.scaleDown,
@@ -503,8 +553,9 @@ class _TabBar extends StatelessWidget {
               width: 50,
               height: 50,
               decoration: BoxDecoration(
-                color: shell.tab == SidifyTab.search ? t.fill3 : Colors.transparent,
                 shape: BoxShape.circle,
+                gradient:
+                    shell.tab == SidifyTab.search ? _selection(t) : null,
               ),
               child: Icon(
                 Icons.search_rounded,
