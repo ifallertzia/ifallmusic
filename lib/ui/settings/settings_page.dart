@@ -17,6 +17,7 @@ import '../../config/branding.dart';
 import '../../core/services/app_feedback.dart';
 import '../../core/services/library_service.dart';
 import '../../core/services/listen_together_service.dart';
+import '../../core/services/music_download_service.dart';
 import '../../core/services/playback_service.dart';
 import '../../core/models/song.dart';
 import '../../core/services/presence_service.dart';
@@ -88,9 +89,13 @@ class SettingsPage extends StatelessWidget {
     final LibraryService library = context.watch<LibraryService>();
     final PlaybackService playback = context.watch<PlaybackService>();
     final JamService jam = context.watch<JamService>();
+    final MusicDownloadService downloads =
+        context.watch<MusicDownloadService>();
     final IfallPalette c = IfallPalette.of(context);
 
-    final int activeDownloads = 0;
+    final int activeDownloads = downloads.jobs
+        .where((job) => job.phase == MusicDownloadPhase.running)
+        .length;
 
     return Scaffold(
       backgroundColor: c.background,
