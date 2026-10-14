@@ -25,9 +25,9 @@ import '../widgets/add_to_playlist_sheet.dart';
 import '../widgets/artwork.dart';
 import '../widgets/song_menu.dart';
 import '../widgets/song_download_button.dart';
-import '../widgets/song_tile.dart';
 import 'equalizer_page.dart';
 import 'player_palette.dart';
+import 'player_sheets.dart';
 
 /// `1.0 → 1x`, `1.5 → 1.5x`, `2.0 → 2x` — the player's own speed shorthand,
 /// so the button never reads `2.0x` or `1.0x`.
@@ -201,65 +201,16 @@ class _FullPlayerPageState extends State<FullPlayerPage>
   // Sheets (existing functionality, unchanged wiring)
   // -------------------------------------------------------------------------
 
-  Future<void> _showQueueSheet() {
-    return showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (BuildContext sheetContext) => const _QueueSheet(),
-    );
-  }
+  // The Up-next and sleep-timer sheets live in `player_sheets.dart` so the
+  // mini player, the room page and the Settings screen all open the same UI.
+  void _showQueueSheet() => showQueueSheet(context);
 
-  Future<void> _showSleepSheet(PlaybackService playback) {
-    return showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (BuildContext sheetContext) => _SleepSheet(playback: playback),
-    );
-  }
+  void _showSleepSheet(PlaybackService playback) =>
+      showSleepTimerSheet(context);
 
-  Future<void> _showSpeedSheet(PlaybackService playback) {
-    const List<double> speeds = <double>[0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
-    return showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (BuildContext sheetContext) => GlassSheet(
-        title: 'Playback speed',
-        subtitle: 'Applied instantly to the current track',
-        maxHeightFactor: 0.6,
-        child: ListView(
-          shrinkWrap: true,
-          padding: const EdgeInsets.only(bottom: 22),
-          children: <Widget>[
-            // Live: the tick follows the speed the moment it changes (also
-            // when it is changed from Settings while this sheet is open).
-            ListenableBuilder(
-              listenable: playback,
-              builder: (BuildContext context, Widget? _) => Column(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  for (final double s in speeds)
-                    ListTile(
-                      onTap: () {
-                        playback.setSpeed(s);
-                        Navigator.of(sheetContext).pop();
-                      },
-                      title: Text(_speedText(s)),
-                      trailing: playback.speed == s
-                          ? Icon(
-                              Icons.check_rounded,
-                              color: sheetContext.accent.primary,
-                            )
-                          : null,
-                    ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  /// Speed, volume, crossfade and normalization in one place, plus the
+  /// equalizer as the first stop.
+  void _showSpeedSheet(PlaybackService playback) => showSoundSheet(context);
 
   void _toggleLyricsSheet() {
     if (!_lyricsCtrl.isAttached) return;
@@ -476,6 +427,11 @@ class _FullPlayerPageState extends State<FullPlayerPage>
             tooltip: 'Sleep Timer',
             icon: const Icon(Icons.bedtime_rounded),
             onPressed: () => _showSleepSheet(playback),
+          ),
+          IconButton(
+            tooltip: 'Stats for nerds',
+            icon: const Icon(Icons.analytics_outlined),
+            onPressed: () => showNerdStatsSheet(context),
           ),
           IconButton(
             tooltip: 'More',
@@ -1541,168 +1497,7 @@ class _TransportIcon extends StatelessWidget {
   }
 }
 
-class _SleepSheet extends StatelessWidget {
-  const _SleepSheet({required this.playback});
-
-  final PlaybackService playback;
-
-  @override
-  Widget build(BuildContext context) {
-    const List<int> minutes = <int>[15, 30, 45, 60, 90];
-    return GlassSheet(
-      title: 'Sleep timer',
-      subtitle: 'Pause playback automatically',
-      maxHeightFactor: 0.75,
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            for (final int m in minutes)
-              ListTile(
-                title: Text('$m minutes'),
-                onTap: () {
-                  playback.startSleepTimer(Duration(minutes: m));
-                  Navigator.of(context).pop();
-                },
-              ),
-            ListTile(
-              title: const Text('Until the current track ends'),
-              onTap: () {
-                final Duration d = playback.duration - playback.position;
-                if (d > Duration.zero) {
-                  playback.startSleepTimer(d);
-                }
-                Navigator.of(context).pop();
-              },
-            ),
-            if (playback.sleepRemaining != null)
-              ListTile(
-                title: const Text(
-                  'Turn off timer',
-                  style: TextStyle(color: SaxifyColors.danger),
-                ),
-                onTap: () {
-                  playback.cancelSleepTimer();
-                  Navigator.of(context).pop();
-                },
-              ),
-            const SizedBox(height: 20),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _QueueSheet extends StatelessWidget {
-  const _QueueSheet();
-
-  @override
-  Widget build(BuildContext context) {
-    final PlaybackService playback = context.watch<PlaybackService>();
-    final SaxifyAccent accent = context.accent;
-    final List<Song> queue = playback.queue;
-
-    return DraggableScrollableSheet(
-      initialChildSize: 0.72,
-      minChildSize: 0.35,
-      maxChildSize: 0.94,
-      expand: false,
-      builder: (BuildContext context, ScrollController controller) {
-        return ClipRRect(
-          borderRadius: const BorderRadius.vertical(
-            top: Radius.circular(SaxifyTheme.radiusLg),
-          ),
-          child: BackdropFilter(
-            filter: GlassBlur.thickFilter,
-            child: ColoredBox(
-              color: const Color(0xFF0B0B0F).withValues(alpha: 0.94),
-              child: Column(
-                children: <Widget>[
-                  const SizedBox(height: 10),
-                  Container(
-                    width: 44,
-                    height: 4.5,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.22),
-                      borderRadius: BorderRadius.circular(3),
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 16, 12, 8),
-                    child: Row(
-                      children: <Widget>[
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: <Widget>[
-                              Text(
-                                'Up next',
-                                style: SaxifyTheme.appleFont(
-                                  size: 17,
-                                  weight: FontWeight.w700,
-                                ),
-                              ),
-                              const SizedBox(height: 3),
-                              Text(
-                                '${queue.length} tracks in the queue',
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  color: SaxifyColors.textMuted,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        IconButton(
-                          tooltip: 'Shuffle queue',
-                          icon: Icon(
-                            Icons.shuffle_rounded,
-                            color: playback.shuffleEnabled
-                                ? accent.primary
-                                : SaxifyColors.textMuted,
-                          ),
-                          onPressed: playback.toggleShuffle,
-                        ),
-                        IconButton(
-                          tooltip: 'Clear queue',
-                          icon: const Icon(
-                            Icons.delete_sweep_rounded,
-                            color: SaxifyColors.textMuted,
-                          ),
-                          onPressed: playback.clearQueue,
-                        ),
-                      ],
-                    ),
-                  ),
-                  const Divider(height: 1),
-                  Expanded(
-                    child: queue.isEmpty
-                        ? const Center(
-                            child: Text(
-                              'Queue is empty',
-                              style: TextStyle(color: SaxifyColors.textMuted),
-                            ),
-                          )
-                        : ListView.builder(
-                            controller: controller,
-                            padding: const EdgeInsets.only(bottom: 24),
-                            itemCount: queue.length,
-                            itemBuilder: (BuildContext c, int i) => QueueTile(
-                              song: queue[i],
-                              isPlaying: i == playback.currentIndex,
-                              onTap: () => playback.skipToIndex(i),
-                              onRemove: () => playback.removeFromQueue(i),
-                            ),
-                          ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
+// ---------------------------------------------------------------------------
+// The Up-next, sleep-timer, sound and stats sheets used to live here. They are
+// now shared with the mini player, the room screen and Settings — see
+// `player_sheets.dart`.

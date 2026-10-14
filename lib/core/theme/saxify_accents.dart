@@ -345,4 +345,15 @@ extension SaxifyAccentX on BuildContext {
 
   SaxifyAccent get qualityAccent =>
       Theme.of(this).extension<SaxifyAccentExtension>()?.qualityAccent ?? accent;
+
+  /// The accent's main [Color], or plain white when no accent extension is
+  /// installed (tests, recovery screens, a `MaterialApp` built by hand).
+  Color get accentOrWhite =>
+      Theme.of(this).extension<SaxifyAccentExtension>()?.accent.primary ??
+      SaxifyAccents.violetPulse.primary;
+
+  /// The quality accent's colour, with the same fallback.
+  Color get qualityAccentOrWhite =>
+      Theme.of(this).extension<SaxifyAccentExtension>()?.qualityAccent.primary ??
+      accentOrWhite;
 }

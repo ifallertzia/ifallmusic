@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart' show ThemeMode;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../theme/saxify_accents.dart';
@@ -10,6 +11,48 @@ import '../theme/saxify_accents.dart';
 ///
 /// Keys are stable strings so the store survives renames of the Dart fields.
 enum StreamResolverMode { smart, innertubeOnly, legacyOnly }
+
+/// The lyrics providers IfallMusic knows how to ask, in the order they are
+/// tried. The list is user-editable from Settings → Lyrics.
+class LyricsProviders {
+  const LyricsProviders._();
+
+  static const String lrclib = 'LRCLIB';
+  static const String lrcRed = 'lrc.red';
+  static const String musixmatch = 'Musixmatch';
+  static const String genius = 'Genius';
+  static const String kugou = 'KuGou';
+  static const String megalobiz = 'Megalobiz';
+  static const String embedded = 'Embedded';
+
+  static const List<String> all = <String>[
+    lrclib,
+    lrcRed,
+    musixmatch,
+    genius,
+    kugou,
+    megalobiz,
+    embedded,
+  ];
+
+  static const List<String> defaultOrder = <String>[
+    lrclib,
+    lrcRed,
+    musixmatch,
+    genius,
+  ];
+
+  static String note(String provider) => switch (provider) {
+    lrclib => 'Open, community-contributed synced lyrics.',
+    lrcRed => 'Aggregated word-level timing (lrc.red).',
+    musixmatch => 'Large catalogue, mostly line-synced.',
+    genius => 'Plain lyrics plus annotations — no timing.',
+    kugou => 'Strong for Chinese and Japanese releases.',
+    megalobiz => 'Hand-timed community lines.',
+    embedded => 'Lyrics carried inside the downloaded file.',
+    _ => '',
+  };
+}
 
 class SettingsService extends ChangeNotifier {
   SettingsService(this._prefs);
@@ -49,6 +92,36 @@ class SettingsService extends ChangeNotifier {
   /// One-shot migration flag: moves an existing install onto the Spotify Green
   /// default look (accent painted across the whole app).
   static const String kGreenDefaultApplied = 'saxify.green_default.v1';
+
+  // ------------------------------------------------- BitChord-parity knobs
+  static const String kThemeMode = 'ifall.theme_mode.v1';
+  static const String kLiquidGlass = 'ifall.liquid_glass.v1';
+  static const String kCrossfade = 'ifall.crossfade_seconds.v1';
+  static const String kAutomix = 'ifall.automix.v1';
+  static const String kNormalizeVolume = 'ifall.normalize_volume.v1';
+  static const String kSilenceSkipping = 'ifall.silence_skipping.v1';
+  static const String kSleepEndOfTrack = 'ifall.sleep_end_of_track.v1';
+  static const String kSleepMinutes = 'ifall.sleep_minutes.v1';
+  static const String kJamServer = 'ifall.jam_server.v1';
+  static const String kJamDisplayName = 'ifall.jam_display_name.v1';
+  static const String kJamLastCode = 'ifall.jam_last_code.v1';
+  static const String kDiscordEnabled = 'ifall.discord_enabled.v1';
+  static const String kDiscordDetails = 'ifall.discord_details.v1';
+  static const String kLastFmSession = 'ifall.lastfm_session.v1';
+  static const String kLastFmUser = 'ifall.lastfm_user.v1';
+  static const String kLastFmEnabled = 'ifall.lastfm_enabled.v1';
+  static const String kListenBrainzToken = 'ifall.listenbrainz_token.v1';
+  static const String kListenBrainzEnabled = 'ifall.listenbrainz_enabled.v1';
+  static const String kScrobblePercent = 'ifall.scrobble_percent.v1';
+  static const String kExtraSources = 'ifall.extra_sources.v1';
+  static const String kLyricsProviders = 'ifall.lyrics_providers.v1';
+  static const String kLyricsRomanize = 'ifall.lyrics_romanize.v1';
+  static const String kLyricsTranslate = 'ifall.lyrics_translate.v1';
+  static const String kStatsOptIn = 'ifall.stats_opt_in.v1';
+  static const String kLanguage = 'ifall.language.v1';
+  static const String kHighPerformance = 'ifall.high_performance.v1';
+  static const String kKeepScreenAwake = 'ifall.keep_screen_awake.v1';
+  static const String kAutoDownloadLikes = 'ifall.auto_download_likes.v1';
 
   // ---------------------------------------------------------------- account
   String get displayName => _prefs.getString(kDisplayName)?.trim() ?? '';
@@ -179,6 +252,195 @@ class SettingsService extends ChangeNotifier {
   bool get explicitFilter => _prefs.getBool(kExplicitFilter) ?? false;
   Future<void> setExplicitFilter(bool v) =>
       _prefs.setBool(kExplicitFilter, v).then((_) => notifyListeners());
+
+  // --------------------------------------------------- appearance / display
+  /// `system` follows the phone, `light` and `dark` pin it.
+  String get themeModeRaw => _prefs.getString(kThemeMode) ?? 'dark';
+  ThemeMode get themeMode => switch (themeModeRaw) {
+    'system' => ThemeMode.system,
+    'light' => ThemeMode.light,
+    _ => ThemeMode.dark,
+  };
+  Future<void> setThemeMode(ThemeMode mode) => _prefs
+      .setString(kThemeMode, mode.name)
+      .then((_) => notifyListeners());
+
+  /// The frosted-glass treatment. It is cheap on modern phones but a costly
+  /// backdrop filter on old ones, so it can be switched off from Settings.
+  bool get liquidGlass => _prefs.getBool(kLiquidGlass) ?? true;
+  Future<void> setLiquidGlass(bool v) =>
+      _prefs.setBool(kLiquidGlass, v).then((_) => notifyListeners());
+
+  /// Drop frame-heavy effects (large blurs, backdrop shaders) on weak devices.
+  bool get highPerformance => _prefs.getBool(kHighPerformance) ?? false;
+  Future<void> setHighPerformance(bool v) =>
+      _prefs.setBool(kHighPerformance, v).then((_) => notifyListeners());
+
+  bool get keepScreenAwake => _prefs.getBool(kKeepScreenAwake) ?? false;
+  Future<void> setKeepScreenAwake(bool v) =>
+      _prefs.setBool(kKeepScreenAwake, v).then((_) => notifyListeners());
+
+  /// BCP-47-ish tag chosen in Settings → Language. `system` follows the phone.
+  String get language => _prefs.getString(kLanguage) ?? 'system';
+  Future<void> setLanguage(String v) =>
+      _prefs.setString(kLanguage, v).then((_) => notifyListeners());
+
+  // ---------------------------------------------------------- transitions
+  /// True crossfade length in seconds, 0–12. Zero means "no crossfade", which
+  /// is the gapless behaviour IfallMusic has always shipped.
+  int get crossfadeSeconds => _prefs.getInt(kCrossfade) ?? 0;
+  Future<void> setCrossfadeSeconds(int v) => _prefs
+      .setInt(kCrossfade, v.clamp(0, 12))
+      .then((_) => notifyListeners());
+
+  /// DJ-style transitions: beat-matched tempo stretch between two tracks.
+  bool get automix => _prefs.getBool(kAutomix) ?? false;
+  Future<void> setAutomix(bool v) =>
+      _prefs.setBool(kAutomix, v).then((_) => notifyListeners());
+
+  /// Loudness normalisation (ReplayGain-style trim on the stream).
+  bool get normalizeVolume => _prefs.getBool(kNormalizeVolume) ?? true;
+  Future<void> setNormalizeVolume(bool v) =>
+      _prefs.setBool(kNormalizeVolume, v).then((_) => notifyListeners());
+
+  /// Skip the quiet lead-in/lead-out of a track (separate from crossfade).
+  bool get silenceSkipping => _prefs.getBool(kSilenceSkipping) ?? false;
+  Future<void> setSilenceSkipping(bool v) =>
+      _prefs.setBool(kSilenceSkipping, v).then((_) => notifyListeners());
+
+  // ------------------------------------------------------------ sleep timer
+  /// Minutes for the last-used fixed sleep timer preset.
+  int get sleepMinutes => _prefs.getInt(kSleepMinutes) ?? 30;
+  Future<void> setSleepMinutes(int v) => _prefs
+      .setInt(kSleepMinutes, v.clamp(1, 720))
+      .then((_) => notifyListeners());
+
+  /// "Stop after this track" instead of a countdown.
+  bool get sleepEndOfTrack => _prefs.getBool(kSleepEndOfTrack) ?? false;
+  Future<void> setSleepEndOfTrack(bool v) =>
+      _prefs.setBool(kSleepEndOfTrack, v).then((_) => notifyListeners());
+
+  // ------------------------------------------------------- listen together
+  /// Base address of the party server. Empty means "ask for one on first use".
+  String get jamServer => _prefs.getString(kJamServer) ?? '';
+  Future<void> setJamServer(String v) =>
+      _prefs.setString(kJamServer, v.trim()).then((_) => notifyListeners());
+
+  /// Name shown to the other people in the room. Defaults to the profile name.
+  String get jamDisplayName => _prefs.getString(kJamDisplayName) ?? '';
+  Future<void> setJamDisplayName(String v) => _prefs
+      .setString(kJamDisplayName, v.trim())
+      .then((_) => notifyListeners());
+
+  String? get jamLastCode => _prefs.getString(kJamLastCode);
+  Future<void> setJamLastCode(String? v) async {
+    if (v == null) {
+      await _prefs.remove(kJamLastCode);
+    } else {
+      await _prefs.setString(kJamLastCode, v);
+    }
+    notifyListeners();
+  }
+
+  // ------------------------------------------------------ presence & social
+  bool get discordEnabled => _prefs.getBool(kDiscordEnabled) ?? false;
+  Future<void> setDiscordEnabled(bool v) =>
+      _prefs.setBool(kDiscordEnabled, v).then((_) => notifyListeners());
+
+  /// Optional second line under the track in Discord.
+  String get discordDetails => _prefs.getString(kDiscordDetails) ?? '';
+  Future<void> setDiscordDetails(String v) =>
+      _prefs.setString(kDiscordDetails, v.trim()).then((_) => notifyListeners());
+
+  bool get lastFmEnabled => _prefs.getBool(kLastFmEnabled) ?? false;
+  Future<void> setLastFmEnabled(bool v) =>
+      _prefs.setBool(kLastFmEnabled, v).then((_) => notifyListeners());
+
+  String get lastFmUser => _prefs.getString(kLastFmUser) ?? '';
+  Future<void> setLastFmUser(String v) =>
+      _prefs.setString(kLastFmUser, v.trim()).then((_) => notifyListeners());
+
+  /// Last.fm session key, returned after the listener approves the token.
+  String get lastFmSession => _prefs.getString(kLastFmSession) ?? '';
+  Future<void> setLastFmSession(String v) =>
+      _prefs.setString(kLastFmSession, v.trim()).then((_) => notifyListeners());
+
+  bool get listenBrainzEnabled =>
+      _prefs.getBool(kListenBrainzEnabled) ?? false;
+  Future<void> setListenBrainzEnabled(bool v) => _prefs
+      .setBool(kListenBrainzEnabled, v)
+      .then((_) => notifyListeners());
+
+  String get listenBrainzToken => _prefs.getString(kListenBrainzToken) ?? '';
+  Future<void> setListenBrainzToken(String v) => _prefs
+      .setString(kListenBrainzToken, v.trim())
+      .then((_) => notifyListeners());
+
+  /// How far into a track a scrobble fires (Last.fm's own rule is 50 %).
+  int get scrobblePercent => _prefs.getInt(kScrobblePercent) ?? 50;
+  Future<void> setScrobblePercent(int v) => _prefs
+      .setInt(kScrobblePercent, v.clamp(10, 95))
+      .then((_) => notifyListeners());
+
+  // ------------------------------------------------------------- fallback
+  /// Extra module/stream sources the resolver may fall back to, persisted as a
+  /// JSON list of `{name, kind, url, enabled}`.
+  List<Map<String, dynamic>> get extraSources {
+    final String? raw = _prefs.getString(kExtraSources);
+    if (raw == null || raw.isEmpty) return <Map<String, dynamic>>[];
+    try {
+      final Object? decoded = jsonDecode(raw);
+      if (decoded is! List) return <Map<String, dynamic>>[];
+      return decoded
+          .whereType<Map>()
+          .map((Map item) => item.cast<String, dynamic>())
+          .toList();
+    } catch (_) {
+      return <Map<String, dynamic>>[];
+    }
+  }
+
+  Future<void> setExtraSources(List<Map<String, dynamic>> value) => _prefs
+      .setString(kExtraSources, jsonEncode(value))
+      .then((_) => notifyListeners());
+
+  /// Which lyrics providers the finder is allowed to ask, in order.
+  List<String> get lyricsProviders {
+    final String? raw = _prefs.getString(kLyricsProviders);
+    if (raw == null || raw.isEmpty) return LyricsProviders.defaultOrder;
+    return raw
+        .split(',')
+        .map((String s) => s.trim())
+        .where((String s) => s.isNotEmpty)
+        .toList();
+  }
+
+  Future<void> setLyricsProviders(List<String> value) => _prefs
+      .setString(kLyricsProviders, value.join(','))
+      .then((_) => notifyListeners());
+
+  /// Transliterates non-latin lyrics into latin script when a provider has it.
+  bool get lyricsRomanize => _prefs.getBool(kLyricsRomanize) ?? false;
+  Future<void> setLyricsRomanize(bool v) =>
+      _prefs.setBool(kLyricsRomanize, v).then((_) => notifyListeners());
+
+  /// Target language for translated lyrics; empty disables translation.
+  String get lyricsTranslateTo => _prefs.getString(kLyricsTranslate) ?? '';
+  Future<void> setLyricsTranslateTo(String v) => _prefs
+      .setString(kLyricsTranslate, v.trim())
+      .then((_) => notifyListeners());
+
+  // ------------------------------------------------------------- telemetry
+  /// Keeps the on-device listening history that powers Replay and the
+  /// recommendation engine. Off means history is still shown in the app but
+  /// nothing is written to the stats store.
+  bool get statsOptIn => _prefs.getBool(kStatsOptIn) ?? true;
+  Future<void> setStatsOptIn(bool v) =>
+      _prefs.setBool(kStatsOptIn, v).then((_) => notifyListeners());
+
+  bool get autoDownloadLikes => _prefs.getBool(kAutoDownloadLikes) ?? false;
+  Future<void> setAutoDownloadLikes(bool v) =>
+      _prefs.setBool(kAutoDownloadLikes, v).then((_) => notifyListeners());
 
   // ------------------------------------------------- resume-where-you-left
   Map<String, dynamic> _positions() {
@@ -361,6 +623,35 @@ class SettingsService extends ChangeNotifier {
     'saxify.spatial_reverb',
     'saxify.spatial_speed',
     'saxify.stream_resolver_mode.v1',
+    // --------------------------------------------- BitChord-parity settings
+    'ifall.automix.v1',
+    'ifall.auto_download_likes.v1',
+    'ifall.crossfade_seconds.v1',
+    'ifall.discord_details.v1',
+    'ifall.discord_enabled.v1',
+    'ifall.extra_sources.v1',
+    'ifall.high_performance.v1',
+    'ifall.jam_display_name.v1',
+    'ifall.jam_last_code.v1',
+    'ifall.jam_server.v1',
+    'ifall.keep_screen_awake.v1',
+    'ifall.language.v1',
+    'ifall.lastfm_enabled.v1',
+    'ifall.lastfm_session.v1',
+    'ifall.lastfm_user.v1',
+    'ifall.listenbrainz_enabled.v1',
+    'ifall.listenbrainz_token.v1',
+    'ifall.liquid_glass.v1',
+    'ifall.lyrics_providers.v1',
+    'ifall.lyrics_romanize.v1',
+    'ifall.lyrics_translate.v1',
+    'ifall.normalize_volume.v1',
+    'ifall.scrobble_percent.v1',
+    'ifall.silence_skipping.v1',
+    'ifall.sleep_end_of_track.v1',
+    'ifall.sleep_minutes.v1',
+    'ifall.stats_opt_in.v1',
+    'ifall.theme_mode.v1',
   ];
 
   Future<void> resetAll() async {
