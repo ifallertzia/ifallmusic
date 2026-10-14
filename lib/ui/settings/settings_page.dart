@@ -17,8 +17,11 @@ import '../../config/branding.dart';
 import '../../core/services/app_feedback.dart';
 import '../../core/services/library_service.dart';
 import '../../core/services/listen_together_service.dart';
+import '../../core/services/music_download_service.dart';
 import '../../core/services/playback_service.dart';
+import '../../core/models/song.dart';
 import '../../core/services/presence_service.dart';
+import '../../core/services/spotify_import_service.dart';
 import '../../core/services/settings_service.dart';
 import '../../core/services/youtube_service.dart';
 import '../../services/lyrics_service.dart';
@@ -123,9 +126,13 @@ class SettingsPage extends StatelessWidget {
     final LibraryService library = context.watch<LibraryService>();
     final PlaybackService playback = context.watch<PlaybackService>();
     final JamService jam = context.watch<JamService>();
+    final MusicDownloadService downloads =
+        context.watch<MusicDownloadService>();
     final IfallPalette c = IfallPalette.of(context);
 
-    final int activeDownloads = 0;
+    final int activeDownloads = downloads.jobs
+        .where((job) => job.phase == MusicDownloadPhase.running)
+        .length;
 
     return Scaffold(
       backgroundColor: c.background,
@@ -1189,9 +1196,7 @@ class AccountsSettingsPage extends StatelessWidget {
                 );
                 if (link == null || link.isEmpty) return;
                 if (!context.mounted) return;
-                showAppNotice(
-                  'Import is coming to this build — the link was noted.',
-                );
+                await _importSpotifyPlaylist(context, link.trim());
               },
             ),
           ],
@@ -1208,6 +1213,43 @@ class AccountsSettingsPage extends StatelessWidget {
     );
   }
 
+}
+
+  /// Imports a public Spotify playlist for real: the embed page hands over
+  /// the track list with no account or API key, every track is matched
+  /// against what IfallMusic can play, and the matches land in a new local
+  /// playlist. Unmatched tracks are counted, never invented.
+  Future<void> _importSpotifyPlaylist(BuildContext context, String link) async {
+    final YoutubeService youtube = context.read<YoutubeService>();
+    final LibraryService library = context.read<LibraryService>();
+    showAppNotice('Reading the Spotify playlist…');
+    final ({String name, List<({String title, String artist})> tracks})? fetched =
+        await SpotifyImportService().fetchPlaylist(link);
+    if (fetched == null || fetched.tracks.isEmpty) {
+      showAppNotice(
+        'Could not read that playlist. It has to be public — or the link is not a playlist.',
+        duration: const Duration(seconds: 5),
+      );
+      return;
+    }
+    final playlist = await library.createPlaylist(fetched.name);
+    int matched = 0;
+    for (final ({String title, String artist}) track in fetched.tracks.take(100)) {
+      try {
+        final List<Song> hits = await youtube.searchSongs(
+          '${track.artist} ${track.title}'.trim(),
+          limit: 1,
+        );
+        if (hits.isEmpty) continue;
+        if (await library.addToPlaylist(playlist.id, hits.first)) matched++;
+      } catch (_) {
+        // One unmatchable track must not sink the whole import.
+      }
+    }
+    showAppNotice(
+      'Imported $matched of ${fetched.tracks.length} tracks into “${fetched.name}”.',
+      duration: const Duration(seconds: 5),
+    );
 }
 
 // ------------------------------------------------------------------- discord
@@ -1396,6 +1438,7 @@ void showTranslationSheet(BuildContext context) {
                 title: Text(target.isEmpty ? 'Off' : target),
                 onChanged: (String? v) {
                   settings.setLyricsTranslateTo(v ?? '');
+                  LyricsService.translateTarget = v ?? '';
                   Navigator.of(sheetContext).pop();
                 },
               ),

@@ -37,6 +37,7 @@ class SaxifyBridge(private val activity: Activity) {
             when (call.method) {
                 "backgroundApp" -> { activity.moveTaskToBack(true); result.success(null) }
                 "bootState" -> result.success(SaxifyBoot.snapshot(activity))
+                "networkType" -> result.success(networkType())
                 "markLaunchSuccess" -> {
                     SaxifyBoot.markSuccess(activity)
                     result.success(null)
@@ -112,6 +113,28 @@ class SaxifyBridge(private val activity: Activity) {
             }
         } catch (e: Exception) {
             result.error("saxify", e.message, null)
+        }
+    }
+
+    /**
+     * The transport the device is currently on: "wifi", "mobile" or "other".
+     * Used only to pick the per-network audio-quality ceiling; any failure
+     * answers "other", which the Dart side treats as unmetered.
+     */
+    private fun networkType(): String {
+        return try {
+            val cm = activity.getSystemService(Context.CONNECTIVITY_SERVICE)
+                as? android.net.ConnectivityManager ?: return "other"
+            val network = cm.activeNetwork ?: return "none"
+            val caps = cm.getNetworkCapabilities(network) ?: return "other"
+            when {
+                caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) -> "wifi"
+                caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) -> "mobile"
+                caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_ETHERNET) -> "wifi"
+                else -> "other"
+            }
+        } catch (e: Exception) {
+            "other"
         }
     }
 

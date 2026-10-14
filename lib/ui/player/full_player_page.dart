@@ -490,11 +490,7 @@ class _FullPlayerPageState extends State<FullPlayerPage>
                 borderRadius: BorderRadius.circular(8),
                 child: Hero(
                   tag: 'player-artwork-${song.id}',
-                  child: Artwork(
-                    url: song.thumbnailUrl,
-                    radius: 8,
-                    size: double.infinity,
-                  ),
+                  child: _LivingArtwork(url: song.thumbnailUrl),
                 ),
               ),
             );
@@ -1501,3 +1497,51 @@ class _TransportIcon extends StatelessWidget {
 // The Up-next, sleep-timer, sound and stats sheets used to live here. They are
 // now shared with the mini player, the room screen and Settings — see
 // `player_sheets.dart`.
+
+/// The animated album canvas: a slow, endless Ken Burns drift on the
+/// sleeve (26 s in, 26 s back out) so the now-playing screen feels alive
+/// the way BitChord's motion artwork does — without needing a video
+/// stream. `disableAnimations` (system reduce-motion) stills it.
+class _LivingArtwork extends StatefulWidget {
+  const _LivingArtwork({required this.url});
+
+  final String url;
+
+  @override
+  State<_LivingArtwork> createState() => _LivingArtworkState();
+}
+
+class _LivingArtworkState extends State<_LivingArtwork>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _drift = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 26),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _drift.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (MediaQuery.disableAnimationsOf(context)) {
+      return Artwork(url: widget.url, radius: 8, size: double.infinity);
+    }
+    return AnimatedBuilder(
+      animation: _drift,
+      builder: (BuildContext context, Widget? child) {
+        final double t = Curves.easeInOut.transform(_drift.value);
+        return Transform.scale(
+          scale: 1.05 + 0.09 * t,
+          child: Transform.translate(
+            offset: Offset(-10 + 20 * t, -6 + 12 * t),
+            child: child,
+          ),
+        );
+      },
+      child: Artwork(url: widget.url, radius: 8, size: double.infinity),
+    );
+  }
+}

@@ -144,6 +144,7 @@ class IfallText {
     Color? color,
     double letterSpacing = -0.3,
     double height = 1.25,
+    TextOverflow? overflow,
     int? maxLines,
   }) {
     return GoogleFonts.inter(
@@ -152,7 +153,7 @@ class IfallText {
       color: color,
       letterSpacing: letterSpacing,
       height: height,
-    ).copyWith(fontFamilyFallback: fallback);
+    ).copyWith(fontFamilyFallback: fallback, overflow: overflow);
   }
 
   /// The big page title (Home, Search, Library…).

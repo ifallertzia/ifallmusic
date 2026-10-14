@@ -192,6 +192,7 @@ class InnertubeResolver {
     bool preferDownload = false,
     bool validate = true,
     Set<String> skipClients = const <String>{},
+    int? maxBitrateKbps,
   }) async {
     final List<String> failures = <String>[];
     for (final _InnertubeClient client in _clients) {
@@ -238,6 +239,7 @@ class InnertubeResolver {
           json,
           client.clientName,
           preferDownload: preferDownload,
+          maxBitrateKbps: preferDownload ? null : maxBitrateKbps,
         );
         int probed = 0;
         for (final InnertubeResolvedStream stream in candidates) {
@@ -408,6 +410,7 @@ class InnertubeResolver {
     Map<String, dynamic> json,
     String clientName, {
     required bool preferDownload,
+    int? maxBitrateKbps,
   }) {
     final Object? streaming = json['streamingData'];
     if (streaming is! Map) return <InnertubeResolvedStream>[];
@@ -429,6 +432,19 @@ class InnertubeResolver {
         final int aLen = a.contentLength == null ? 0 : 1;
         final int bLen = b.contentLength == null ? 0 : 1;
         if (aLen != bLen) return bLen.compareTo(aLen);
+        return b.bitrate.compareTo(a.bitrate);
+      }
+      if (maxBitrateKbps != null) {
+        // Per-network ceiling: the best stream at or under the cap first,
+        // then the cheapest stream above it. Nothing is dropped — the probe
+        // loop can still climb if the capped streams turn out dead.
+        final int cap = maxBitrateKbps * 1000;
+        final bool aIn = a.bitrate <= cap;
+        final bool bIn = b.bitrate <= cap;
+        if (aIn != bIn) return aIn ? -1 : 1;
+        return aIn
+            ? b.bitrate.compareTo(a.bitrate)
+            : a.bitrate.compareTo(b.bitrate);
       }
       return b.bitrate.compareTo(a.bitrate);
     });

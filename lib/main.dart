@@ -26,6 +26,7 @@ import 'core/services/recommendation_service.dart';
 import 'core/services/recommendation_worker.dart';
 import 'core/services/settings_service.dart';
 import 'core/services/youtube_service.dart';
+import 'services/lyrics_service.dart';
 import 'core/theme/saxify_accents.dart';
 import 'core/theme/saxify_theme.dart';
 import 'core/theme/theme_controller.dart';
@@ -115,6 +116,10 @@ Future<AppBoot> _initializeApp() async {
   await NotificationBootstrap.init();
 
   final SettingsService settings = SettingsService(prefs);
+  // Lyrics lookup follows the saved provider order + translation target
+  // from the first search, not just after the Settings page is opened.
+  LyricsService.instance.providers = settings.lyricsProviders;
+  LyricsService.translateTarget = settings.lyricsTranslateTo;
   // One-shot: land on the Spotify Green default look.
   await settings.applyGreenDefault();
   final LibraryService library = LibraryService(prefs);
