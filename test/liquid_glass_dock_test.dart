@@ -344,7 +344,8 @@ void main() {
     await settle(tester);
     expect(SidifyDockScroll.barHidden.value, isTrue);
 
-    await dock.shell.select(SidifyTab.explore);
+    // `select` is synchronous void — awaiting it is an analyzer error.
+    dock.shell.select(SidifyTab.explore);
     await settle(tester);
     expect(SidifyDockScroll.barHidden.value, isTrue);
 
