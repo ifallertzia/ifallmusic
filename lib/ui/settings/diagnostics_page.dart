@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 import '../../config/branding.dart';
-import '../../core/theme/glass.dart';
-import '../../core/theme/saxify_theme.dart';
 import '../../core/theme/ifall_ui.dart';
 
 /// App diagnostics — deliberately short and human readable.

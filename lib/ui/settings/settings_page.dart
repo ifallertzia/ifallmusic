@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -35,6 +36,43 @@ import 'playlist_sync_sheet.dart';
 import 'update_dialog.dart';
 import '../../core/theme/glass.dart';
 import '../widgets/neon.dart';
+
+/// One-line text prompt shared by the account pages.
+///
+/// Kept at file scope so Last.fm, ListenBrainz, Spotify and Discord can all
+/// reach it — a private method on one page is invisible to the others.
+Future<String?> _prompt(
+  BuildContext context, {
+  required String title,
+  required String initial,
+  bool obscure = false,
+  String? hint,
+}) {
+  final TextEditingController controller = TextEditingController(text: initial);
+  return showDialog<String>(
+    context: context,
+    builder: (BuildContext dialogContext) => AlertDialog(
+      title: Text(title),
+      content: TextField(
+        controller: controller,
+        autofocus: true,
+        obscureText: obscure,
+        decoration: InputDecoration(hintText: hint ?? title),
+        onSubmitted: (String v) => Navigator.of(dialogContext).pop(v),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(),
+          child: const Text('Cancel'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(controller.text),
+          child: const Text('Save'),
+        ),
+      ],
+    ),
+  );
+}
 
 /// The language choices offered in Settings. `system` follows the phone.
 const List<(String, String)> appLanguages = <(String, String)>[
@@ -421,7 +459,9 @@ class SettingsPage extends StatelessWidget {
                   subtitle: 'Boot log, playback errors and device info',
                   onTap: () => Navigator.of(context).push(
                     MaterialPageRoute<void>(
-                      builder: (BuildContext c2) => const DiagnosticsPage(),
+                      builder: (BuildContext c2) => DiagnosticsPage(
+                        safeMode: context.read<bool>(),
+                      ),
                     ),
                   ),
                 ),
@@ -1168,39 +1208,6 @@ class AccountsSettingsPage extends StatelessWidget {
     );
   }
 
-  Future<String?> _prompt(
-    BuildContext context, {
-    required String title,
-    required String initial,
-    bool obscure = false,
-    String? hint,
-  }) {
-    final TextEditingController controller =
-        TextEditingController(text: initial);
-    return showDialog<String>(
-      context: context,
-      builder: (BuildContext dialogContext) => AlertDialog(
-        title: Text(title),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          obscureText: obscure,
-          decoration: InputDecoration(hintText: hint ?? title),
-          onSubmitted: (String v) => Navigator.of(dialogContext).pop(v),
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(controller.text),
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 // ------------------------------------------------------------------- discord
@@ -2698,19 +2705,17 @@ class _TileText extends StatelessWidget {
   }
 }
 
+/// A contact / support row. The subtitle and trailing slot were dropped when
+/// the About page moved to [IfallRow]; nothing passes them any more.
 class _SettingTile extends StatelessWidget {
   const _SettingTile({
     required this.icon,
     required this.title,
-    this.subtitle,
-    this.trailing,
     this.onTap,
   });
 
   final IconData icon;
   final String title;
-  final String? subtitle;
-  final Widget? trailing;
   final VoidCallback? onTap;
 
   @override
@@ -2718,14 +2723,12 @@ class _SettingTile extends StatelessWidget {
     return GlassListTile(
       onTap: onTap,
       leading: _TileIcon(icon),
-      trailing:
-          trailing ??
-          const Icon(
-            Icons.chevron_right_rounded,
-            size: 18,
-            color: IfallTokens.textFaint,
-          ),
-      child: _TileText(title: title, subtitle: subtitle),
+      trailing: const Icon(
+        Icons.chevron_right_rounded,
+        size: 18,
+        color: IfallTokens.textFaint,
+      ),
+      child: _TileText(title: title, subtitle: null),
     );
   }
 }

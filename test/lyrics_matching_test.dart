@@ -105,9 +105,14 @@ void main() {
           return 404;
         }),
       );
+      // One request per rung that actually talks to the network: LRCLIB get,
+      // LRCLIB search, then lrc.red. Musixmatch and Genius need an API key and
+      // cost nothing, and lyrics.ovh is skipped when there is no artist.
+      const int requestsPerLookup = 3;
       expect((await missing.find(title: 'Song')).status, LyricsStatus.notFound);
       await missing.find(title: 'Song');
-      expect(misses, 2);
+      // Still `requestsPerLookup`, not double: a "not found" is cached.
+      expect(misses, requestsPerLookup);
       final unavailable = LyricsService(
         persist: false,
         dio: mock((_) {
@@ -120,7 +125,8 @@ void main() {
         LyricsStatus.unavailable,
       );
       await unavailable.find(title: 'Song');
-      expect(outages, 4);
+      // Doubled: an outage is never cached, so the second lookup asks again.
+      expect(outages, requestsPerLookup * 2);
     },
   );
   test('instrumental and synced-only payloads', () async {
