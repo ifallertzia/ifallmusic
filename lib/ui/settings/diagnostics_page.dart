@@ -16,7 +16,7 @@ class DiagnosticsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AuroraBackdrop(
+    return IfallBackdrop(
       intensity: 0.65,
       child: Scaffold(
         backgroundColor: Colors.transparent,
@@ -24,7 +24,7 @@ class DiagnosticsPage extends StatelessWidget {
         body: ListView(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 60),
           children: <Widget>[
-            GlassPanel(
+            IfallGlass(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
@@ -55,7 +55,7 @@ class DiagnosticsPage extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 12),
-            GlassPanel(
+            IfallGlass(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
@@ -76,7 +76,7 @@ class DiagnosticsPage extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 12),
-            GlassPanel(
+            IfallGlass(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[

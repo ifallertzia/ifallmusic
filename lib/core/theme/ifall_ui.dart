@@ -199,6 +199,58 @@ class IfallTokens {
   static const Color success = IfallColors.green;
 }
 
+/// The page floor: true black, optionally lifted by one very soft accent
+/// bloom in the top corner.
+///
+/// BitChord keeps its backgrounds flat so the artwork is the only colour on
+/// screen — this replaces the old animated aurora with that restraint.
+class IfallBackdrop extends StatelessWidget {
+  const IfallBackdrop({
+    super.key,
+    required this.child,
+    this.intensity = 1,
+  });
+
+  final Widget child;
+  final double intensity;
+
+  @override
+  Widget build(BuildContext context) {
+    final IfallPalette c = IfallPalette.of(context);
+    if (intensity <= 0) {
+      return ColoredBox(color: c.background, child: child);
+    }
+    return ColoredBox(
+      color: c.background,
+      child: Stack(
+        fit: StackFit.expand,
+        children: <Widget>[
+          Positioned(
+            top: -220,
+            right: -160,
+            child: IgnorePointer(
+              child: Container(
+                width: 420,
+                height: 420,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: RadialGradient(
+                    colors: <Color>[
+                      c.accent.withValues(alpha: 0.10 * intensity),
+                      Colors.transparent,
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
 // --------------------------------------------------------------------- glass
 
 /// A frosted panel: translucent fill, hairline border, blurred backdrop.
@@ -215,6 +267,8 @@ class IfallGlass extends StatelessWidget {
     this.width,
     this.height,
     this.onTap,
+    this.glow = false,
+    this.tint,
   });
 
   final Widget child;
@@ -228,6 +282,13 @@ class IfallGlass extends StatelessWidget {
   final double? height;
   final VoidCallback? onTap;
 
+  /// Adds a soft accent-coloured halo — reserved for the one panel on a page
+  /// that should catch the eye.
+  final bool glow;
+
+  /// Overrides the panel's fill colour.
+  final Color? tint;
+
   @override
   Widget build(BuildContext context) {
     final IfallPalette c = IfallPalette.of(context);
@@ -236,9 +297,18 @@ class IfallGlass extends StatelessWidget {
       height: height,
       padding: padding,
       decoration: BoxDecoration(
-        color: color ?? c.glass,
+        color: tint ?? color ?? c.glass,
         borderRadius: BorderRadius.circular(radius),
         border: Border.all(color: border ?? c.outline.withValues(alpha: 0.7)),
+        boxShadow: glow
+            ? <BoxShadow>[
+                BoxShadow(
+                  color: c.accent.withValues(alpha: 0.18),
+                  blurRadius: 30,
+                  spreadRadius: -10,
+                ),
+              ]
+            : null,
       ),
       child: child,
     );

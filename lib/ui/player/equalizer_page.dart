@@ -204,7 +204,7 @@ class _EqualizerPageState extends State<EqualizerPage> {
   @override
   Widget build(BuildContext context) {
     final SettingsService settings = context.read<SettingsService>();
-    return AuroraBackdrop(
+    return IfallBackdrop(
       intensity: 0.7,
       child: Scaffold(
         backgroundColor: Colors.transparent,
@@ -216,7 +216,7 @@ class _EqualizerPageState extends State<EqualizerPage> {
           padding: const EdgeInsets.fromLTRB(16, 6, 16, 180),
           children: <Widget>[
             // ------------------------------------------------ bands
-            const SectionHeader(
+            const IfallSectionHeader(
               title: 'Studio equalizer',
               subtitle: 'Bound to the live player session',
               padding: EdgeInsets.fromLTRB(4, 6, 4, 10),
@@ -227,14 +227,13 @@ class _EqualizerPageState extends State<EqualizerPage> {
                 child: Center(child: CircularProgressIndicator()),
               )
             else if (_unsupported)
-              const EmptyState(
+              const IfallEmpty(
                 icon: Icons.graphic_eq_rounded,
-                title: 'Equalizer unavailable',
                 message:
-                    'This device does not expose an audio session equalizer. Playback is unchanged.',
+                    'Equalizer unavailable — this device does not expose an audio session equalizer. Playback is unchanged.',
               )
             else ...<Widget>[
-              GlassPanel(
+              IfallGlass(
                 radius: SaxifyTheme.radiusMd,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,

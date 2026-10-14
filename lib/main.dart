@@ -479,21 +479,31 @@ class IfallRecoveryApp extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 22),
-                GlassButton(
-                  label: 'Repair cache & retry',
-                  icon: Icons.refresh_rounded,
-                  expand: true,
-                  onPressed: () async {
-                    await NativeBridge.repairLocalCache();
-                    try {
-                      final AppBoot boot = await _initializeApp().timeout(
-                        const Duration(seconds: 20),
-                      );
-                      runApp(IfallMusicApp(boot: boot));
-                    } catch (error) {
-                      BootLog.write('retry failed: $error');
-                    }
-                  },
+                SizedBox(
+                  width: double.infinity,
+                  height: 50,
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      await NativeBridge.repairLocalCache();
+                      try {
+                        final AppBoot boot = await _initializeApp().timeout(
+                          const Duration(seconds: 20),
+                        );
+                        runApp(IfallMusicApp(boot: boot));
+                      } catch (error) {
+                        BootLog.write('retry failed: $error');
+                      }
+                    },
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      side: const BorderSide(color: Colors.white24),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(IfallUI.rPill),
+                      ),
+                    ),
+                    icon: const Icon(Icons.refresh_rounded),
+                    label: const Text('Repair cache & retry'),
+                  ),
                 ),
               ],
             ),
