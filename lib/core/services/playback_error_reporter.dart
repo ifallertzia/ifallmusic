@@ -45,7 +45,7 @@ class PlaybackErrorReport {
   ) {
     final details = redactPlaybackDiagnostic('''IfallMusic playback error
 Time (UTC): ${DateTime.now().toUtc().toIso8601String()}
-App: ${IfallBranding.versionLabel}
+App: ${SidifyBranding.versionLabel}
 Platform: ${Platform.operatingSystem} ${Platform.operatingSystemVersion}
 Stage: $stage
 Track ID: ${song.id}
@@ -66,7 +66,7 @@ No stream URLs, credentials, local file paths or listening history are attached.
 
   Uri get mailUri => Uri(
     scheme: 'mailto',
-    path: IfallBranding.contactEmail,
+    path: SidifyBranding.contactEmail,
     query:
         'subject=${Uri.encodeComponent('IfallMusic playback error #$id')}&body=${Uri.encodeComponent(body)}',
   );

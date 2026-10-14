@@ -140,7 +140,7 @@ class MusicDownloadService extends ChangeNotifier {
     final String legacy =
         '/${String.fromCharCodes(const <int>[83, 97, 120, 105, 102, 121])}/';
     if (!path.contains(legacy)) return path;
-    return path.replaceAll(legacy, '/${IfallBranding.downloadFolderName}/');
+    return path.replaceAll(legacy, '/${SidifyBranding.downloadFolderName}/');
   }
 
   List<MusicDownloadJob> _readJobs() {
@@ -273,7 +273,7 @@ class MusicDownloadService extends ChangeNotifier {
       );
       final Directory documents = await getApplicationDocumentsDirectory();
       final Directory privateFolder = Directory(
-        '${documents.path}/${IfallBranding.downloadFolderName}/Music',
+        '${documents.path}/${SidifyBranding.downloadFolderName}/Music',
       );
       if (!privateFolder.existsSync())
         privateFolder.createSync(recursive: true);

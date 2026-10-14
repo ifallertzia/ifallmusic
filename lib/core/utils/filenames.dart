@@ -12,7 +12,7 @@ class Filenames {
         .trim();
     final String base = cleaned.isEmpty ? 'track' : cleaned;
     final String clipped = base.length > 80 ? base.substring(0, 80).trim() : base;
-    return '$clipped${IfallBranding.fileSuffix}.$ext';
+    return '$clipped${SidifyBranding.fileSuffix}.$ext';
   }
 
   static bool looksCorrupt(List<int> head, int size) {

@@ -158,5 +158,5 @@ class ArtistService {
     return null;
   }
 
-  String fallbackAsset() => IfallBranding.splashAsset;
+  String fallbackAsset() => SidifyBranding.splashAsset;
 }

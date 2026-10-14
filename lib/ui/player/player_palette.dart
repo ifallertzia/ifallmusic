@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -7,98 +6,80 @@ import 'package:flutter/material.dart';
 
 import '../../core/services/artwork_cache.dart';
 
-/// Colours extracted from one album sleeve, pre-darkened for the player
-/// backdrop so text, icons and controls always stay readable on top.
+/// Colours sampled from one album sleeve, for the Now Playing mesh backdrop
+/// and the collection headers — the port of the web app's `palette.ts` /
+/// `MeshBackdrop`: four luminous quadrant colours over a dimmed base.
+///
+/// Extraction reuses [ArtworkCache.providerFor] (no extra network request),
+/// decodes at 48×48 and averages each quadrant. Results are cached per URL;
+/// any failure resolves to the neutral graphite palette, never a throw.
 @immutable
-class PlayerPalette {
-  const PlayerPalette({
-    required this.primary,
-    required this.secondary,
-    required this.glow,
-  });
+class MeshPalette {
+  const MeshPalette({required this.colors, required this.base});
 
-  /// Top of the backdrop gradient — a deep, tinted version of the sleeve.
-  final Color primary;
+  /// Four tuned quadrant colours (top-left, top-right, bottom-right,
+  /// bottom-left), vivid but kept below glare.
+  final List<Color> colors;
 
-  /// Middle of the gradient — an even darker companion shade.
-  final Color secondary;
+  /// The dimmed dominant colour the mesh sits on.
+  final Color base;
 
-  /// A slightly brighter, more saturated tone used for the ambient halo
-  /// behind the artwork and the play-button glow.
-  final Color glow;
-
-  /// Neutral charcoal used before extraction finishes or when it fails.
-  static const PlayerPalette fallback = PlayerPalette(
-    primary: Color(0xFF23242C),
-    secondary: Color(0xFF101218),
-    glow: Color(0xFF363A4A),
+  static const MeshPalette fallback = MeshPalette(
+    colors: <Color>[
+      Color(0xFF3A3A40),
+      Color(0xFF2A2A30),
+      Color(0xFF45454C),
+      Color(0xFF26262B),
+    ],
+    base: Color(0xFF17171B),
   );
+
+  Color get primary => colors.first;
 }
 
-/// Extracts the dominant colours of album artwork.
-///
-/// Implementation notes:
-/// - Reuses [ArtworkCache.providerFor], so no extra network request is made —
-///   the sleeve already in the image cache is decoded at a tiny resolution.
-/// - Runs fully asynchronously; playback is never blocked.
-/// - Results are cached per URL, so returning to a song is instant.
-/// - Any failure (missing artwork, decode error, …) resolves to
-///   [PlayerPalette.fallback] instead of throwing.
-class PlayerPaletteService {
-  PlayerPaletteService._();
+class MeshPaletteService {
+  MeshPaletteService._();
 
-  static final Map<String, PlayerPalette> _cache = <String, PlayerPalette>{};
-  static final Map<String, Future<PlayerPalette>> _pending =
-      <String, Future<PlayerPalette>>{};
+  static final Map<String, MeshPalette> _cache = <String, MeshPalette>{};
+  static final Map<String, Future<MeshPalette>> _pending =
+      <String, Future<MeshPalette>>{};
 
-  /// Synchronous cache lookup (null when the sleeve was never analysed).
-  static PlayerPalette? cached(String url) => _cache[url];
+  static MeshPalette? cached(String url) => _cache[url];
 
-  /// Extracts a sleeve's palette in the background without waiting for it.
-  /// Used to warm the next track, so the backdrop switches instantly when the
-  /// song does instead of a beat later.
   static void warm(String url) {
     if (url.isEmpty || _cache.containsKey(url)) return;
     unawaited(extract(url));
   }
 
-  /// Resolves the palette for [url], extracting it once and caching it.
-  static Future<PlayerPalette> extract(String url) {
-    if (url.isEmpty) return Future<PlayerPalette>.value(PlayerPalette.fallback);
-    final PlayerPalette? hit = _cache[url];
-    if (hit != null) return Future<PlayerPalette>.value(hit);
-    final Future<PlayerPalette>? inFlight = _pending[url];
+  static Future<MeshPalette> extract(String url) {
+    if (url.isEmpty) return Future<MeshPalette>.value(MeshPalette.fallback);
+    final MeshPalette? hit = _cache[url];
+    if (hit != null) return Future<MeshPalette>.value(hit);
+    final Future<MeshPalette>? inFlight = _pending[url];
     if (inFlight != null) return inFlight;
-
-    final Future<PlayerPalette> future = _extract(url).then(
-      (PlayerPalette palette) {
+    final Future<MeshPalette> future = _extract(url).then(
+      (MeshPalette palette) {
         _cache[url] = palette;
         return palette;
       },
-      onError: (Object _) => PlayerPalette.fallback,
+      onError: (Object _) => MeshPalette.fallback,
     ).whenComplete(() => _pending.remove(url));
     _pending[url] = future;
     return future;
   }
 
-  // ---------------------------------------------------------------------
-  // Extraction
-  // ---------------------------------------------------------------------
-
-  static Future<PlayerPalette> _extract(String url) async {
+  static Future<MeshPalette> _extract(String url) async {
     final ui.Image image = await _decodeSmall(ArtworkCache.providerFor(url));
     try {
       final ByteData? data =
           await image.toByteData(format: ui.ImageByteFormat.rawRgba);
-      if (data == null) return PlayerPalette.fallback;
-      return _paletteFromPixels(data);
+      if (data == null) return MeshPalette.fallback;
+      return _fromPixels(data, image.width, image.height);
     } finally {
       image.dispose();
     }
   }
 
-  /// Decodes the provider at a tiny size (max 48×48) — more than enough for
-  /// a dominant-colour pass and cheap enough for the UI isolate.
   static Future<ui.Image> _decodeSmall(ImageProvider provider) {
     final Completer<ui.Image> completer = Completer<ui.Image>();
     final ImageStream stream = ResizeImage(
@@ -107,147 +88,191 @@ class PlayerPaletteService {
       height: 48,
       allowUpscaling: false,
     ).resolve(ImageConfiguration.empty);
-
-    late final ImageStreamListener listener;
+    late ImageStreamListener listener;
     listener = ImageStreamListener(
-      (ImageInfo info, bool syncCall) {
+      (ImageInfo info, bool _) {
         stream.removeListener(listener);
-        if (!completer.isCompleted) {
-          // Hand out our own handle and release the ImageInfo's one.
-          completer.complete(info.image.clone());
-        }
-        info.dispose();
+        completer.complete(info.image);
       },
-      onError: (Object error, StackTrace? stackTrace) {
+      onError: (Object error, StackTrace? stack) {
         stream.removeListener(listener);
-        if (!completer.isCompleted) completer.completeError(error);
+        completer.completeError(error, stack);
       },
     );
     stream.addListener(listener);
     return completer.future;
   }
 
-  static PlayerPalette _paletteFromPixels(ByteData data) {
-    // Quantise to 4 bits per channel and build a weighted histogram that
-    // prefers saturated, mid-brightness colours (the "identity" of a sleeve)
-    // over flat blacks and whites.
-    final Map<int, _Bucket> buckets = <int, _Bucket>{};
-    final int byteCount = data.lengthInBytes;
-
-    for (int i = 0; i + 3 < byteCount; i += 4) {
-      final int r = data.getUint8(i);
-      final int g = data.getUint8(i + 1);
-      final int b = data.getUint8(i + 2);
-      final int a = data.getUint8(i + 3);
-      if (a < 128) continue;
-
-      final int key = ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
-      final _Bucket bucket = buckets.putIfAbsent(key, _Bucket.new);
-      bucket.add(r, g, b);
-    }
-    if (buckets.isEmpty) return PlayerPalette.fallback;
-
-    _Bucket? best;
-    double bestScore = -1;
-    for (final _Bucket bucket in buckets.values) {
-      final double score = bucket.score;
-      if (score > bestScore) {
-        bestScore = score;
-        best = bucket;
+  static MeshPalette _fromPixels(ByteData data, int w, int h) {
+    // Quadrant sums: [tl, tr, br, bl], plus the whole-frame average.
+    final List<List<double>> sums =
+        List<List<double>>.generate(5, (_) => <double>[0, 0, 0, 0]);
+    final Uint8List bytes = data.buffer.asUint8List();
+    for (int y = 0; y < h; y++) {
+      for (int x = 0; x < w; x++) {
+        final int i = (y * w + x) * 4;
+        if (i + 3 >= bytes.length) continue;
+        final int a = bytes[i + 3];
+        if (a < 16) continue;
+        final int quad = (y < h / 2 ? 0 : 2) + (x < w / 2 ? 0 : 1);
+        // Map to [tl=0, tr=1, br=2, bl=3].
+        final int q = switch (quad) { 0 => 0, 1 => 1, 2 => 3, _ => 2 };
+        for (final int slot in <int>[q, 4]) {
+          sums[slot][0] += bytes[i];
+          sums[slot][1] += bytes[i + 1];
+          sums[slot][2] += bytes[i + 2];
+          sums[slot][3] += 1;
+        }
       }
     }
-    if (best == null) return PlayerPalette.fallback;
-
-    final HSLColor dominant = HSLColor.fromColor(best.averageColor);
-
-    // Optional second hue for gradient depth: the strongest bucket whose hue
-    // clearly differs from the dominant one.
-    HSLColor? companion;
-    double companionScore = -1;
-    for (final _Bucket bucket in buckets.values) {
-      final HSLColor hsl = HSLColor.fromColor(bucket.averageColor);
-      final double hueDelta = _hueDistance(hsl.hue, dominant.hue);
-      if (hueDelta < 40 || hsl.saturation < 0.12) continue;
-      final double score = bucket.score;
-      if (score > companionScore) {
-        companionScore = score;
-        companion = hsl;
-      }
+    Color avg(List<double> s, Color fallback) {
+      if (s[3] == 0) return fallback;
+      return Color.fromARGB(
+        255,
+        (s[0] / s[3]).round(),
+        (s[1] / s[3]).round(),
+        (s[2] / s[3]).round(),
+      );
     }
-    // Only keep the companion when it is a meaningful part of the sleeve.
-    if (companionScore < bestScore * 0.22) companion = null;
 
-    return _buildPalette(dominant, companion);
+    const List<Color> fb = MeshPalette.fallback.colors;
+    final List<Color> tuned = <Color>[
+      for (int i = 0; i < 4; i++) _tune(avg(sums[i], fb[i])),
+    ];
+    return MeshPalette(colors: tuned, base: _dim(avg(sums[4], fb[0]), 0.24));
   }
 
-  /// Darkens and tempers the extracted hues so the backdrop stays deep and
-  /// accessible (white text / icons remain readable on top).
-  static PlayerPalette _buildPalette(HSLColor dominant, HSLColor? companion) {
-    final double saturation =
-        dominant.saturation <= 0.08 ? dominant.saturation : dominant.saturation.clamp(0.28, 0.78);
-
-    final double primaryLightness = dominant.lightness.clamp(0.16, 0.30);
-    final Color primary = HSLColor.fromAHSL(
-      1,
-      dominant.hue,
-      saturation,
-      primaryLightness,
-    ).toColor();
-
-    final HSLColor secondBase = companion ?? dominant;
-    final double secondSaturation = secondBase.saturation <= 0.08
-        ? secondBase.saturation
-        : secondBase.saturation.clamp(0.24, 0.70);
-    final Color secondary = HSLColor.fromAHSL(
-      1,
-      secondBase.hue,
-      secondSaturation,
-      (primaryLightness * 0.48).clamp(0.06, 0.15),
-    ).toColor();
-
-    final Color glow = HSLColor.fromAHSL(
-      1,
-      dominant.hue,
-      math.min(1.0, saturation * 1.15),
-      0.36,
-    ).toColor();
-
-    return PlayerPalette(primary: primary, secondary: secondary, glow: glow);
+  /// `tune()` from the web palette: lift saturation a touch and keep the
+  /// colour luminous but never glaring.
+  static Color _tune(Color c) {
+    final HSLColor hsl = HSLColor.fromColor(c);
+    return hsl
+        .withSaturation((hsl.saturation * 1.15).clamp(0.15, 0.85))
+        .withLightness(hsl.lightness.clamp(0.28, 0.52))
+        .toColor();
   }
 
-  static double _hueDistance(double a, double b) {
-    final double d = (a - b).abs() % 360;
-    return d > 180 ? 360 - d : d;
+  static Color _dim(Color c, double amount) {
+    final HSLColor hsl = HSLColor.fromColor(c);
+    return hsl
+        .withSaturation((hsl.saturation * 0.9).clamp(0.0, 1.0))
+        .withLightness((hsl.lightness * amount).clamp(0.04, 0.2))
+        .toColor();
   }
 }
 
-class _Bucket {
-  int count = 0;
-  int _r = 0;
-  int _g = 0;
-  int _b = 0;
+/// The mesh itself: four blurred blobs at the corners over [MeshPalette.base],
+/// crossfading when the track changes. In Flutter the "blur" is a radial
+/// gradient per blob, which reads the same and costs no backdrop filter.
+class MeshBackdrop extends StatelessWidget {
+  const MeshBackdrop({
+    super.key,
+    required this.palette,
+    this.scrim = true,
+  });
 
-  void add(int r, int g, int b) {
-    count++;
-    _r += r;
-    _g += g;
-    _b += b;
+  final MeshPalette palette;
+  final bool scrim;
+
+  @override
+  Widget build(BuildContext context) {
+    final List<Color> c = palette.colors;
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 800),
+      color: palette.base,
+      child: Stack(
+        fit: StackFit.expand,
+        children: <Widget>[
+          _blob(c[0], const Alignment(-0.75, -0.8)),
+          _blob(c[1], const Alignment(0.85, -0.7)),
+          _blob(c[2], const Alignment(0.7, 0.85)),
+          _blob(c[3], const Alignment(-0.85, 0.75)),
+          if (scrim)
+            const DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: <Color>[Color(0x1A000000), Color(0x61000000)],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
   }
 
-  Color get averageColor {
-    if (count == 0) return const Color(0xFF000000);
-    return Color.fromARGB(255, _r ~/ count, _g ~/ count, _b ~/ count);
+  Widget _blob(Color color, Alignment alignment) {
+    return Align(
+      alignment: alignment,
+      child: Container(
+        width: 340,
+        height: 340,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: RadialGradient(
+            colors: <Color>[
+              color.withValues(alpha: 0.85),
+              color.withValues(alpha: 0),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Resolves the palette for [artworkUrl] (or a neutral mesh when artwork
+/// tinting — "Colour from artwork" — is off, exactly like the web app).
+class MeshBackdropFor extends StatefulWidget {
+  const MeshBackdropFor({
+    super.key,
+    required this.artworkUrl,
+    required this.dynamicColor,
+    this.scrim = true,
+  });
+
+  final String artworkUrl;
+  final bool dynamicColor;
+  final bool scrim;
+
+  @override
+  State<MeshBackdropFor> createState() => _MeshBackdropForState();
+}
+
+class _MeshBackdropForState extends State<MeshBackdropFor> {
+  MeshPalette _palette = MeshPalette.fallback;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
   }
 
-  /// Population weighted towards saturated, mid-brightness colours.
-  double get score {
-    final Color c = averageColor;
-    final HSLColor hsl = HSLColor.fromColor(c);
-    // 0 at pure black/white, 1 around mid brightness.
-    final double brightnessWeight =
-        1 - (hsl.lightness - 0.5).abs() * 1.6;
-    return count *
-        (0.18 + hsl.saturation) *
-        brightnessWeight.clamp(0.08, 1.0);
+  @override
+  void didUpdateWidget(MeshBackdropFor old) {
+    super.didUpdateWidget(old);
+    if (old.artworkUrl != widget.artworkUrl ||
+        old.dynamicColor != widget.dynamicColor) {
+      _load();
+    }
+  }
+
+  void _load() {
+    if (!widget.dynamicColor || widget.artworkUrl.isEmpty) {
+      _palette = MeshPalette.fallback;
+      return;
+    }
+    _palette = MeshPaletteService.cached(widget.artworkUrl) ?? _palette;
+    MeshPaletteService.extract(widget.artworkUrl).then((MeshPalette p) {
+      if (mounted && widget.artworkUrl.isNotEmpty) {
+        setState(() => _palette = p);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MeshBackdrop(palette: _palette, scrim: widget.scrim);
   }
 }

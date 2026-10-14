@@ -157,8 +157,8 @@ class PresenceService extends ChangeNotifier {
             'track_name': song.title,
             if (song.album != null) 'release_name': song.album!,
             'additional_info': <String, dynamic>{
-              'media_player': IfallBranding.appName,
-              'submission_client': IfallBranding.appName,
+              'media_player': SidifyBranding.appName,
+              'submission_client': SidifyBranding.appName,
               if (song.id.isNotEmpty) 'origin_url': song.id,
             },
           },

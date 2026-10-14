@@ -1,24 +1,25 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ifallmusic/core/utils/audio_container.dart';
-import 'package:ifallmusic/ui/shell/shell_controller.dart';
+import 'package:ifallmusic/ui/shell/sidify_shell_controller.dart';
 
 void main() {
   test('back replays tab visits and only exits at home', () {
-    final shell = ShellController();
+    final SidifyShellController shell = SidifyShellController();
     shell.goSearch('Song');
     shell.goLibrary();
-    shell.goSettings();
+    shell.goTogether();
     expect(shell.back(), isTrue);
-    expect(shell.tab, SaxifyTab.library);
+    expect(shell.tab, SidifyTab.library);
     expect(shell.back(), isTrue);
-    expect(shell.tab, SaxifyTab.search);
+    expect(shell.tab, SidifyTab.search);
     expect(shell.back(), isTrue);
-    expect(shell.tab, SaxifyTab.home);
+    expect(shell.tab, SidifyTab.home);
     expect(shell.back(), isFalse);
     shell.dispose();
   });
+
   test('duplicate tabs do not add history; explicit home is exit boundary', () {
-    final shell = ShellController();
+    final SidifyShellController shell = SidifyShellController();
     shell.goSearch();
     shell.goSearch('new');
     shell.goLibrary();
@@ -26,38 +27,25 @@ void main() {
     expect(shell.back(), isFalse);
     shell.dispose();
   });
-  test('Library opens Your Space instead of preselecting Liked', () {
-    final shell = ShellController();
-    expect(shell.libraryTab, LibraryTabs.overview);
-    shell.goLiked();
-    expect(shell.libraryTab, LibraryTabs.liked);
-    shell.select(SaxifyTab.library);
-    expect(shell.libraryTab, LibraryTabs.overview);
+
+  test('search hand-off carries the query and bumps the nonce', () {
+    final SidifyShellController shell = SidifyShellController();
+    shell.goSearch('Believer');
+    expect(shell.tab, SidifyTab.search);
+    expect(shell.searchQuery, 'Believer');
+    final int nonce = shell.searchNonce;
     shell.goHome();
-    shell.select(SaxifyTab.library);
-    expect(shell.libraryTab, LibraryTabs.overview);
+    shell.goSearch('Believer');
+    expect(shell.searchNonce, greaterThan(nonce));
     shell.dispose();
   });
 
-  test('Library deep links are consumed once, so Back returns to the list', () {
-    final shell = ShellController();
-    shell.goLiked();
-    expect(shell.libraryTab, LibraryTabs.liked);
-    final int nonce = shell.libraryNonce;
-
-    // The Library list opens the section as a pushed page and immediately
-    // clears the request, so a second visit starts from the list again.
-    shell.clearLibraryTab();
-    expect(shell.libraryTab, LibraryTabs.overview);
-    expect(shell.libraryNonce, greaterThan(nonce));
-
-    shell.goDownloads();
-    expect(shell.libraryTab, LibraryTabs.downloads);
-    shell.select(SaxifyTab.library);
-    expect(shell.libraryTab, LibraryTabs.overview);
-    expect(shell.back(), isTrue);
-    expect(shell.tab, SaxifyTab.home);
-    shell.dispose();
+  test('tab indices match the floating tab bar order', () {
+    expect(SidifyTab.home.index, 0);
+    expect(SidifyTab.explore.index, 1);
+    expect(SidifyTab.search.index, 2);
+    expect(SidifyTab.library.index, 3);
+    expect(SidifyTab.together.index, 4);
   });
 
   test('download container uses honest extension and MIME', () {

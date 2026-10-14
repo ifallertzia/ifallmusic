@@ -13,7 +13,7 @@ import 'package:ifallmusic/core/services/playback_service.dart';
 import 'package:ifallmusic/core/services/settings_service.dart';
 import 'package:ifallmusic/core/services/youtube_service.dart';
 import 'package:ifallmusic/ui/library/library_page.dart';
-import 'package:ifallmusic/ui/shell/shell_controller.dart';
+import 'package:ifallmusic/ui/shell/sidify_shell_controller.dart';
 
 class FakePlayer implements AudioPlayer {
   final states = StreamController<PlayerState>.broadcast(sync: true);
@@ -61,57 +61,6 @@ class FakePlayer implements AudioPlayer {
   }
 
   @override
-  Future<void> play() async {
-    playing = true;
-    states.add(PlayerState(true, processingState));
-  }
-
-  @override
-  Future<void> pause() async {
-    playing = false;
-    states.add(PlayerState(false, processingState));
-  }
-
-  @override
-  Future<void> stop() async {
-    playing = false;
-    processingState = ProcessingState.idle;
-    states.add(PlayerState(false, processingState));
-  }
-
-  @override
-  Future<void> seek(Duration? value, {int? index}) async {
-    position = value ?? Duration.zero;
-    positions.add(position);
-  }
-
-  @override
-  Future<void> setSpeed(double value) async {
-    speed = value;
-  }
-
-  @override
-  Future<void> setLoopMode(LoopMode mode) async {
-    loops.add(mode);
-  }
-
-  void complete({int times = 1}) {
-    position = duration!;
-    processingState = ProcessingState.completed;
-    for (int i = 0; i < times; i++) {
-      states.add(PlayerState(true, ProcessingState.completed));
-    }
-  }
-
-  @override
-  Future<void> dispose() async {
-    await states.close();
-    await positions.close();
-    await durations.close();
-    await events.close();
-  }
-
-  @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
@@ -139,40 +88,37 @@ String frameworkErrorHead(Object error) {
 }
 
 /// Fails with the framework's OWN complaint (overflow, failed assertion, …).
-///
-/// A layout error inside `LibraryPage` is recorded by the binding and only
-/// re-thrown after the test body finishes, so without this the first thing you
-/// ever see is a downstream "found 0 widgets" that hides the real cause.
 void expectCleanPump(WidgetTester tester, String step) {
   final Object? error = tester.takeException();
   if (error == null) return;
   fail('$step threw a framework error: ${frameworkErrorHead(error)}');
 }
 
-/// The Library is a single list now: no horizontal tab strip, and every
-/// collection is its own pushed page so the system Back button returns to the
-/// list instead of dropping the listener on Home.
+/// The Library is a hub now: every collection is its own pushed page, so the
+/// system Back button returns to the list instead of dropping the listener
+/// on Home — and there is no horizontal tab strip anywhere.
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   /// Boots the Library inside every provider it reads, and tears the player
   /// down after the test.
   Widget libraryUnderTest(SharedPreferences prefs) {
+    final SettingsService settings = SettingsService(prefs);
+    final LibraryService library = LibraryService(prefs);
     final PlaybackService playback = PlaybackService(
       youtube: YoutubeService(),
-      settings: SettingsService(prefs),
-      library: LibraryService(prefs),
+      settings: settings,
+      library: library,
       player: FakePlayer(),
     );
     addTearDown(playback.dispose);
     return MultiProvider(
       providers: [
-        ChangeNotifierProvider<ShellController>(
-          create: (_) => ShellController(),
+        ChangeNotifierProvider<SettingsService>.value(value: settings),
+        ChangeNotifierProvider<SidifyShellController>(
+          create: (_) => SidifyShellController(),
         ),
-        ChangeNotifierProvider<LibraryService>.value(
-          value: LibraryService(prefs),
-        ),
+        ChangeNotifierProvider<LibraryService>.value(value: library),
         ChangeNotifierProvider<MusicDownloadService>.value(
           value: MusicDownloadService(prefs: prefs),
         ),
@@ -180,15 +126,13 @@ void main() {
           value: LocalMusicService(prefs),
         ),
         ChangeNotifierProvider<PlaybackService>.value(value: playback),
+        Provider<YoutubeService>.value(value: YoutubeService()),
       ],
-      // The Library lives inside the shell's Scaffold in the real app, and
-      // ListTile needs that Material ancestor — pumping the page bare makes
-      // every row throw "No Material widget found".
       child: const MaterialApp(home: Scaffold(body: LibraryPage())),
     );
   }
 
-  testWidgets('library lists every section and shows no tab strip', (
+  testWidgets('library hub lists every section and shows no tab strip', (
     tester,
   ) async {
     SharedPreferences.setMockInitialValues(<String, Object>{});
@@ -198,12 +142,12 @@ void main() {
     await tester.pumpAndSettle();
     expectCleanPump(tester, 'pumpAndSettle');
 
-    expect(find.text('Your Space'), findsOneWidget);
-    expect(find.text('Liked songs'), findsOneWidget);
-    expect(find.text('Playlists'), findsOneWidget);
+    expect(find.text('Library'), findsOneWidget);
+    expect(find.text('Liked Songs'), findsOneWidget);
+    expect(find.text('History'), findsOneWidget);
     expect(find.text('Downloads'), findsOneWidget);
-    expect(find.text('Recently played'), findsOneWidget);
-    expect(find.text('Lyrics Finder'), findsOneWidget);
+    expect(find.text('Lyrics finder'), findsOneWidget);
+    expect(find.text('Playlists'), findsOneWidget);
     // The horizontal tab strip is gone for good.
     expect(find.byType(TabBar), findsNothing);
     expect(find.byType(TabBarView), findsNothing);
@@ -219,21 +163,20 @@ void main() {
     await tester.pumpAndSettle();
     expectCleanPump(tester, 'pumpAndSettle');
 
-    await tester.tap(find.text('Liked songs'));
+    await tester.tap(find.text('Liked Songs'));
     await tester.pumpAndSettle();
-    expectCleanPump(tester, 'after tapping Liked songs');
+    expectCleanPump(tester, 'after tapping Liked Songs');
 
-    // The section is a real route with its own title and back arrow.
-    expect(find.text('Liked Songs'), findsOneWidget);
-    expect(find.byType(BackButton), findsOneWidget);
+    // The section is a real route with its own header.
+    expect(find.text('Liked Songs'), findsWidgets);
+    expect(find.byIcon(Icons.arrow_back_rounded), findsOneWidget);
 
     await tester.pageBack();
     await tester.pumpAndSettle();
     expectCleanPump(tester, 'after pageBack');
 
-    // Back lands on the library list again, never on Home.
-    expect(find.text('Your Space'), findsOneWidget);
-    expect(find.text('Liked songs'), findsOneWidget);
-    expect(find.text('Liked Songs'), findsNothing);
+    // Back lands on the library hub again, never on Home.
+    expect(find.text('Library'), findsOneWidget);
+    expect(find.text('Playlists'), findsOneWidget);
   });
 }

@@ -24,13 +24,13 @@ class BackendConfig {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
         clientHeader: clientValue,
-        'User-Agent': userAgent ?? IfallBranding.userAgent,
+        'User-Agent': userAgent ?? SidifyBranding.userAgent,
       };
 
   static Map<String, String> downloadHeaders({String? userAgent}) =>
       <String, String>{
         'Accept': '*/*',
         clientHeader: clientValue,
-        'User-Agent': userAgent ?? IfallBranding.userAgent,
+        'User-Agent': userAgent ?? SidifyBranding.userAgent,
       };
 }

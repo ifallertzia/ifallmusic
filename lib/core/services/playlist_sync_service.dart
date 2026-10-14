@@ -28,7 +28,7 @@ class PlaylistSyncService {
             body: jsonEncode(<String, Object?>{
               'title': title,
               'songs': songs,
-              'app': IfallBranding.appName,
+              'app': SidifyBranding.appName,
             }),
           )
           .timeout(const Duration(seconds: 20));
@@ -52,7 +52,7 @@ class PlaylistSyncService {
             body: jsonEncode(<String, Object?>{
               'title': title,
               'playlists': allPlaylists,
-              'app': IfallBranding.appName,
+              'app': SidifyBranding.appName,
             }),
           )
           .timeout(const Duration(seconds: 20));

@@ -58,7 +58,7 @@ void main() {
     });
 
     test('saved names use the app suffix and reject html', () {
-      expect(Filenames.saxify('Night Drive', 'mp3'), 'Night Drive${IfallBranding.fileSuffix}.mp3');
+      expect(Filenames.saxify('Night Drive', 'mp3'), 'Night Drive${SidifyBranding.fileSuffix}.mp3');
       expect(Filenames.looksCorrupt('<html>nope'.codeUnits, 20), isTrue);
       expect(Filenames.looksCorrupt(<int>[0x49, 0x44, 0x33], 2048), isFalse);
     });

@@ -1,450 +1,312 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../core/models/song.dart';
+import '../../core/models/nerd_stats.dart';
 import '../../core/services/playback_service.dart';
 import '../../core/services/settings_service.dart';
-import '../../core/theme/ifall_ui.dart';
-import '../../core/utils/format.dart';
-import '../widgets/artwork.dart';
-import '../../core/models/nerd_stats.dart';
+import '../../core/theme/sidify_theme.dart';
+import '../widgets/song_menu.dart';
+import '../widgets/sidify_widgets.dart';
+import 'equalizer_page.dart';
 
-// ------------------------------------------------------------------- queue
-
-/// The up-next sheet: the live queue, draggable and removable.
-void showQueueSheet(BuildContext context) {
-  showIfallSheet<void>(
-    context: context,
-    builder: (BuildContext sheetContext) => const _QueueSheet(),
+/// The player's capsule sheet (the site's PlaybackSheet): speed, sleep
+/// timer, crossfade and friends, plus the path to the equalizer and the
+/// "stats for nerds". Everything here drives the same engine settings the
+/// old interface used — nothing about playback changes.
+Future<void> showPlaybackSheet(BuildContext context) {
+  return showSidifySheet(
+    context,
+    title: 'Playback',
+    child: const _PlaybackSheetBody(),
   );
 }
 
-class _QueueSheet extends StatelessWidget {
-  const _QueueSheet();
-
-  @override
-  Widget build(BuildContext context) {
-    final PlaybackService playback = context.watch<PlaybackService>();
-    final List<Song> queue = playback.queue;
-    final int current = playback.currentIndex;
-
-    return IfallSheet(
-      title: 'Up next',
-      subtitle: '${queue.length} tracks',
-      actions: <Widget>[
-        TextButton(
-          onPressed: queue.isEmpty ? null : playback.clearQueue,
-          child: Text(
-            'Clear',
-            style: IfallText.caption(IfallPalette.of(context).accent)
-                .copyWith(fontWeight: FontWeight.w700),
-          ),
-        ),
-      ],
-      child: queue.isEmpty
-          ? const IfallEmpty(
-              icon: Icons.queue_music_rounded,
-              message: 'Nothing is queued. Play something and it lands here.',
-            )
-          : ReorderableListView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: queue.length,
-              onReorder: (int from, int to) =>
-                  _move(context, from: from, to: to),
-              itemBuilder: (BuildContext context, int i) {
-                final Song song = queue[i];
-                final bool active = i == current;
-                return _QueueRow(
-                  key: ValueKey<String>('q-${song.id}-$i'),
-                  song: song,
-                  index: i,
-                  active: active,
-                  onTap: () => playback.skipToIndex(i),
-                  onRemove: () => playback.removeFromQueue(i),
-                );
-              },
-            ),
-    );
-  }
-
-  /// ReorderableListView reports the index the item *would* land in after the
-  /// move, which is one further down when an item travels downwards.
-  void _move(BuildContext context, {required int from, required int to}) {
-    final PlaybackService playback = context.read<PlaybackService>();
-    final List<Song> queue = List<Song>.from(playback.queue);
-    if (from < 0 || from >= queue.length) return;
-    if (to > from) to -= 1;
-    if (to < 0 || to >= queue.length) return;
-    final Song song = queue.removeAt(from);
-    queue.insert(to, song);
-    playback.reorderQueue(queue, keepCurrentIndex: playback.currentIndex);
-  }
-}
-
-class _QueueRow extends StatelessWidget {
-  const _QueueRow({
-    super.key,
-    required this.song,
-    required this.index,
-    required this.active,
-    required this.onTap,
-    required this.onRemove,
-  });
-
-  final Song song;
-  final int index;
-  final bool active;
-  final VoidCallback onTap;
-  final VoidCallback onRemove;
-
-  @override
-  Widget build(BuildContext context) {
-    final IfallPalette c = IfallPalette.of(context);
-    return Material(
-      color: Colors.transparent,
-      child: ListTile(
-        key: ValueKey<String>('row-${song.id}-$index'),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 6),
-        leading: ReorderableDragStartListener(
-          index: index,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10),
-            child: Icon(
-              Icons.drag_handle_rounded,
-              size: 18,
-              color: c.onSurfaceVariant,
-            ),
-          ),
-        ),
-        title: Text(
-          song.title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: IfallText.body(active ? c.accent : c.onSurface),
-        ),
-        subtitle: Text(
-          song.artist,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: IfallText.caption(c.onSurfaceVariant),
-        ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            if (song.duration != null)
-              Text(
-                Fmt.duration(song.duration),
-                style: IfallText.caption(c.onSurfaceVariant),
-              ),
-            IconButton(
-              onPressed: onRemove,
-              icon: const Icon(Icons.close_rounded),
-              iconSize: 18,
-              color: c.onSurfaceVariant,
-            ),
-          ],
-        ),
-        onTap: onTap,
-      ),
-    );
-  }
-}
-
-// -------------------------------------------------------------- sleep timer
-
-/// Fixed presets, or "stop after this track".
-void showSleepTimerSheet(BuildContext context) {
-  showIfallSheet<void>(
-    context: context,
-    builder: (BuildContext sheetContext) => const _SleepTimerSheet(),
-  );
-}
-
-class _SleepTimerSheet extends StatelessWidget {
-  const _SleepTimerSheet();
-
-  static const List<int> presets = <int>[5, 10, 15, 30, 45, 60, 90, 120];
+class _PlaybackSheetBody extends StatelessWidget {
+  const _PlaybackSheetBody();
 
   @override
   Widget build(BuildContext context) {
     final PlaybackService playback = context.watch<PlaybackService>();
     final SettingsService settings = context.watch<SettingsService>();
-    final IfallPalette c = IfallPalette.of(context);
-    final Duration? remaining = playback.sleepRemaining;
+    final SidifyTokens t = context.sidify;
+    final Duration? sleep = playback.sleepRemaining;
 
-    return IfallSheet(
-      title: 'Sleep timer',
-      subtitle: remaining == null
-          ? 'Playback pauses when the timer ends'
-          : 'Pausing in ${Fmt.clock(remaining)}',
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(0, 8, 0, 20),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          if (remaining != null) ...<Widget>[
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: playback.cancelSleepTimer,
-                icon: const Icon(Icons.close_rounded),
-                label: const Text('Cancel sleep timer'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: c.accent,
-                  foregroundColor:
-                      ThemeData.estimateBrightnessForColor(c.accent) ==
-                              Brightness.dark
-                          ? Colors.white
-                          : Colors.black,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(IfallUI.rPill),
+          _row(
+            context,
+            Icons.speed_rounded,
+            'Speed',
+            trailing: Wrap(
+              spacing: 6,
+              children: <Widget>[
+                for (final double v in <double>[0.75, 1, 1.25, 1.5, 2])
+                  _miniChip(
+                    context,
+                    v == 1 ? '1×' : '${v}×',
+                    playback.speed == v,
+                    () => playback.setSpeed(v),
                   ),
+              ],
+            ),
+          ),
+          _row(
+            context,
+            Icons.bedtime_rounded,
+            sleep != null
+                ? 'Sleep timer · ${sleep.inMinutes + 1} min left'
+                : 'Sleep timer',
+            trailing: Wrap(
+              spacing: 6,
+              children: <Widget>[
+                if (sleep != null)
+                  _miniChip(context, 'Off', false, playback.cancelSleepTimer)
+                else
+                  for (final int m in <int>[15, 30, 45, 60])
+                    _miniChip(
+                      context,
+                      '$m',
+                      false,
+                      () => playback.startSleepTimer(Duration(minutes: m)),
+                    ),
+              ],
+            ),
+          ),
+          _row(
+            context,
+            Icons.blur_linear_rounded,
+            'Crossfade · ${settings.crossfadeSeconds == 0 ? 'Off' : '${settings.crossfadeSeconds}s'}',
+            trailing: SizedBox(
+              width: 130,
+              child: SliderTheme(
+                data: _sliderTheme(t),
+                child: Slider(
+                  value: settings.crossfadeSeconds.toDouble(),
+                  min: 0,
+                  max: 12,
+                  divisions: 12,
+                  onChanged: (double v) =>
+                      playback.setCrossfadeSeconds(v.round()),
                 ),
               ),
             ),
-            const SizedBox(height: 16),
-          ],
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: <Widget>[
-              for (final int minutes in presets)
-                IfallChip(
-                  label: '$minutes min',
-                  selected: remaining != null &&
-                      remaining.inMinutes <= minutes &&
-                      remaining.inMinutes > minutes - 2,
-                  onTap: () {
-                    settings.setSleepMinutes(minutes);
-                    settings.setSleepEndOfTrack(false);
-                    playback.startSleepTimer(Duration(minutes: minutes));
-                    Navigator.of(context).pop();
-                  },
-                ),
-            ],
           ),
-          const SizedBox(height: 18),
-          IfallSwitchRow(
-            icon: Icons.skip_next_rounded,
-            title: 'Stop after this track',
-            subtitle: 'Instead of counting down',
-            value: settings.sleepEndOfTrack,
-            onChanged: (bool v) async {
-              await settings.setSleepEndOfTrack(v);
-              if (v) {
-                playback.startSleepTimer(
-                  const Duration(hours: 12),
-                  endOfTrack: true,
-                );
-              } else {
-                playback.cancelSleepTimer();
-              }
-              if (context.mounted) Navigator.of(context).pop();
+          _row(
+            context,
+            Icons.all_inclusive_rounded,
+            'AutoPlay',
+            subtitle: 'Similar music lines up before the queue ends',
+            trailing: SidifySwitch(
+              value: settings.autoplay,
+              label: 'AutoPlay',
+              onChanged: settings.setAutoplay,
+            ),
+          ),
+          _row(
+            context,
+            Icons.graphic_eq_rounded,
+            'Volume normalization',
+            trailing: SidifySwitch(
+              value: playback.normalizeVolume,
+              label: 'Volume normalization',
+              onChanged: playback.setNormalizeVolume,
+            ),
+          ),
+          _row(
+            context,
+            Icons.content_cut_rounded,
+            'Skip silence',
+            trailing: SidifySwitch(
+              value: settings.skipSilence,
+              label: 'Skip silence',
+              onChanged: (bool v) async {
+                await settings.setSkipSilence(v);
+                await playback.setSkipSilence(v);
+              },
+            ),
+          ),
+          Divider(
+            height: 24,
+            thickness: 0.5,
+            color: t.hairline,
+            indent: 20,
+            endIndent: 20,
+          ),
+          _row(
+            context,
+            Icons.equalizer_rounded,
+            'Equalizer',
+            subtitle: settings.equalizerEnabled
+                ? settings.equalizerProfileName
+                : 'Off',
+            chevron: true,
+            onTap: () {
+              Navigator.of(context).pop();
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const EqualizerPage(),
+                  settings: const RouteSettings(name: 'sidify/equalizer'),
+                ),
+              );
+            },
+          ),
+          _row(
+            context,
+            Icons.query_stats_rounded,
+            'Stats for nerds',
+            chevron: true,
+            onTap: () {
+              Navigator.of(context).pop();
+              showSidifySheet(
+                context,
+                title: 'Stats for nerds',
+                child: const _NerdStatsBody(),
+              );
             },
           ),
         ],
       ),
     );
   }
-}
 
-// ------------------------------------------------------------- stats for nerds
-
-/// Codec, container, bitrate and everything else the engine is doing.
-void showNerdStatsSheet(BuildContext context) {
-  showIfallSheet<void>(
-    context: context,
-    builder: (BuildContext sheetContext) => const _NerdStatsSheet(),
-  );
-}
-
-class _NerdStatsSheet extends StatelessWidget {
-  const _NerdStatsSheet();
-
-  @override
-  Widget build(BuildContext context) {
-    final PlaybackService playback = context.watch<PlaybackService>();
-    final IfallPalette c = IfallPalette.of(context);
-    final NerdStats stats = playback.nerdStats;
-
-    return IfallSheet(
-      title: 'Stats for nerds',
-      subtitle: stats.title,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          _Stat('Video ID', stats.videoId),
-          _Stat('Source', stats.source),
-          _Stat('Container', stats.bufferLine),
-          _Stat('Format', stats.formatLine),
-          _Stat('Progress', stats.progressLine),
-          _Stat('Resolver', stats.resolver),
-          _Stat('Speed', '${stats.speed}x'),
-          _Stat('Volume', '${(stats.volume * 100).round()}%'),
-          _Stat('Normalized', stats.normalized ? 'On' : 'Off'),
-          _Stat(
-            'Crossfade',
-            stats.crossfadeSeconds == 0
-                ? 'Off'
-                : '${stats.crossfadeSeconds}s',
-          ),
-          _Stat('Automix', stats.automix ? 'On' : 'Off'),
-          _Stat('Skip silence', stats.skipSilence ? 'On' : 'Off'),
-          _Stat('Platform', stats.platformLine),
-          if (stats.sessionId != null)
-            _Stat('Audio session', '${stats.sessionId}'),
-          const SizedBox(height: 10),
-          Text(
-            'Values are read back from the player and the resolver, so a track '
-            'that fell over to the legacy resolver says so here.',
-            style: IfallText.caption(c.onSurfaceVariant),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _Stat extends StatelessWidget {
-  const _Stat(this.label, this.value);
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    final IfallPalette c = IfallPalette.of(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 7),
+  Widget _row(
+    BuildContext context,
+    IconData icon,
+    String title, {
+    String? subtitle,
+    Widget? trailing,
+    VoidCallback? onTap,
+    bool chevron = false,
+  }) {
+    final SidifyTokens t = context.sidify;
+    final Widget row = Container(
+      constraints: const BoxConstraints(minHeight: 52),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          SizedBox(
-            width: 120,
-            child: Text(label, style: IfallText.caption(c.onSurfaceVariant)),
-          ),
+          Icon(icon, size: 19, color: t.text),
+          const SizedBox(width: 14),
           Expanded(
-            child: Text(
-              value,
-              style: IfallText.body(c.onSurface)
-                  .copyWith(fontWeight: FontWeight.w600),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  title,
+                  style: TextStyle(fontSize: 15.5, color: t.text),
+                ),
+                if (subtitle != null)
+                  Text(
+                    subtitle,
+                    style: TextStyle(fontSize: 12.5, color: t.text2),
+                  ),
+              ],
             ),
           ),
+          if (trailing != null) trailing,
+          if (chevron)
+            Icon(Icons.chevron_right_rounded, size: 18, color: t.text3),
         ],
       ),
     );
+    if (onTap == null) return row;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(onTap: onTap, child: row),
+    );
   }
-}
 
-// ---------------------------------------------------------------------- sound
-
-/// Volume, speed and the quick-jump into the equalizer.
-void showSoundSheet(BuildContext context) {
-  showIfallSheet<void>(
-    context: context,
-    builder: (BuildContext sheetContext) => const _SoundSheet(),
-  );
-}
-
-class _SoundSheet extends StatelessWidget {
-  const _SoundSheet();
-
-  @override
-  Widget build(BuildContext context) {
-    final PlaybackService playback = context.watch<PlaybackService>();
-    final SettingsService settings = context.watch<SettingsService>();
-    final IfallPalette c = IfallPalette.of(context);
-
-    return IfallSheet(
-      title: 'Sound',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          IfallSliderRow(
-            icon: Icons.volume_up_rounded,
-            title: 'Volume',
-            value: playback.volume,
-            min: 0,
-            max: 1,
-            format: (double v) => '${(v * 100).round()}%',
-            onChanged: playback.setVolume,
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 6, 16, 4),
-            child: Text(
-              'Speed',
-              style: IfallText.body(c.onSurface),
+  Widget _miniChip(
+    BuildContext context,
+    String label,
+    bool on,
+    VoidCallback onTap,
+  ) {
+    final SidifyTokens t = context.sidify;
+    return Material(
+      color: on ? t.primary : t.fill2,
+      borderRadius: BorderRadius.circular(999),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(999),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: on ? t.onPrimary : t.text,
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: IfallSegmented<double>(
-              value: settings.playbackSpeed,
-              options: const <double>[0.5, 0.75, 1.0, 1.25, 1.5, 2.0],
-              labelBuilder: (double v) => v == 1.0 ? '1x' : '${v}x',
-              onChanged: playback.setSpeed,
-            ),
-          ),
-          IfallSliderRow(
-            icon: Icons.compare_arrows_rounded,
-            title: 'Crossfade',
-            value: settings.crossfadeSeconds.toDouble(),
-            min: 0,
-            max: 12,
-            divisions: 12,
-            format: (double v) => v == 0 ? 'Off' : '${v.round()}s',
-            onChanged: (double v) => playback.setCrossfadeSeconds(v.round()),
-          ),
-          IfallSwitchRow(
-            icon: Icons.volume_down_rounded,
-            title: 'Normalize volume',
-            value: settings.normalizeVolume,
-            onChanged: playback.setNormalizeVolume,
-          ),
-          IfallSwitchRow(
-            icon: Icons.content_cut_rounded,
-            title: 'Skip silence',
-            value: settings.skipSilence,
-            onChanged: playback.setSkipSilence,
-          ),
-        ],
+        ),
       ),
     );
   }
+
+  SliderThemeData _sliderTheme(SidifyTokens t) => SliderThemeData(
+        trackHeight: 4,
+        activeTrackColor: t.text,
+        inactiveTrackColor: t.fill3,
+        thumbColor: t.text,
+        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+        overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+      );
 }
 
-// -------------------------------------------------------------- track details
-
-/// The "about this track" sheet: artwork, artist, and where it came from.
-void showTrackDetailsSheet(BuildContext context, Song song) {
-  showIfallSheet<void>(
-    context: context,
-    builder: (BuildContext sheetContext) => _TrackDetailsSheet(song: song),
-  );
-}
-
-class _TrackDetailsSheet extends StatelessWidget {
-  const _TrackDetailsSheet({required this.song});
-
-  final Song song;
+/// What the engine is actually doing, in the site's "stats for nerds" spirit.
+/// Only neutral facts are shown — codec, bitrate, format — never a provider.
+class _NerdStatsBody extends StatelessWidget {
+  const _NerdStatsBody();
 
   @override
   Widget build(BuildContext context) {
-    final NerdStats stats = context.read<PlaybackService>().nerdStats;
-    return IfallSheet(
-      title: song.title,
-      subtitle: song.artist,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Center(
-            child: Artwork(url: song.thumbnailUrl, size: 180, radius: 14),
+    final NerdStats s = context.watch<PlaybackService>().nerdStats;
+    final SidifyTokens t = context.sidify;
+    Widget stat(String k, String v) => Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 7),
+          child: Row(
+            children: <Widget>[
+              SizedBox(
+                width: 120,
+                child: Text(k, style: TextStyle(fontSize: 13.5, color: t.text2)),
+              ),
+              Expanded(
+                child: Text(
+                  v,
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    color: t.text,
+                    fontFeatures: const <FontFeature>[
+                      FontFeature.tabularFigures(),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 18),
-          if (song.album != null) _Stat('Album', song.album!),
-          if (song.duration != null) _Stat('Length', Fmt.duration(song.duration)),
-          _Stat('Source', song.source.name),
-          if (song.id == stats.videoId) _Stat('Container', stats.bufferLine),
-          _Stat('Video ID', song.id),
+        );
+    return SingleChildScrollView(
+      padding: const EdgeInsets.only(top: 8, bottom: 20),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          stat('Engine', 'Sidify'),
+          stat('Stream', s.bufferLine.isEmpty || s.bufferLine == '—'
+              ? '—'
+              : s.bufferLine),
+          stat('Format', s.formatLine),
+          stat('Progress', s.progressLine),
+          stat('Speed', '${s.speed}×'),
+          stat('Volume', '${(s.volume * 100).round()}%'),
+          stat('Normalization', s.normalized ? 'On' : 'Off'),
+          stat('Crossfade', s.crossfadeSeconds == 0
+              ? 'Off'
+              : '${s.crossfadeSeconds}s'),
+          stat('Skip silence', s.skipSilence ? 'On' : 'Off'),
+          stat('Platform', s.platformLine),
         ],
       ),
     );

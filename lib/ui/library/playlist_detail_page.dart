@@ -3,234 +3,113 @@ import 'package:provider/provider.dart';
 
 import '../../core/models/playlist.dart';
 import '../../core/models/song.dart';
+import '../../core/services/app_feedback.dart';
 import '../../core/services/library_service.dart';
 import '../../core/services/playback_service.dart';
-import '../../core/theme/ifall_ui.dart';
-import '../settings/playlist_sync_sheet.dart';
-import '../widgets/artwork.dart';
-import '../widgets/song_tile.dart';
+import '../../core/theme/sidify_theme.dart';
+import '../widgets/collection_header.dart';
+import '../widgets/sidify_widgets.dart';
+import '../widgets/song_menu.dart';
 
-/// A user playlist's detail screen — BitChord's warm gradient header, black
-/// body, one accent-coloured Play pill.
+/// A playlist opened: the mosaic sleeve, Play / Shuffle, then the songs —
+/// with rename, remove and delete through the "…" at the top.
 class PlaylistDetailPage extends StatelessWidget {
-  const PlaylistDetailPage({super.key, required this.playlistId});
+  const PlaylistDetailPage({super.key, required this.playlist});
 
-  final String playlistId;
+  final Playlist playlist;
+
+  Playlist? _live(BuildContext context) {
+    final LibraryService library = context.watch<LibraryService>();
+    for (final Playlist p in library.playlists) {
+      if (p.id == playlist.id) return p;
+    }
+    return null;
+  }
 
   @override
   Widget build(BuildContext context) {
-    final IfallPalette c = IfallPalette.of(context);
-    final LibraryService library = context.watch<LibraryService>();
-
-    final Playlist? playlist = library.playlistById(playlistId);
-
-    if (playlist == null) {
+    final Playlist? live = _live(context);
+    if (live == null) {
       return Scaffold(
-        backgroundColor: c.background,
         body: SafeArea(
-          child: IfallEmpty(
-            icon: Icons.queue_music_rounded,
-            message: 'This playlist may have been deleted.',
-            actionLabel: 'Go back',
-            action: () => Navigator.of(context).maybePop(),
+          child: Column(
+            children: <Widget>[
+              Align(
+                alignment: Alignment.centerLeft,
+                child: IconButton(
+                  icon: const Icon(Icons.arrow_back_rounded),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ),
+              const EmptyState(
+                icon: Icons.playlist_remove_rounded,
+                title: 'This playlist is gone',
+                desc: 'It was deleted, so there is nothing to show.',
+              ),
+            ],
           ),
         ),
       );
     }
-
-    return _PlaylistBody(playlist: playlist);
-  }
-}
-
-class _PlaylistBody extends StatelessWidget {
-  const _PlaylistBody({required this.playlist});
-
-  final Playlist playlist;
-
-  @override
-  Widget build(BuildContext context) {
-    final IfallPalette c = IfallPalette.of(context);
-    final PlaybackService playback = context.read<PlaybackService>();
-    final LibraryService library = context.watch<LibraryService>();
-    final List<Song> songs = playlist.songs;
-    final Color onAccent =
-        ThemeData.estimateBrightnessForColor(c.accent) == Brightness.dark
-            ? Colors.white
-            : Colors.black;
-
+    final List<Song> songs = live.songs;
     return Scaffold(
-      backgroundColor: c.background,
       body: CustomScrollView(
+        physics: const BouncingScrollPhysics(),
         slivers: <Widget>[
-          SliverAppBar(
-            pinned: true,
-            expandedHeight: 260,
-            backgroundColor: c.background,
-            flexibleSpace: FlexibleSpaceBar(
-              background: Stack(
-                fit: StackFit.expand,
-                children: <Widget>[
-                  DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: <Color>[
-                          c.accent.withValues(alpha: 0.35),
-                          c.accent.withValues(alpha: 0.12),
-                          c.background,
-                        ],
-                      ),
-                    ),
-                  ),
-                  Positioned(
-                    left: 18,
-                    right: 18,
-                    bottom: 18,
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: <Widget>[
-                        Container(
-                          width: 112,
-                          height: 112,
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(IfallUI.rMd),
-                            boxShadow: <BoxShadow>[
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.45),
-                                blurRadius: 28,
-                                offset: const Offset(0, 12),
-                                spreadRadius: -8,
-                              ),
-                            ],
-                          ),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(IfallUI.rMd),
-                            child: songs.isEmpty
-                                ? ColoredBox(
-                                    color: c.fill,
-                                    child: Icon(
-                                      Icons.queue_music_rounded,
-                                      size: 40,
-                                      color: c.onSurfaceVariant,
-                                    ),
-                                  )
-                                : Artwork(
-                                    url: playlist.artwork,
-                                    size: 112,
-                                    radius: 0,
-                                  ),
-                          ),
-                        ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: <Widget>[
-                              Text('PLAYLIST', style: IfallText.label(c.accent)),
-                              const SizedBox(height: 6),
-                              Text(
-                                playlist.name,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: IfallText.style(
-                                  22,
-                                  weight: FontWeight.w800,
-                                  letterSpacing: -0.7,
-                                  color: c.onSurface,
-                                ),
-                              ),
-                              const SizedBox(height: 5),
-                              Text(
-                                '${playlist.count} songs',
-                                style: IfallText.caption(c.onSurfaceVariant),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
           SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-              child: Row(
-                children: <Widget>[
-                  Expanded(
-                    child: SizedBox(
-                      height: 46,
-                      child: FilledButton.icon(
-                        onPressed: songs.isEmpty
-                            ? null
-                            : () => playback.playQueue(songs),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: c.accent,
-                          foregroundColor: onAccent,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(IfallUI.rPill),
-                          ),
-                        ),
-                        icon: const Icon(Icons.play_arrow_rounded),
-                        label: Text(
-                          'Play',
-                          style: IfallText.body(onAccent).copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  IconButton(
-                    tooltip: 'Share code',
-                    onPressed: () => sharePlaylistCode(context, playlist),
-                    icon: Icon(Icons.ios_share_rounded, color: c.onSurface),
-                  ),
-                  IconButton(
-                    tooltip: 'Shuffle',
-                    onPressed: songs.isEmpty
-                        ? null
-                        : () async {
-                            await playback.playQueue(songs);
-                            if (!playback.shuffleEnabled) {
-                              await playback.toggleShuffle();
-                            }
-                          },
-                    icon: Icon(Icons.shuffle_rounded, color: c.onSurface),
-                    style: IconButton.styleFrom(
-                      backgroundColor: c.fill,
-                      minimumSize: const Size(48, 48),
-                    ),
-                  ),
-                ],
+            child: CollectionHeader(
+              artwork: live.artwork,
+              arts: songs
+                  .take(4)
+                  .map((Song s) => s.thumbnailUrl)
+                  .toList(),
+              eyebrow: 'Playlist',
+              title: live.name,
+              meta:
+                  '${songs.length} song${songs.length == 1 ? '' : 's'}',
+              onPlay: songs.isEmpty
+                  ? null
+                  : () => context
+                      .read<PlaybackService>()
+                      .playQueue(songs, startIndex: 0),
+              onShuffle: songs.isEmpty
+                  ? null
+                  : () {
+                      final List<Song> shuffled = List<Song>.of(songs)
+                        ..shuffle();
+                      context
+                          .read<PlaybackService>()
+                          .playQueue(shuffled, startIndex: 0);
+                    },
+              action: HeaderAction(
+                icon: Icons.more_horiz_rounded,
+                label: 'Playlist options',
+                onTap: () => _options(context, live),
               ),
             ),
           ),
           if (songs.isEmpty)
-            SliverToBoxAdapter(
-              child: IfallEmpty(
-                icon: Icons.music_note_rounded,
-                message:
-                    'Use “Add to playlist” from any song’s menu to fill it up.',
+            const SliverToBoxAdapter(
+              child: EmptyState(
+                icon: Icons.queue_music_rounded,
+                title: 'No songs yet',
+                desc: 'Add songs from any song\'s "…" menu.',
               ),
             )
           else
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(8, 4, 8, 140),
-              sliver: SliverList(
-                delegate: SliverChildBuilderDelegate(
-                  (BuildContext c, int i) => SongTile(
-                    song: songs[i],
-                    onTap: () => playback.playQueue(songs, startIndex: i),
-                    onLongPress: () =>
-                        _removeDialog(context, library, playlist, i),
+              padding: const EdgeInsets.only(bottom: 190),
+              sliver: SliverList.builder(
+                itemCount: songs.length,
+                itemBuilder: (BuildContext context, int i) => Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: TrackRow(
+                    tracks: songs,
+                    index: i,
+                    onRemove: () => context
+                        .read<LibraryService>()
+                        .removeFromPlaylist(live.id, songs[i].id),
                   ),
-                  childCount: songs.length,
                 ),
               ),
             ),
@@ -239,34 +118,95 @@ class _PlaylistBody extends StatelessWidget {
     );
   }
 
-  Future<void> _removeDialog(
+  Future<void> _options(BuildContext context, Playlist playlist) async {
+    final LibraryService library = context.read<LibraryService>();
+    await showSidifySheet(
+      context,
+      title: playlist.name,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          _sheetItem(context, Icons.edit_rounded, 'Rename', () async {
+            Navigator.of(context).pop();
+            final String? name = await _askRename(context, playlist.name);
+            if (name != null && name.trim().isNotEmpty) {
+              await library.renamePlaylist(playlist.id, name.trim());
+            }
+          }),
+          _sheetItem(context, Icons.delete_rounded, 'Delete playlist',
+              () async {
+            Navigator.of(context).pop();
+            await library.deletePlaylist(playlist.id);
+            showAppNotice('Playlist deleted');
+          }, danger: true),
+          const SizedBox(height: 12),
+        ],
+      ),
+    );
+  }
+
+  Widget _sheetItem(
     BuildContext context,
-    LibraryService library,
-    Playlist playlist,
-    int index,
-  ) async {
-    final Song song = playlist.songs[index];
-    final bool? confirmed = await showDialog<bool>(
+    IconData icon,
+    String label,
+    VoidCallback onTap, {
+    bool danger = false,
+  }) {
+    final SidifyTokens t = context.sidify;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: Container(
+          height: 52,
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Row(
+            children: <Widget>[
+              Icon(icon, size: 19, color: danger ? t.danger : t.text),
+              const SizedBox(width: 14),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 15.5,
+                  color: danger ? t.danger : t.text,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<String?> _askRename(BuildContext context, String current) {
+    final TextEditingController controller =
+        TextEditingController(text: current);
+    final SidifyTokens t = context.sidify;
+    return showDialog<String>(
       context: context,
       builder: (BuildContext dialogContext) => AlertDialog(
-        title: const Text('Remove from playlist?'),
-        content: Text(
-          '"${song.title}" will be removed from "${playlist.name}".',
+        backgroundColor: t.raised,
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: Text('Rename playlist', style: SidifyText.title(t.text)),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          style: TextStyle(color: t.text),
+          onSubmitted: (String v) => Navigator.of(dialogContext).pop(v),
         ),
         actions: <Widget>[
           TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Cancel'),
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: Text('Cancel', style: TextStyle(color: t.text2)),
           ),
           TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Remove'),
+            onPressed: () =>
+                Navigator.of(dialogContext).pop(controller.text),
+            child: Text('Save', style: TextStyle(color: t.text)),
           ),
         ],
       ),
     );
-    if (confirmed == true) {
-      await library.removeFromPlaylist(playlist.id, song.id);
-    }
   }
 }

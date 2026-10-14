@@ -7,7 +7,6 @@ import 'package:ifallmusic/core/models/playlist.dart';
 import 'package:ifallmusic/core/models/song.dart';
 import 'package:ifallmusic/core/services/library_service.dart';
 import 'package:ifallmusic/core/services/music_download_service.dart';
-import 'package:ifallmusic/ui/library/library_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 Song _song(String id) => Song(
@@ -20,12 +19,13 @@ Song _song(String id) => Song(
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('library tab counters cover every tab, in tab order', () async {
+  // The Library page is a hub now (Replay, Liked Songs, History, Downloads,
+  // Lyrics finder, playlists…), so the counts that used to feed the old tab
+  // bar are asserted against the services they are read from.
+  test('library hub counts come straight from the services', () async {
     final File offlineFile = File(
-      '${Directory.systemTemp.path}/saxify_library_tabs_test.mp3',
-    );
-    await offlineFile.writeAsString('x');
-
+      '${Directory.systemTemp.path}/sidify_library_hub_test.mp3',
+    )..writeAsBytesSync(<int>[1, 2, 3]);
     final MusicDownloadJob job = MusicDownloadJob(song: _song('dl1'))
       ..phase = MusicDownloadPhase.done
       ..offlinePath = offlineFile.path;
@@ -59,22 +59,27 @@ void main() {
     final LibraryService library = LibraryService(prefs);
     final MusicDownloadService downloads = MusicDownloadService(prefs: prefs);
 
-    final List<int> counts = buildLibraryTabCounts(
-      library: library,
-      downloads: downloads,
-      onDeviceCount: 5,
-    );
-
-    // One entry per tab: Your Space · Liked · Playlists · Songs · Artists ·
-    // On device · Downloads · History · Lyrics Finder.
-    expect(counts, hasLength(libraryTabCount));
-    expect(libraryTabCount, 9);
-    expect(
-      counts,
-      <int>[0, 1, 1, 2, 1, 5, 1, 1, 0],
-      reason: 'counts must stay aligned with the tab order',
-    );
+    expect(library.likedSongs, hasLength(1));
+    expect(library.playlists, hasLength(1));
+    expect(library.artists, hasLength(1));
+    expect(library.history, hasLength(1));
+    expect(library.likedSongs.first.id, 'liked1');
+    expect(downloads.downloaded, hasLength(1));
+    expect(downloads.isDownloaded('dl1'), isTrue);
 
     await offlineFile.delete();
+  });
+
+  test('liked toggling survives a restart through the same prefs', () async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final LibraryService library = LibraryService(prefs);
+    await library.toggleLike(_song('a'));
+    expect(library.isLiked('a'), isTrue);
+
+    final LibraryService restarted = LibraryService(prefs);
+    expect(restarted.isLiked('a'), isTrue);
+    await restarted.toggleLike(_song('a'));
+    expect(restarted.isLiked('a'), isFalse);
   });
 }

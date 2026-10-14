@@ -1,34 +1,30 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../config/branding.dart';
 import '../../core/models/album_card.dart';
 import '../../core/models/artist.dart';
 import '../../core/models/song.dart';
 import '../../core/services/home_catalog.dart';
 import '../../core/services/library_service.dart';
+import '../../core/services/listen_together_service.dart';
 import '../../core/services/playback_service.dart';
 import '../../core/services/settings_service.dart';
-import '../../core/theme/ifall_ui.dart';
-import '../../core/utils/format.dart';
-import '../../screens/music_browse_screen.dart';
-import '../../services/yt_music_parser.dart';
-import '../album/album_page.dart';
-import '../artist/artist_router.dart';
-import '../brands/brands_page.dart';
-import '../shell/ifall_shell.dart';
-import '../shell/shell_controller.dart';
-import '../widgets/media_cards.dart';
-import '../widgets/song_tile.dart';
-import 'home_cards.dart';
-import '../widgets/liked_songs_artwork.dart';
+import '../../core/services/youtube_service.dart';
+import '../../core/theme/sidify_theme.dart';
+import '../artist/artist_page.dart';
+import '../library/history_page.dart';
+import '../library/liked_page.dart';
+import '../settings/settings_page.dart';
+import '../shell/sidify_routes.dart';
+import '../shell/sidify_shell_controller.dart';
+import '../widgets/sidify_widgets.dart';
 
-/// **Home** — the canvas the listener lands on.
+/// Home, as the site lays it out: a small logo lockup and greeting, Top
+/// picks heroes, Quick picks, Recently played, the Listen Together invite,
+/// Recommended, New releases, Trending, Artists and From your Liked Songs.
 ///
-/// A big, tight title in a frosted top bar; a greeting; then rails that sit
-/// directly on the page rather than inside boxes: *Made for you*, mood &
-/// genres, the trending chart, new releases, music brands, top artists and
-/// *Recommended for you*.
+/// The rails come from the same engine catalog the app has always used —
+/// only the clothes are Sidify's now.
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
@@ -37,542 +33,463 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  final ScrollController _scroll = ScrollController();
-  final ValueNotifier<bool> _scrolled = ValueNotifier<bool>(false);
+  List<Song> _quick = <Song>[];
+  String _quickSeedId = '';
 
   @override
   void initState() {
     super.initState();
-    _scroll.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
       context.read<HomeCatalog>().load();
     });
   }
 
-  void _onScroll() {
-    final bool scrolled = _scroll.hasClients && _scroll.offset > 8;
-    if (scrolled != _scrolled.value) _scrolled.value = scrolled;
+  String get _greeting {
+    final int h = DateTime.now().hour;
+    if (h < 5) return 'Good night';
+    if (h < 12) return 'Good morning';
+    if (h < 17) return 'Good afternoon';
+    return 'Good evening';
   }
 
-  @override
-  void dispose() {
-    _scroll.removeListener(_onScroll);
-    _scroll.dispose();
-    _scrolled.dispose();
-    super.dispose();
-  }
-
-  void _openAlbum(AlbumCard album) {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (BuildContext c) => AlbumPage(album: album)),
-    );
-  }
-
-  void _openBrowse(MusicBrowseItem item) {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (BuildContext c) => MusicBrowseScreen(item: item),
-      ),
-    );
+  void _seedQuickPicks(Song? seed, List<Song> fallback) {
+    if (seed == null || seed.id == _quickSeedId) return;
+    _quickSeedId = seed.id;
+    context
+        .read<YoutubeService>()
+        .similarSongs(seed.id, limit: 16)
+        .then((List<Song> songs) {
+      if (!mounted) return;
+      setState(() {
+        _quick = songs.where((Song s) => s.id != seed.id).toList();
+      });
+    }).catchError((_) {
+      if (mounted) setState(() => _quick = fallback);
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final HomeCatalog catalog = context.watch<HomeCatalog>();
+    final LibraryService library = context.watch<LibraryService>();
+    final PlaybackService playback = context.watch<PlaybackService>();
     final SettingsService settings = context.watch<SettingsService>();
-    final IfallPalette c = IfallPalette.of(context);
 
-    return Stack(
-      children: <Widget>[
-        RefreshIndicator(
-          color: c.accent,
-          backgroundColor: c.surface,
-          onRefresh: () => catalog.load(force: true),
-          child: ListView(
-            controller: _scroll,
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: EdgeInsets.only(
-              top: 60 + MediaQuery.paddingOf(context).top,
-              bottom: IfallInsets.bottom,
-            ),
-            children: <Widget>[
-              const HomeListenTogetherCard(),
-              _Hero(name: settings.displayName),
-              if (catalog.loading) ...<Widget>[
-                const IfallSectionHeader(
-                  title: 'Made for you',
-                  subtitle: 'Picked from what you keep playing',
-                ),
-                const _LoadingRail(),
-              ] else ...<Widget>[
-                if (catalog.error != null && catalog.madeForYou.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                    child: IfallGlass(
-                      radius: IfallUI.rLg,
-                      blur: 0,
-                      padding: const EdgeInsets.all(18),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          Text(
-                            'Home feed unavailable',
-                            style: IfallText.section(c.onSurface),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(catalog.error!, style: IfallText.caption(c.onSurfaceVariant)),
-                          const SizedBox(height: 14),
-                          FilledButton(
-                            onPressed: () => catalog.load(force: true),
-                            child: const Text('Retry'),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-
-                // ------------------------------------------------ Made for you
-                if (catalog.madeForYou.isNotEmpty) ...<Widget>[
-                  IfallSectionHeader(
-                    title: 'Made for you',
-                    subtitle: 'Picked from what you keep playing',
-                    onSeeAll: () => context.read<ShellController>().goSearch(),
-                  ),
-                  SizedBox(
-                    height: 196,
-                    child: ListView.builder(
-                      scrollDirection: Axis.horizontal,
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      itemCount: catalog.madeForYou.length + 1,
-                      itemBuilder: (BuildContext context, int i) {
-                        final PlaybackService playback =
-                            context.read<PlaybackService>();
-                        if (i == 0) {
-                          return LikedSongsCard(
-                            count: context.watch<LibraryService>().likedSongs.length,
-                            onTap: () => context.read<ShellController>().goLiked(),
-                          );
-                        }
-                        final Song song = catalog.madeForYou[i - 1];
-                        return SongCard(
-                          song: song,
-                          onTap: () => playback.playQueue(
-                            catalog.madeForYou,
-                            startIndex: i - 1,
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                ],
-
-                // --------------------------------------------- mood & genres
-                const IfallSectionHeader(
-                  title: 'Mood & genres',
-                  subtitle: 'Tap one to start a station',
-                ),
-                const HomeMoodGrid(),
-
-                // --------------------------------------------------- trending
-                if (catalog.trending.isNotEmpty) ...<Widget>[
-                  IfallSectionHeader(
-                    title: 'Trending now',
-                    subtitle: 'Trending music discovery',
-                    seeAllLabel: 'Show all',
-                    onSeeAll: () => context.read<ShellController>().goSearch(
-                          'Hindi top hit songs India 2026',
-                        ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: IfallGlass(
-                      radius: IfallUI.rLg,
-                      blur: 0,
-                      padding: const EdgeInsets.symmetric(vertical: 4),
-                      child: Column(
-                        children: <Widget>[
-                          for (int i = 0; i < catalog.trending.length; i++)
-                            SongTile(
-                              song: catalog.trending[i],
-                              rank: i + 1,
-                              onTap: () => context
-                                  .read<PlaybackService>()
-                                  .playQueue(catalog.trending, startIndex: i),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-
-                // --------------------------------------------- playlists rail
-                if (catalog.playlistsForYou.isNotEmpty) ...<Widget>[
-                  const IfallSectionHeader(
-                    title: 'Playlists you may like',
-                    subtitle: 'Based on your listening',
-                  ),
-                  SizedBox(
-                    height: 224,
-                    child: ListView.builder(
-                      scrollDirection: Axis.horizontal,
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      itemCount: catalog.playlistsForYou.length,
-                      itemBuilder: (BuildContext context, int i) {
-                        final item = catalog.playlistsForYou[i];
-                        return AlbumTile(
-                          coverUrl: item.artwork,
-                          title: item.title,
-                          artist: 'Playlist',
-                          onTap: () => _openBrowse(item),
-                        );
-                      },
-                    ),
-                  ),
-                ],
-
-                // ----------------------------------------------- new releases
-                const IfallSectionHeader(
-                  title: 'New releases',
-                  subtitle: 'Fresh albums & singles',
-                  seeAllLabel: 'Browse',
-                ),
-                SizedBox(
-                  height: 224,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    itemCount: catalog.freshReleases.isNotEmpty
-                        ? catalog.freshReleases.length
-                        : HomeCatalog.newReleases.length,
-                    itemBuilder: (BuildContext context, int i) {
-                      if (catalog.freshReleases.isNotEmpty) {
-                        final item = catalog.freshReleases[i];
-                        return AlbumTile(
-                          coverUrl: item.artwork,
-                          title: item.title,
-                          artist: 'Album',
-                          onTap: () => _openBrowse(item),
-                        );
-                      }
-                      final AlbumCard album = HomeCatalog.newReleases[i];
-                      return AlbumTile(
-                        coverUrl: album.coverUrl,
-                        title: album.title,
-                        artist: album.artist,
-                        onTap: () => _openAlbum(album),
-                      );
-                    },
-                  ),
-                ),
-
-                // ----------------------------------------------------- brands
-                IfallSectionHeader(
-                  title: 'Music brands',
-                  subtitle: 'Official label channels',
-                  seeAllLabel: 'All',
-                  onSeeAll: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (BuildContext c) => const BrandsPage(),
-                    ),
-                  ),
-                ),
-                const HomeBrandRow(),
-
-                // ------------------------------------------------ top artists
-                IfallSectionHeader(
-                  title: 'Top artists',
-                  subtitle: 'Commanding the charts right now',
-                  seeAllLabel: 'Library',
-                  onSeeAll: () => context.read<ShellController>().goLibrary(),
-                ),
-                SizedBox(
-                  height: 176,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    itemCount: HomeCatalog.topArtists.length,
-                    itemBuilder: (BuildContext context, int i) {
-                      final ArtistRef artist = HomeCatalog.topArtists[i];
-                      return ArtistBubble(
-                        name: artist.name,
-                        imageUrl: catalog.photoFor(
-                          artist.name,
-                          fallback: artist.imageUrl,
-                        ),
-                        onTap: () => openArtistByName(
-                          context,
-                          name: artist.name,
-                          channelId: artist.channelId,
-                        ),
-                      );
-                    },
-                  ),
-                ),
-
-                // ----------------------------------------------- recommended
-                if (catalog.recommended.isNotEmpty) ...<Widget>[
-                  const IfallSectionHeader(
-                    title: 'Recommended for you',
-                    subtitle: 'Because of your recent listening',
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: IfallGlass(
-                      radius: IfallUI.rLg,
-                      blur: 0,
-                      padding: const EdgeInsets.symmetric(vertical: 4),
-                      child: Column(
-                        children: <Widget>[
-                          for (int i = 0; i < catalog.recommended.length; i++)
-                            SongTile(
-                              song: catalog.recommended[i],
-                              subtitle: catalog.recommended[i].artist,
-                              onTap: () =>
-                                  context.read<PlaybackService>().playQueue(
-                                        catalog.recommended,
-                                        startIndex: i,
-                                      ),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ],
-              const SizedBox(height: 8),
-              const _Footer(),
-            ],
-          ),
-        ),
-        Positioned(
-          top: 0,
-          left: 0,
-          right: 0,
-          child: ValueListenableBuilder<bool>(
-            valueListenable: _scrolled,
-            builder: (BuildContext context, bool scrolled, Widget? child) =>
-                HomeTopBar(scrolled: scrolled),
-          ),
-        ),
-      ],
+    final List<Song> recent = <Song>[
+      for (final HistoryEntry e in library.history) e.song,
+    ];
+    final List<Song> liked = library.likedSongs;
+    final Song? seed = playback.current ?? (recent.isNotEmpty ? recent.first : null);
+    final List<Song> recommended = catalog.recommended;
+    final List<Song> trending = catalog.trending;
+    _seedQuickPicks(
+      seed,
+      <Song>[...recommended, ...trending],
     );
-  }
-}
+    final List<Song> quick = _quick.isNotEmpty
+        ? _quick
+        : <Song>[...recommended, ...trending].take(16).toList();
 
-/// A shimmering placeholder rail shown while the feed loads.
-class _LoadingRail extends StatelessWidget {
-  const _LoadingRail();
+    final String firstName = settings.displayName.split(' ').first;
+    final bool loading = catalog.loading && catalog.madeForYou.isEmpty;
 
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 186,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        itemCount: 3,
-        separatorBuilder: (_, __) => const SizedBox(width: 12),
-        itemBuilder: (BuildContext context, int i) => SizedBox(
-          width: 132,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              IfallShimmer(width: 132, height: 132),
-              const SizedBox(height: 10),
-              const IfallShimmer(width: 96, height: 12),
-              const SizedBox(height: 6),
-              const IfallShimmer(width: 66, height: 10),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// The greeting card.
-///
-/// Built as a flexible column so the two big buttons can never overflow — on a
-/// narrow phone they stack, on a wider one they sit side by side.
-class _Hero extends StatelessWidget {
-  const _Hero({required this.name});
-
-  final String name;
-
-  @override
-  Widget build(BuildContext context) {
-    final IfallPalette c = IfallPalette.of(context);
-    final HomeCatalog catalog = context.watch<HomeCatalog>();
-    final PlaybackService playback = context.read<PlaybackService>();
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 6),
-      child: IfallGlass(
-        radius: IfallUI.rXl,
-        blur: 0,
-        padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(IfallUI.rPill),
-                color: c.accent.withValues(alpha: 0.16),
-                border: Border.all(color: c.accent.withValues(alpha: 0.35)),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  Icon(Icons.auto_awesome_rounded, size: 13, color: c.accent),
-                  const SizedBox(width: 6),
-                  Text(
-                    IfallBranding.tagline.toUpperCase(),
-                    style: IfallText.label(c.accent),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 14),
-            RichText(
-              text: TextSpan(
-                style: IfallText.style(26, weight: FontWeight.w800,
-                    letterSpacing: -0.9, color: c.onSurface, height: 1.18),
-                children: <InlineSpan>[
-                  TextSpan(text: '${Fmt.greeting()}, '),
-                  TextSpan(
-                    text: '$name.',
-                    style: TextStyle(color: c.accent),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              'Your universe of sound awaits.',
-              style: IfallText.body(c.onSurfaceVariant),
-            ),
-            const SizedBox(height: 16),
-            LayoutBuilder(
-              builder: (BuildContext context, BoxConstraints constraints) {
-                final bool stack = constraints.maxWidth < 380;
-                final Widget mix = _HeroButton(
-                  label: "Play today's mix",
-                  icon: Icons.play_arrow_rounded,
-                  filled: true,
-                  onTap: () async {
-                    await catalog.load();
-                    if (!context.mounted) return;
-                    final List<Song> mix = <Song>[
-                      ...catalog.madeForYou,
-                      ...catalog.trending,
-                      ...catalog.recommended,
-                    ];
-                    if (mix.isEmpty) {
-                      context
-                          .read<ShellController>()
-                          .goSearch('Hindi trending songs India');
-                      return;
-                    }
-                    await playback.playQueue(mix, startIndex: 0);
-                  },
-                );
-                final Widget shuffle = _HeroButton(
-                  label: 'Shuffle library',
-                  icon: Icons.shuffle_rounded,
-                  onTap: () {
-                    final List<Song> liked =
-                        context.read<LibraryService>().likedSongs;
-                    final List<Song> pool = liked.isNotEmpty
-                        ? liked
-                        : <Song>[
-                            ...catalog.madeForYou,
-                            ...catalog.trending,
-                          ];
-                    if (pool.isEmpty) {
-                      context.read<ShellController>().goSearch('top Hindi songs');
-                      return;
-                    }
-                    playback.playQueue(
-                      pool,
-                      startIndex: DateTime.now().millisecondsSinceEpoch %
-                          pool.length,
-                    );
-                  },
-                );
-                if (stack) {
-                  return Column(
-                    children: <Widget>[
-                      mix,
-                      const SizedBox(height: 10),
-                      shuffle,
-                    ],
-                  );
-                }
-                return Row(
+    return SafeArea(
+      bottom: false,
+      child: ListView(
+        padding: const EdgeInsets.only(bottom: 190),
+        physics: const BouncingScrollPhysics(),
+        children: <Widget>[
+          _header(context, firstName),
+          if (loading)
+            _loadingShelves()
+          else ...<Widget>[
+            _topPicks(context, catalog, liked, recent, seed, trending),
+            if (quick.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 36),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: <Widget>[
-                    Expanded(child: mix),
-                    const SizedBox(width: 10),
-                    Expanded(child: shuffle),
+                    SectionHeader(
+                      title: 'Quick picks',
+                      subtitle:
+                          seed != null ? 'Inspired by ${seed.title}' : 'Start here',
+                    ),
+                    QuickPicks(tracks: quick, label: 'Quick picks'),
                   ],
-                );
-              },
+                ),
+              ),
+            if (recent.isNotEmpty)
+              ShelfSection(
+                title: 'Recently played',
+                onMore: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const HistoryPage(),
+                    settings: const RouteSettings(name: 'sidify/history'),
+                  ),
+                ),
+                children: <Widget>[
+                  for (int i = 0; i < recent.length && i < 20; i++)
+                    SongCard(tracks: recent, index: i, label: 'Recently played'),
+                ],
+              ),
+            _roomInvite(context),
+            if (recommended.isNotEmpty)
+              ShelfSection(
+                title: 'Recommended for you',
+                children: <Widget>[
+                  for (int i = 0; i < recommended.length; i++)
+                    SongCard(tracks: recommended, index: i, label: 'Recommended'),
+                ],
+              ),
+            if (catalog.freshReleases.isNotEmpty)
+              ShelfSection(
+                title: 'New releases',
+                children: <Widget>[
+                  for (final item in catalog.freshReleases)
+                    SquareCard(
+                      title: item.title,
+                      artwork: item.artwork,
+                      onTap: () => openBrowse(context, item),
+                    ),
+                ],
+              )
+            else
+              ShelfSection(
+                title: 'New releases',
+                children: <Widget>[
+                  for (final AlbumCard a in HomeCatalog.newReleases)
+                    AlbumCardWidget(
+                      album: a,
+                      onTap: () => openAlbum(context, a),
+                    ),
+                ],
+              ),
+            if (trending.isNotEmpty)
+              ShelfSection(
+                title: 'Trending now',
+                children: <Widget>[
+                  for (int i = 0; i < trending.length; i++)
+                    SongCard(tracks: trending, index: i, label: 'Trending now'),
+                ],
+              ),
+            if (catalog.madeForYou.isNotEmpty)
+              ShelfSection(
+                title: 'Made for you',
+                children: <Widget>[
+                  for (int i = 0; i < catalog.madeForYou.length; i++)
+                    SongCard(
+                      tracks: catalog.madeForYou,
+                      index: i,
+                      label: 'Made for you',
+                    ),
+                ],
+              ),
+            ShelfSection(
+              title: 'Artists to follow',
+              children: <Widget>[
+                for (final ArtistRef a in HomeCatalog.topArtists)
+                  ArtistCardWidget(
+                    name: a.name,
+                    imageUrl: catalog.photoFor(a.name, fallback: a.imageUrl),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => ArtistPage(
+                          name: a.name,
+                          channelId: a.channelId.isEmpty ? null : a.channelId,
+                        ),
+                        settings: const RouteSettings(name: SidifyRoutes.artist),
+                      ),
+                    ),
+                  ),
+              ],
             ),
+            if (liked.isNotEmpty)
+              ShelfSection(
+                title: 'From your Liked Songs',
+                onMore: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const LikedSongsPage(),
+                    settings: const RouteSettings(name: 'sidify/liked'),
+                  ),
+                ),
+                children: <Widget>[
+                  for (int i = 0; i < liked.length && i < 20; i++)
+                    SongCard(tracks: liked, index: i, label: 'Liked Songs'),
+                ],
+              ),
           ],
-        ),
+          if (catalog.error != null && !loading)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Text(
+                'Some shelves could not load. Your library still works.',
+                style: TextStyle(fontSize: 13, color: context.sidify.text2),
+              ),
+            ),
+        ],
       ),
     );
   }
-}
 
-class _HeroButton extends StatelessWidget {
-  const _HeroButton({
-    required this.label,
-    required this.icon,
-    required this.onTap,
-    this.filled = false,
-  });
-
-  final String label;
-  final IconData icon;
-  final VoidCallback onTap;
-  final bool filled;
-
-  @override
-  Widget build(BuildContext context) {
-    final IfallPalette c = IfallPalette.of(context);
-    final Color ink = filled
-        ? (ThemeData.estimateBrightnessForColor(c.accent) == Brightness.dark
-            ? Colors.white
-            : Colors.black)
-        : c.onSurface;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(IfallUI.rPill),
-        child: Container(
-          height: 44,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: filled ? c.accent : c.glass,
-            borderRadius: BorderRadius.circular(IfallUI.rPill),
-            border: Border.all(
-              color: filled ? c.accent : c.outline.withValues(alpha: 0.9),
-            ),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: <Widget>[
-              Icon(icon, size: 18, color: ink),
-              const SizedBox(width: 8),
-              Flexible(
-                child: Text(
-                  label,
+  Widget _header(BuildContext context, String firstName) {
+    final SidifyTokens t = context.sidify;
+    final JamService jam = context.watch<JamService>();
+    final SidifyShellController shell =
+        context.read<SidifyShellController>();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 16),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: <Widget>[
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Row(
+                  children: <Widget>[
+                    const SidifyLogoMark(size: 22),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Sidify',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: t.text2,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  firstName.isEmpty ? _greeting : '$_greeting, $firstName',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: IfallText.body(ink).copyWith(fontWeight: FontWeight.w700),
+                  style: SidifyText.display(t.text),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Row(
+              children: <Widget>[
+                GestureDetector(
+                  onTap: () => shell.goTogether(),
+                  child: Container(
+                    height: 36,
+                    padding: EdgeInsets.symmetric(
+                      horizontal: jam.isConnected ? 12 : 0,
+                    ),
+                    width: jam.isConnected ? null : 36,
+                    decoration: BoxDecoration(
+                      color: jam.isConnected ? t.brand : t.fill,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: <Widget>[
+                        Icon(
+                          Icons.people_rounded,
+                          size: 18,
+                          color: jam.isConnected ? Colors.white : t.text,
+                        ),
+                        if (jam.isConnected) ...<Widget>[
+                          const SizedBox(width: 4),
+                          Text(
+                            '${jam.members.length}',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                SidifyIconButton(
+                  icon: Icons.settings_rounded,
+                  label: 'Settings',
+                  tone: 'fill',
+                  size: 36,
+                  iconSize: 18,
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const SettingsPage(),
+                      settings: const RouteSettings(name: SidifyRoutes.settings),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _topPicks(
+    BuildContext context,
+    HomeCatalog catalog,
+    List<Song> liked,
+    List<Song> recent,
+    Song? seed,
+    List<Song> trending,
+  ) {
+    final PlaybackService playback = context.read<PlaybackService>();
+    final List<Widget> heroes = <Widget>[];
+    if (liked.isNotEmpty || recent.isNotEmpty) {
+      heroes.add(
+        HeroCard(
+          eyebrow: 'Made for you',
+          title: 'Your Mix',
+          subtitle: 'Songs you love, and more like them',
+          artwork: (liked.isNotEmpty ? liked.first : recent.first).thumbnailUrl,
+          onTap: () {
+            final List<Song> pool = <Song>[
+              ...liked.take(40),
+              ...recent.take(20),
+              ...catalog.recommended.take(15),
+            ]..shuffle();
+            playback.playQueue(pool, startIndex: 0);
+          },
+        ),
+      );
+    }
+    if (seed != null) {
+      heroes.add(
+        HeroCard(
+          eyebrow: 'Because you listened to',
+          title: seed.title,
+          subtitle: '${seed.artist} · Song radio',
+          artwork: seed.thumbnailUrl,
+          onTap: () => playback.playRadio(seed),
+        ),
+      );
+    }
+    // Your top artist: the name you play most, from your own history.
+    final Map<String, int> counts = <String, int>{};
+    final Map<String, Song> byArtist = <String, Song>{};
+    for (final HistoryEntry e in libraryHistory(context)) {
+      counts[e.song.artist] = (counts[e.song.artist] ?? 0) + 1;
+      byArtist[e.song.artist] = e.song;
+    }
+    String? topArtist;
+    int best = 0;
+    counts.forEach((String artist, int n) {
+      if (n > best) {
+        best = n;
+        topArtist = artist;
+      }
+    });
+    if (topArtist != null && topArtist != seed?.artist) {
+      final Song s = byArtist[topArtist]!;
+      heroes.add(
+        HeroCard(
+          eyebrow: 'Your top artist',
+          title: '$topArtist Radio',
+          subtitle: 'Their songs and similar music',
+          artwork: s.thumbnailUrl,
+          onTap: () => playback.playRadio(s),
+        ),
+      );
+    }
+    if (trending.isNotEmpty) {
+      heroes.add(
+        HeroCard(
+          eyebrow: 'Trending',
+          title: "Today's Hits",
+          subtitle:
+              trending.take(3).map((Song s) => s.artist).join(', '),
+          artwork: trending.first.thumbnailUrl,
+          onTap: () => playback.playQueue(trending, startIndex: 0),
+        ),
+      );
+    }
+    for (final AlbumCard a in HomeCatalog.newReleases.take(2)) {
+      heroes.add(
+        HeroCard(
+          eyebrow: 'New music',
+          title: a.title,
+          subtitle: a.artist,
+          artwork: a.coverUrl,
+          onTap: () => openAlbum(context, a),
+        ),
+      );
+    }
+    if (heroes.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 36),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          const SectionHeader(title: 'Top picks for you'),
+          SizedBox(
+            height: (MediaQuery.sizeOf(context).width * 0.7).clamp(200.0, 320.0) / 0.92 + 4,
+            child: Shelf(gap: 14, children: heroes),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<HistoryEntry> libraryHistory(BuildContext context) =>
+      context.read<LibraryService>().history;
+
+  Widget _roomInvite(BuildContext context) {
+    final JamService jam = context.watch<JamService>();
+    if (jam.isConnected) return const SizedBox.shrink();
+    final SidifyTokens t = context.sidify;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 36),
+      child: GestureDetector(
+        onTap: () => context.read<SidifyShellController>().goTogether(),
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: t.raised,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: t.edge, width: 0.5),
+          ),
+          child: Row(
+            children: <Widget>[
+              Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: t.brand,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.people_rounded, size: 28, color: Colors.white),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      'Listen together',
+                      style: TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -0.2,
+                        color: t.text,
+                      ),
+                    ),
+                    Text(
+                      'Start a room, share the code, and everyone hears the '
+                      'same song at the same moment.',
+                      style: TextStyle(
+                        fontSize: 13.5,
+                        height: 1.35,
+                        color: t.text2,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -581,40 +498,30 @@ class _HeroButton extends StatelessWidget {
       ),
     );
   }
-}
 
-/// The "Made with love" footer that closes Home.
-class _Footer extends StatelessWidget {
-  const _Footer();
-
-  @override
-  Widget build(BuildContext context) {
-    final IfallPalette c = IfallPalette.of(context);
+  Widget _loadingShelves() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 26, 24, 12),
+      padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Opacity(
-            opacity: 0.7,
-            child: Image.asset(
-              'assets/images/ifall_logo.png',
-              width: 44,
-              height: 44,
-              fit: BoxFit.contain,
-            ),
+          const SidifySkeleton(width: 200, height: 24, radius: 6),
+          const SizedBox(height: 14),
+          Row(
+            children: <Widget>[
+              for (int i = 0; i < 3; i++) ...<Widget>[
+                const SidifySkeleton(width: 148, height: 200, radius: 12),
+                const SizedBox(width: 12),
+              ],
+            ],
           ),
-          const SizedBox(height: 10),
-          Text(
-            'Made with ❤️ by ${IfallBranding.author}',
-            textAlign: TextAlign.center,
-            style: IfallText.caption(c.onSurfaceVariant),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '${IfallBranding.appName} ${IfallBranding.fullVersionLabel} · ${IfallBranding.tagline}',
-            textAlign: TextAlign.center,
-            style: IfallText.caption(c.onSurfaceVariant),
-          ),
+          const SizedBox(height: 34),
+          const SidifySkeleton(width: 160, height: 24, radius: 6),
+          const SizedBox(height: 14),
+          for (int i = 0; i < 4; i++) ...<Widget>[
+            const SidifySkeleton(height: 60, radius: 8),
+            const SizedBox(height: 8),
+          ],
         ],
       ),
     );

@@ -1,7 +1,7 @@
 name: ifallmusic
-description: IfallMusic — stream beyond limits. A premium liquid-glass music app.
+description: Sidify — stream beyond limits. A premium glass music app.
 publish_to: 'none'
-version: 2.8.0+33
+version: 2.9.0+34
 
 environment:
   sdk: '>=3.5.0 <4.0.0'
@@ -44,13 +44,7 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-    # The chubby ("mota golu molu") mascot — the face of the app, used on the
-    # welcome card, the empty states, the About page and the splash.
-    - assets/images/ifall_motu_master.png
-    - assets/images/ifall_motu_heart.png
-    - assets/images/ifall_logo.png
-    - assets/images/ifall_splash.png
-    - assets/images/saxify_logo.png
-    - assets/images/saxify_splash.png
-    # Liked Songs sleeve — the app-logo character, liking.
-    - assets/images/liked_songs_motu.png
+    # The Sidify logo: the uploaded logo photo, full (mark + wordmark) and
+    # cropped to the mark alone. Every logo slot in the app uses one of these.
+    - assets/images/sidify_logo.png
+    - assets/images/sidify_mark.png

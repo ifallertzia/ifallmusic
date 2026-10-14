@@ -4,7 +4,7 @@ import 'package:ifallmusic/config/branding.dart';
 import 'package:ifallmusic/core/models/album_card.dart';
 import 'package:ifallmusic/core/theme/saxify_accents.dart';
 import 'package:ifallmusic/core/utils/format.dart';
-import 'package:ifallmusic/ui/widgets/saxify_logo.dart';
+import 'package:ifallmusic/ui/widgets/sidify_widgets.dart';
 
 void main() {
   group('AlbumCard ytq codec', () {
@@ -86,19 +86,18 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           theme: ThemeData.dark(),
-          home: const Center(child: SaxifyLogo(size: 40)),
+          home: const Center(child: SidifyLogoMark(size: 40)),
         ),
       );
-      expect(find.byType(SaxifyLogo), findsOneWidget);
+      expect(find.byType(SidifyLogoMark), findsOneWidget);
       expect(find.byType(Image), findsOneWidget);
       final image = tester.widget<Image>(find.byType(Image));
       expect(image.image, isA<AssetImage>());
       // Asserted against the branding constant rather than a literal path:
-      // the mascot was repainted into `ifall_motu_master.png` and the test
-      // should not have to change every time the artwork file is swapped.
+      // the logo artwork can be swapped without the test having to change.
       expect(
         (image.image as AssetImage).assetName,
-        IfallBranding.logoAsset,
+        SidifyBranding.markAsset,
       );
     });
   });

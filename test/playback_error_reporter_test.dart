@@ -28,7 +28,7 @@ void main() {
       expect(report.body, contains('StateError'));
       expect(report.body, isNot(contains('SECRET')));
       expect(report.body, isNot(contains('/data/user')));
-      expect(report.mailUri.path, IfallBranding.contactEmail);
+      expect(report.mailUri.path, SidifyBranding.contactEmail);
       expect(report.mailUri.queryParameters['body'], report.body);
       expect(report.body, contains('Queue position: 3 / 8'));
     },
