@@ -1,3 +1,14 @@
+/// The floating dock, measured: the liquid-glass mini player and tab bar must
+/// keep the geometry they have always had, keep driving the real services, and
+/// must not grow Flutter's yellow double underline under their labels.
+///
+/// The dock is painted by `MaterialApp.builder`, above the navigator and
+/// outside any `Material` — which is exactly where a `Text` with no inherited
+/// style falls back to Flutter's debug style: yellow monospace, double
+/// underlined. This test reproduces that environment instead of a comfortable
+/// `Scaffold`, so the yellow line cannot come back unnoticed.
+library;
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -18,17 +29,6 @@ import 'package:ifallmusic/core/theme/sidify_theme.dart';
 import 'package:ifallmusic/ui/shell/sidify_dock.dart';
 import 'package:ifallmusic/ui/shell/sidify_shell_controller.dart';
 import 'package:ifallmusic/ui/widgets/sidify_widgets.dart';
-
-/// The floating dock, measured: the liquid-glass mini player and tab bar must
-/// keep the geometry they have always had, keep driving the real services, and
-/// must not grow Flutter's yellow double underline under their labels.
-///
-/// The dock is painted by `MaterialApp.builder`, above the navigator and
-/// outside any `Material` — which is exactly where a `Text` with no inherited
-/// style falls back to Flutter's debug style: yellow monospace, double
-/// underlined. This test reproduces that environment instead of a comfortable
-/// `Scaffold`, so the yellow line cannot come back unnoticed.
-library;
 
 Song _song(String id, String title) => Song(
       id: id,
@@ -294,7 +294,10 @@ void main() {
 
       // What the dock inherits. Flutter's fallback style is yellow monospace
       // 48/900 with a double underline, so any of these is the bug back again.
-      final TextStyle base = DefaultTextStyle.of(tester.element(text));
+      // DefaultTextStyle.of hands back the inherited *widget*, and with no
+      // ancestor at all it hands back Flutter's fallback — so this is the exact
+      // lookup that used to return yellow monospace with a double underline.
+      final TextStyle base = DefaultTextStyle.of(tester.element(text)).style;
       expect(base.decoration, TextDecoration.none, reason: '$label base style');
       expect(base.fontFamily, isNot('monospace'), reason: '$label base style');
       expect(base.fontSize, isNot(48), reason: '$label base style');

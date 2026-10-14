@@ -79,7 +79,7 @@ class _UpdateDialogState extends State<_UpdateDialog> {
       _info = info;
       _stage = info == null
           ? _Stage.couldNotCheck
-          : info!.hasUpdate
+          : info.hasUpdate
               ? _Stage.available
               : _Stage.upToDate;
     });
@@ -263,7 +263,7 @@ class _UpdateDialogState extends State<_UpdateDialog> {
           ),
         ],
       ),
-      _Stage.downloading => _progress(t, size),
+      _Stage.downloading => _downloadReadOut(t, size),
       _Stage.ready => _copy(
         t,
         'The download is finished. Tap Install in the Android prompt that just '
@@ -283,7 +283,7 @@ class _UpdateDialogState extends State<_UpdateDialog> {
   }
 
   /// The live download read-out: the percentage counts up while the bar fills.
-  Widget _progress(SidifyTokens t, String size) {
+  Widget _downloadReadOut(SidifyTokens t, String size) {
     // No content-length means no honest fraction — spin instead of lying.
     final bool measured = _progress > 0;
     return Column(
