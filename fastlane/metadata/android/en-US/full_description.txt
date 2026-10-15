@@ -1,0 +1,27 @@
+Sidify (package com.ifallmusic.app) is a Flutter music player for Android. It searches and streams tracks, keeps a local library, shows lyrics, and can download audio for offline playback.
+
+Features
+• Search and play music from public YouTube / YouTube Music sources (via youtube_explode_dart)
+• Background playback with a media notification and lock-screen controls
+• Liked songs, playlists, history, and on-device recommendations
+• Offline downloads into the device music library
+• Synchronized lyrics (LRC) and a full-screen player
+• Optional spatial / equalizer processing on the device
+• Listen-together rooms when a compatible backend is configured
+• Import helpers for playlists (no proprietary Google Play or Firebase SDK)
+
+This build contains no Google Play Services, Firebase, ads, or crash-reporting SDKs. Network access is used to search, stream, fetch lyrics/artwork, and (optionally) check GitHub for app updates.
+
+Permissions
+• INTERNET / ACCESS_NETWORK_STATE — streaming, search, artwork, lyrics
+• FOREGROUND_SERVICE / MEDIA_PLAYBACK / WAKE_LOCK / POST_NOTIFICATIONS — background player
+• READ_MEDIA_AUDIO / storage (older Android) — local files and downloads
+• RECORD_AUDIO / MODIFY_AUDIO_SETTINGS — voice search and spatial audio effects
+• REQUEST_INSTALL_PACKAGES — GitHub/sideload builds only (stripped from the F-Droid APK; F-Droid Client updates the app)
+• REQUEST_IGNORE_BATTERY_OPTIMIZATIONS — keep long playback alive
+
+AntiFeatures (F-Droid)
+• NonFreeNet — playback and search depend on YouTube / YouTube Music, which are not free-network services
+
+Source: https://github.com/ifallertzia/ifallmusic
+License: MIT

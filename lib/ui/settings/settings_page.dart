@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../config/branding.dart';
+import '../../config/foss_build.dart';
 import '../../core/models/playlist.dart';
 import '../../core/services/app_feedback.dart';
 import '../../core/services/library_service.dart';
@@ -514,13 +515,14 @@ class SettingsPage extends StatelessWidget {
                   mode: LaunchMode.externalApplication,
                 ),
               ),
-              SidifyGroupRow(
-                icon: Icons.system_update_rounded,
-                title: 'Check for updates',
-                subtitle: 'Install the newest Sidify over this app',
-                chevron: true,
-                onTap: () => showUpdateDialog(context),
-              ),
+              if (FossBuild.githubUpdaterEnabled)
+                SidifyGroupRow(
+                  icon: Icons.system_update_rounded,
+                  title: 'Check for updates',
+                  subtitle: 'Install the newest Sidify over this app',
+                  chevron: true,
+                  onTap: () => showUpdateDialog(context),
+                ),
               SidifyGroupRow(
                 icon: Icons.bug_report_rounded,
                 title: 'Diagnostics',

@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'config/branding.dart';
+import 'config/foss_build.dart';
 import 'core/models/playlist.dart';
 import 'core/models/song.dart';
 import 'core/services/app_feedback.dart';
@@ -258,6 +259,7 @@ class _SidifyAppState extends State<SidifyApp> with WidgetsBindingObserver {
   DateTime? _lastUpdateCheck;
 
   Future<void> _checkUpdate({bool force = false}) async {
+    if (!FossBuild.githubUpdaterEnabled) return;
     if (!mounted || _checkingUpdate || updateDialogOpen ||
         WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) return;
     final now = DateTime.now();
@@ -285,6 +287,7 @@ class _SidifyAppState extends State<SidifyApp> with WidgetsBindingObserver {
   }
 
   Future<void> _startUpdateReminders() async {
+    if (!FossBuild.githubUpdaterEnabled) return;
     try {
       await UpdateReminders.initialize(onTap: () => _checkUpdate(force: true));
     } catch (e) {

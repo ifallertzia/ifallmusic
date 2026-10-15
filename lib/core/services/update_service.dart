@@ -8,6 +8,8 @@ import 'package:open_filex/open_filex.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../../config/foss_build.dart';
+
 /// Everything the in-app updater needs: version + build-number compare against
 /// GitHub Releases, in-app APK download with progress, and hand-off to the
 /// system installer.
@@ -51,7 +53,9 @@ class UpdateService {
       int.tryParse((await _info()).buildNumber) ?? 0;
 
   /// Returns null when we could not reach any release endpoint.
+  /// F-Droid builds never query GitHub (store updates the app instead).
   Future<UpdateInfo?> check() async {
+    if (!FossBuild.githubUpdaterEnabled) return null;
     final PackageInfo info = await _info();
     final String current = info.version;
     final int currentBuild = int.tryParse(info.buildNumber) ?? 0;
@@ -175,6 +179,9 @@ class UpdateService {
     String url, {
     void Function(double fraction, int receivedBytes)? onProgress,
   }) async {
+    if (!FossBuild.githubUpdaterEnabled) {
+      throw StateError('GitHub APK updates are disabled in the F-Droid build');
+    }
     final Directory dir = await _downloadDir();
     final File file = File('${dir.path}/ifallmusic-update.apk');
 
@@ -209,6 +216,9 @@ class UpdateService {
 
   /// Hands the downloaded APK to the Android package installer.
   Future<void> install(String path) async {
+    if (!FossBuild.githubUpdaterEnabled) {
+      throw StateError('GitHub APK updates are disabled in the F-Droid build');
+    }
     await OpenFilex.open(
       path,
       type: 'application/vnd.android.package-archive',

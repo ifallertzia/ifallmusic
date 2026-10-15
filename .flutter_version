@@ -1,0 +1,8 @@
+# Pin used for reproducible F-Droid / CI builds.
+# GitHub Actions currently uses the latest Flutter stable channel.
+# Update this file when bumping the Flutter SDK.
+channel=stable
+# Engine / SDK revision recorded in .metadata at project creation / last migrate.
+revision=6a19cca56475dbfba1478ee68d7bd0c2ef891da1
+# Prefer an explicit SDK version when opening the fdroiddata MR (example):
+version=3.35.0
