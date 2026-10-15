@@ -35,6 +35,7 @@ dependencies:
   speech_to_text: ^7.0.0
   sqflite: ^2.4.1
   workmanager: ^0.10.0
+  flutter_local_notifications: ^18.0.1
 
 dev_dependencies:
   flutter_test:

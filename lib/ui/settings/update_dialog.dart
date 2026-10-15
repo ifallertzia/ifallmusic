@@ -13,15 +13,20 @@ import '../widgets/sidify_widgets.dart';
 ///
 /// The APK it installs is signed with the same release key as always, so it
 /// lands over the current app with no conflict (see docs/RELEASE_SIGNING.md).
-Future<void> showUpdateDialog(BuildContext context) {
-  return showDialog<void>(
-    context: context,
-    // One dialog owns the whole flow (check → offer → download → install), so
-    // there is no second route to pop and nothing to get out of step.
-    barrierDismissible: false,
-    builder: (BuildContext dialogContext) =>
-        _UpdateDialog(service: UpdateService()),
-  );
+bool updateDialogOpen = false;
+
+Future<void> showUpdateDialog(BuildContext context, {UpdateInfo? info}) async {
+  if (updateDialogOpen) return;
+  updateDialogOpen = true;
+  try {
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _UpdateDialog(service: UpdateService(), initialInfo: info),
+    );
+  } finally {
+    updateDialogOpen = false;
+  }
 }
 
 /// Where the updater is in its flow.
@@ -36,7 +41,9 @@ enum _Stage {
 }
 
 class _UpdateDialog extends StatefulWidget {
-  const _UpdateDialog({required this.service});
+  const _UpdateDialog({required this.service, this.initialInfo});
+
+  final UpdateInfo? initialInfo;
 
   final UpdateService service;
 
@@ -58,7 +65,12 @@ class _UpdateDialogState extends State<_UpdateDialog> {
   @override
   void initState() {
     super.initState();
-    unawaited(_check());
+    if (widget.initialInfo != null) {
+      _info = widget.initialInfo;
+      _stage = _Stage.available;
+    } else {
+      unawaited(_check());
+    }
   }
 
   @override
