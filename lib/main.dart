@@ -271,7 +271,7 @@ class _SidifyAppState extends State<SidifyApp> with WidgetsBindingObserver {
       if (!mounted || info == null || !info.hasUpdate || !info.downloadable) return;
       if (WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) return;
       final dialogContext = _navigatorKey.currentState?.overlay?.context;
-      if (dialogContext == null || updateDialogOpen) return;
+      if (dialogContext == null || !dialogContext.mounted || updateDialogOpen) return;
       await showUpdateDialog(dialogContext, info: info);
       // Permission denial never prevents the in-app offer.
       await NotificationBootstrap.requestOnFirstPlay();

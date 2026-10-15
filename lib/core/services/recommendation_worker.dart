@@ -10,7 +10,9 @@ void saxifyRecommendationDispatcher() {
   Workmanager().executeTask((String task, Map<String, dynamic>? input) async {
     try {
       WidgetsFlutterBinding.ensureInitialized();
-      if (task == 'checkAppUpdate') return UpdateReminders.backgroundCheck();
+      if (task == 'checkAppUpdate') {
+        return await UpdateReminders.backgroundCheck();
+      }
       final RecommendationStore store = RecommendationStore();
       await store.open();
       await store.touchCache();
