@@ -26,6 +26,9 @@ import 'core/services/recommendation_service.dart';
 import 'core/services/recommendation_worker.dart';
 import 'core/services/settings_service.dart';
 import 'core/services/youtube_service.dart';
+import 'core/services/update_service.dart';
+import 'core/services/update_reminders.dart';
+import 'ui/settings/update_dialog.dart';
 import 'core/theme/sidify_theme.dart';
 import 'services/lyrics_service.dart';
 import 'ui/onboarding/welcome_page.dart';
@@ -249,6 +252,46 @@ class SidifyApp extends StatefulWidget {
 
 class _SidifyAppState extends State<SidifyApp> with WidgetsBindingObserver {
   Timer? _syncTimer;
+  Timer? _updateTimer;
+  Timer? _launchUpdateTimer;
+  bool _checkingUpdate = false;
+  DateTime? _lastUpdateCheck;
+
+  Future<void> _checkUpdate({bool force = false}) async {
+    if (!mounted || _checkingUpdate || updateDialogOpen ||
+        WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) return;
+    final now = DateTime.now();
+    if (!force && _lastUpdateCheck != null &&
+        now.difference(_lastUpdateCheck!) < const Duration(hours: 6)) return;
+    _checkingUpdate = true;
+    _lastUpdateCheck = now;
+    final service = UpdateService();
+    try {
+      final info = await service.check();
+      if (!mounted || info == null || !info.hasUpdate || !info.downloadable) return;
+      if (WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) return;
+      final dialogContext = _navigatorKey.currentState?.overlay?.context;
+      if (dialogContext == null || updateDialogOpen) return;
+      await showUpdateDialog(dialogContext, info: info);
+      // Permission denial never prevents the in-app offer.
+      await NotificationBootstrap.requestOnFirstPlay();
+      await UpdateReminders.notify(info);
+    } catch (e) {
+      BootLog.write('Automatic update check skipped: $e');
+    } finally {
+      service.dispose();
+      _checkingUpdate = false;
+    }
+  }
+
+  Future<void> _startUpdateReminders() async {
+    try {
+      await UpdateReminders.initialize(onTap: () => _checkUpdate(force: true));
+    } catch (e) {
+      BootLog.write('Update notifications skipped: $e');
+    }
+  }
+
 
   /// Root-navigator bookkeeping for the floating mini player and tab bar.
   final SidifyRouteObserver _routeObserver = SidifyRouteObserver();
@@ -264,6 +307,9 @@ class _SidifyAppState extends State<SidifyApp> with WidgetsBindingObserver {
   }
 
   Future<void> _afterFirstFrame() async {
+    unawaited(_startUpdateReminders());
+    _launchUpdateTimer = Timer(const Duration(seconds: 1), () => _checkUpdate(force: true));
+    _updateTimer = Timer.periodic(const Duration(hours: 6), (_) => _checkUpdate());
     await NativeBridge.markLaunchSuccess();
     final AppBoot boot = widget.boot;
     if (boot.safeMode) return;
@@ -301,6 +347,10 @@ class _SidifyAppState extends State<SidifyApp> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _launchUpdateTimer?.cancel();
+      _launchUpdateTimer = Timer(const Duration(seconds: 1), () => _checkUpdate());
+    }
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive ||
         state == AppLifecycleState.detached) {
@@ -312,6 +362,8 @@ class _SidifyAppState extends State<SidifyApp> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _syncTimer?.cancel();
+    _updateTimer?.cancel();
+    _launchUpdateTimer?.cancel();
     super.dispose();
   }
 

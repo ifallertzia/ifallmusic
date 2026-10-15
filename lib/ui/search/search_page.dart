@@ -50,15 +50,25 @@ class _SearchPageState extends State<SearchPage> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _focus.requestFocus());
+    MoodCoverCatalog.instance.addListener(_coversChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _focus.requestFocus();
+      MoodCoverCatalog.instance.ensure(context.read<YoutubeService>());
+    });
   }
 
   @override
   void dispose() {
+    MoodCoverCatalog.instance.removeListener(_coversChanged);
     _debounce?.cancel();
     _controller.dispose();
     _focus.dispose();
     super.dispose();
+  }
+
+  void _coversChanged() {
+    if (mounted) setState(() {});
   }
 
   void _adoptShellQuery(SidifyShellController shell) {
@@ -318,6 +328,7 @@ class _SearchPageState extends State<SearchPage> {
               return MoodCard(
                 title: m.title,
                 colorHex: m.color,
+                artwork: MoodCoverCatalog.instance.coverFor(m),
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute<void>(
                     builder: (_) => ExploreMoodPage(mood: m),

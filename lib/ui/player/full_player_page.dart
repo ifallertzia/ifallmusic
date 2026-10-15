@@ -17,6 +17,7 @@ import '../widgets/song_menu.dart';
 import 'lyrics_view.dart';
 import 'player_palette.dart';
 import 'player_sheets.dart';
+import 'waveform_seek_bar.dart';
 
 /// Now Playing — full screen, over everything (the web app's `NowPlaying`).
 ///
@@ -365,11 +366,8 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
     );
   }
 
-  /// The playback timeline. Kept as thin as the reference and as functional as
-  /// the player it belongs to: [playback.positionStream] drives the fill, and
-  /// every tap or drag hands a fraction straight to [PlaybackService.seekTo].
-  /// The visible line is 2px; the gesture band around it is 26px, so it stays
-  /// easy to hit without turning into a card.
+  /// Artwork-tinted wave driven by the existing audio position stream.
+  /// Seeking still delegates to PlaybackService; volume is independent.
   Widget _scrubber(
     BuildContext context,
     Song song,
@@ -377,7 +375,7 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
   ) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(28, 8, 28, 0),
-      child: _Timeline(song: song, playback: playback),
+      child: _Timeline(key: ValueKey(song.id), song: song, playback: playback),
     );
   }
 
@@ -793,12 +791,9 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
   }
 }
 
-/// The timeline: a 2px hairline, a thumb that only exists while it is being
-/// held, and elapsed / remaining under it. The drag position is owned here
-/// rather than by the page, so scrubbing repaints this row alone and never
-/// rebuilds the artwork, the backdrop or the controls.
+/// Position/remaining labels and drag preview; only this row rebuilds on ticks.
 class _Timeline extends StatefulWidget {
-  const _Timeline({required this.song, required this.playback});
+  const _Timeline({super.key, required this.song, required this.playback});
 
   final Song song;
   final PlaybackService playback;
@@ -809,6 +804,12 @@ class _Timeline extends StatefulWidget {
 
 class _TimelineState extends State<_Timeline> {
   double? _drag;
+
+  @override
+  void didUpdateWidget(_Timeline oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.song.id != widget.song.id) _drag = null;
+  }
 
   static const TextStyle _time = TextStyle(
     fontSize: 11.5,
@@ -821,13 +822,6 @@ class _TimelineState extends State<_Timeline> {
   Duration get _duration {
     final Duration d = widget.playback.duration;
     return d.inMilliseconds > 0 ? d : (widget.song.duration ?? Duration.zero);
-  }
-
-  void _begin(double width, double dx) {
-    // Nothing to scrub into while the length is still unknown — a tap must not
-    // turn into "back to the start" while the stream is being resolved.
-    if (_duration.inMilliseconds <= 0) return;
-    setState(() => _drag = (dx / width).clamp(0.0, 1.0));
   }
 
   void _end(bool commit) {
@@ -853,92 +847,16 @@ class _TimelineState extends State<_Timeline> {
         final Duration shownAt = durMs > 0
             ? Duration(milliseconds: (durMs * shown).round())
             : Duration.zero;
-        final bool held = _drag != null;
         return Column(
           children: <Widget>[
-            LayoutBuilder(
-              builder: (BuildContext context, BoxConstraints box) {
-                final double w = box.maxWidth;
-                return GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTapDown: (TapDownDetails d) {
-                    _begin(w, d.localPosition.dx);
-                    _end(true);
-                  },
-                  onHorizontalDragStart: (DragStartDetails d) =>
-                      _begin(w, d.localPosition.dx),
-                  onHorizontalDragUpdate: (DragUpdateDetails d) =>
-                      _begin(w, d.localPosition.dx),
-                  onHorizontalDragEnd: (DragEndDetails _) => _end(true),
-                  onHorizontalDragCancel: () => _end(false),
-                  // The painted line is 2px; this band is what the finger
-                  // actually hits, so a thin timeline is still easy to grab.
-                  child: SizedBox(
-                    height: 26,
-                    child: Stack(
-                      alignment: Alignment.center,
-                      children: <Widget>[
-                        // The unplayed rail, the full width of the line. While
-                        // the duration is still unknown it breathes instead of
-                        // lying flat about a position nobody has yet.
-                        if (durMs > 0)
-                          Container(
-                            height: 2,
-                            decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.22),
-                              borderRadius: BorderRadius.circular(999),
-                            ),
-                          )
-                        else
-                          const SizedBox(
-                            height: 2,
-                            child: LinearProgressIndicator(
-                              minHeight: 2,
-                              backgroundColor: Color(0x38FFFFFF),
-                              color: Color(0xBFFFFFFF),
-                            ),
-                          ),
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: SizedBox(
-                            height: 2,
-                            width: (w * shown).clamp(0.0, w),
-                            child: Container(
-                              decoration: BoxDecoration(
-                                color: held
-                                    ? Colors.white
-                                    : Colors.white.withValues(alpha: 0.92),
-                                borderRadius: BorderRadius.circular(999),
-                              ),
-                            ),
-                          ),
-                        ),
-                        // The thumb: 9px, and it fades in only while held. The
-                        // Stack centers it, so the travel is measured from the
-                        // middle of the row.
-                        AnimatedOpacity(
-                          opacity: held ? 1 : 0,
-                          duration: const Duration(milliseconds: 120),
-                          child: Transform.translate(
-                            offset: Offset(
-                              (w * shown).clamp(0.0, w) - w / 2,
-                              0,
-                            ),
-                            child: Container(
-                              width: 9,
-                              height: 9,
-                              decoration: const BoxDecoration(
-                                color: Colors.white,
-                                shape: BoxShape.circle,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
+            WaveformSeekBar(
+              value: shown,
+              enabled: durMs > 0,
+              playing: widget.playback.isPlaying && !widget.playback.isLoading,
+              artworkUrl: widget.song.thumbnailUrl,
+              reduceMotion: context.watch<SettingsService>().reduceMotion,
+              onChanged: (double value) => setState(() => _drag = value),
+              onEnd: (bool commit) => _end(commit),
             ),
             Row(
               children: <Widget>[
