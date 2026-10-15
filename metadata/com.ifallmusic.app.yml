@@ -1,0 +1,57 @@
+# F-Droid Data recipe (copy into fdroiddata/metadata/com.ifallmusic.app.yml).
+# https://gitlab.com/fdroid/fdroiddata
+
+Categories:
+  - Multimedia
+License: MIT
+AuthorName: Siddharth
+AuthorEmail: dastaanenajdik@gmail.com
+WebSite: https://sidify.vercel.app
+SourceCode: https://github.com/ifallertzia/ifallmusic
+IssueTracker: https://github.com/ifallertzia/ifallmusic/issues
+Changelog: https://github.com/ifallertzia/ifallmusic/blob/HEAD/RELEASE_NOTES.md
+
+AutoName: Sidify
+
+RepoType: git
+Repo: https://github.com/ifallertzia/ifallmusic.git
+
+Builds:
+  - versionName: 2.10.0
+    versionCode: 39
+    commit: v2.10.0+39
+    sudo:
+      - apt-get update
+      - apt-get install -y openjdk-17-jdk-headless
+      - update-java-alternatives --set java-1.17.0-openjdk-amd64
+    output: build/app/outputs/flutter-apk/app-release.apk
+    srclibs:
+      - flutter@stable
+    rm:
+      - ios
+      - macos
+      - windows
+      - linux
+      - web
+    prebuild:
+      - export PUB_CACHE=$(pwd)/.pub-cache
+      - $$flutter$$/bin/flutter config --no-analytics
+      - $$flutter$$/bin/flutter --version
+      - $$flutter$$/bin/flutter pub get
+      - sed -i '/REQUEST_INSTALL_PACKAGES/d' android/app/src/main/AndroidManifest.xml
+    scandelete:
+      - .pub-cache
+    build:
+      - export PUB_CACHE=$(pwd)/.pub-cache
+      - $$flutter$$/bin/flutter config --no-analytics
+      - $$flutter$$/bin/flutter build apk --release --dart-define=FDROID=true --dart-define=FLAVOR=fdroid
+    ndk: r27
+
+AntiFeatures:
+  - NonFreeNet
+
+AutoUpdateMode: Version
+UpdateCheckMode: Tags
+UpdateCheckData: pubspec.yaml|version:\s.*\+(\d+)|.|version:\s([\d.]+)
+CurrentVersion: 2.10.0
+CurrentVersionCode: 39

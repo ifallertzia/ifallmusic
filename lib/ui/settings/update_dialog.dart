@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../config/branding.dart';
+import '../../config/foss_build.dart';
 import '../../core/services/update_service.dart';
 import '../../core/theme/sidify_theme.dart';
 import '../widgets/sidify_widgets.dart';
@@ -16,6 +17,7 @@ import '../widgets/sidify_widgets.dart';
 bool updateDialogOpen = false;
 
 Future<void> showUpdateDialog(BuildContext context, {UpdateInfo? info}) async {
+  if (!FossBuild.githubUpdaterEnabled) return;
   if (updateDialogOpen) return;
   updateDialogOpen = true;
   try {

@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart';
 import 'package:workmanager/workmanager.dart';
 
+import '../../config/foss_build.dart';
 import 'recommendation_store.dart';
 import 'update_reminders.dart';
 
@@ -11,6 +12,7 @@ void saxifyRecommendationDispatcher() {
     try {
       WidgetsFlutterBinding.ensureInitialized();
       if (task == 'checkAppUpdate') {
+        if (!FossBuild.githubUpdaterEnabled) return true;
         return await UpdateReminders.backgroundCheck();
       }
       final RecommendationStore store = RecommendationStore();
@@ -25,7 +27,9 @@ void saxifyRecommendationDispatcher() {
 
 Future<void> registerRecommendationRefresh() async {
   await Workmanager().initialize(saxifyRecommendationDispatcher);
-  await registerUpdateReminders();
+  if (FossBuild.githubUpdaterEnabled) {
+    await registerUpdateReminders();
+  }
   await Workmanager().registerPeriodicTask(
     'saxify-reco',
     'refreshRecommendations',

@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../config/foss_build.dart';
 import 'update_service.dart';
 
 /// Android schedules checks approximately every six hours (battery/Doze may
@@ -15,6 +16,7 @@ class UpdateReminders {
   static const _versionKey = 'sidify.update.notice_version';
 
   static Future<bool> initialize({VoidCallback? onTap}) async {
+    if (!FossBuild.githubUpdaterEnabled) return false;
     if (kIsWeb || !Platform.isAndroid) return false;
     await _notifications.initialize(
       const InitializationSettings(
@@ -27,6 +29,7 @@ class UpdateReminders {
   }
 
   static Future<void> notify(UpdateInfo info) async {
+    if (!FossBuild.githubUpdaterEnabled) return;
     if (kIsWeb || !Platform.isAndroid) return;
     final prefs = await SharedPreferences.getInstance();
     await prefs.reload();
@@ -50,6 +53,7 @@ class UpdateReminders {
   }
 
   static Future<bool> backgroundCheck() async {
+    if (!FossBuild.githubUpdaterEnabled) return false;
     final service = UpdateService();
     try {
       await initialize();
