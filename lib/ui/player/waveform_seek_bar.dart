@@ -89,6 +89,8 @@ class _WaveformSeekBarState extends State<WaveformSeekBar>
     return Semantics(
       label: 'Playback position',
       value: '${(widget.value * 100).round()}%',
+      increasedValue: '${((widget.value + 0.05).clamp(0.0, 1.0) * 100).round()}%',
+      decreasedValue: '${((widget.value - 0.05).clamp(0.0, 1.0) * 100).round()}%',
       enabled: widget.enabled,
       onIncrease: widget.enabled ? () => adjust(0.05) : null,
       onDecrease: widget.enabled ? () => adjust(-0.05) : null,
