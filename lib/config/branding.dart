@@ -17,17 +17,16 @@
 class SidifyBranding {
   const SidifyBranding._();
 
-  static const double logoWidth = 1254;
-  static const double logoHeight = 1254;
-  static const String logoFormat = 'PNG (uploaded logo photo)';
+  static const double logoWidth = 1024;
+  static const double logoHeight = 1024;
+  static const String logoFormat = 'PNG (uploaded Spotify + YouTube Music mark)';
 
-  /// The full uploaded logo photo (mark + wordmark), used at large sizes:
-  /// the splash, the welcome screen and the About card.
+  /// The combined Spotify + YouTube Music mark cropped from the latest upload.
+  /// It is used at larger sizes, including the welcome screen and About card.
   static const String logoAsset = 'assets/images/sidify_logo.png';
 
-  /// The mark on its own (the gradient note, cropped from the same photo),
-  /// used wherever the site shows its small square logo: the home header,
-  /// empty states and the liked-songs sleeve fallback.
+  /// The uploaded combined mark, used in the home header, empty states and
+  /// the liked-songs sleeve fallback.
   static const String markAsset = 'assets/images/sidify_mark.png';
 
   /// Kept for the artwork fallback in the engine: the mark, never a letter.

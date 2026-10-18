@@ -20,8 +20,7 @@ import 'song_menu.dart';
 /// and colours, so every section reads like the site.
 
 // ---------------------------------------------------------------------------
-// Logo — wherever the site shows its mark, the app shows the Sidify photo
-// mark (the uploaded logo, cropped to the gradient note).
+// Logo — use the uploaded Spotify + YouTube Music merged mark everywhere.
 // ---------------------------------------------------------------------------
 
 /// The logo mark on its own, in a rounded square like the site's mark.

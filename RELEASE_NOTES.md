@@ -1,5 +1,16 @@
 # Sidify 2.10.0
 
+## Unreleased — refreshed app identity
+
+- Replaced the launcher, in-app, splash-screen, web, desktop and store-listing
+  icons with the newly uploaded Spotify + YouTube Music merged mark.
+- Fixed the logo asset generator: it now uses the committed uploaded artwork as
+  its single source instead of missing mascot source files, and keeps the
+  generated platform assets in sync.
+- Kept the Android application ID, signing identity and build-number release
+  flow unchanged so this remains an in-place update for compatible installs.
+
+
 ## Unreleased — the dock folds, the player goes quiet
 
 ### Bottom bar & mini player
