@@ -9,6 +9,7 @@ import '../../services/yt_music_service.dart';
 import '../models/artist.dart';
 import '../models/song.dart';
 import 'radio_queue.dart';
+import 'ai_song_filter.dart';
 import 'vibe_ranker.dart';
 
 /// Thin, typed wrapper around `YoutubeExplode`.
@@ -55,7 +56,7 @@ class YoutubeService {
   // ------------------------------------------------------------------ search
   Future<List<Video>> search(String query, {int limit = 20}) async {
     final VideoSearchList results = await _yt.search.search(query);
-    return results.take(limit).toList();
+    return results.where((v) => !v.isLive && !isLikelyAiSong(Song.fromVideo(v))).take(limit).toList();
   }
 
   /// Raw-query YTM-first music search with a separate YouTube fallback.
@@ -83,7 +84,7 @@ class YoutubeService {
     }
     List<Song> songs = [], all = [], fallback = [];
     var musicSucceeded = false;
-    List<Song> merged() => mergeMusicResults(songs, all, fallback)
+    List<Song> merged() => withoutAiSongs(mergeMusicResults(songs, all, fallback))
         .take(limit)
         .map((s) => subtitle == null ? s : s.copyWith(subtitle: subtitle))
         .toList();
@@ -132,12 +133,23 @@ class YoutubeService {
     return out;
   }
 
+
+  /// Standalone YouTube video shelf, independent from the YT Music results.
+  Future<List<Song>> searchVideoSongs(String query, {int limit = 12}) async {
+    final raw = YtMusicService.sanitize(query);
+    if (raw.isEmpty) return [];
+    final videos = await search(raw, limit: limit * 3);
+    return videos.where((v) => looksLikeSong(
+      title: v.title, author: v.author, duration: v.duration,
+    )).map(Song.fromVideo).take(limit).toList();
+  }
+
   Future<List<Song>> musicSongs(String query, {int limit = 20}) async {
     try {
       return (await music.search(
         query,
         filter: YtMusicService.songsFilter,
-      )).tracks.take(limit).toList();
+      )).tracks.where((s) => !isLikelyAiSong(s)).take(limit).toList();
     } catch (e) {
       debugPrint('YTM catalog: $e');
       return [];
@@ -309,7 +321,7 @@ class YoutubeService {
           )) {
         continue;
       }
-      if (seen.contains(v.id.value)) continue;
+      if (seen.contains(v.id.value) || isLikelyAiSong(Song.fromVideo(v))) continue;
       seen.add(v.id.value);
       out.add(Song.fromVideo(v));
       if (out.length >= limit) break;
@@ -355,7 +367,7 @@ class YoutubeService {
         'isAudioOnly': true,
         'enablePersistentPlaylistPanel': true,
       });
-      candidates.addAll(parseMusicRadio(json).tracks);
+      candidates.addAll(withoutAiSongs(parseMusicRadio(json).tracks));
     } catch (e) {
       debugPrint('YTM radio unavailable: ${e.runtimeType}');
     }
@@ -378,7 +390,7 @@ class YoutubeService {
     if (distinct().length < 4) {
       candidates.addAll(await musicSongs('${seed.artist} songs', limit: 24));
     }
-    if (vibe == null) return distinct();
+    if (vibe == null) return withoutAiSongs(distinct());
 
     // Rank the whole pool — never only what fit in the first slice.
     final List<Song> ranked = VibeRanker.rank(
@@ -390,14 +402,14 @@ class YoutubeService {
     );
     // Guarantee the queue can always move: if ranking came back thin, fall
     // back to the plain candidate list.
-    if (ranked.length >= 4) return ranked;
+    if (ranked.length >= 4) return withoutAiSongs(ranked);
     final List<Song> plain = distinct();
     for (final Song song in plain) {
       if (ranked.length >= limit) break;
       if (ranked.any((Song s) => s.id == song.id)) continue;
       ranked.add(song);
     }
-    return ranked;
+    return withoutAiSongs(ranked);
   }
 
   /// Extra candidates from what the listener's memory says they like: the

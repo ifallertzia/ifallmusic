@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/models/song.dart';
 import '../../core/services/library_service.dart';
+import '../../core/services/playback_service.dart';
 import '../../core/services/youtube_service.dart';
 import '../../core/theme/sidify_theme.dart';
 import '../../services/yt_music_parser.dart';
@@ -34,6 +35,7 @@ class _SearchPageState extends State<SearchPage> {
   int _shellNonce = 0;
 
   List<Song> _songs = <Song>[];
+  List<Song> _videos = <Song>[];
   List<MusicBrowseItem> _albums = <MusicBrowseItem>[];
   List<MusicBrowseItem> _artists = <MusicBrowseItem>[];
   bool _loading = false;
@@ -43,6 +45,7 @@ class _SearchPageState extends State<SearchPage> {
   static const List<(String, String)> _tabs = <(String, String)>[
     ('all', 'Top results'),
     ('songs', 'Songs'),
+    ('videos', 'Video Songs'),
     ('albums', 'Albums'),
     ('artists', 'Artists'),
   ];
@@ -95,18 +98,24 @@ class _SearchPageState extends State<SearchPage> {
       _failed = false;
       if (term.isEmpty) {
         _songs = <Song>[];
+        _videos = <Song>[];
         _albums = <MusicBrowseItem>[];
         _artists = <MusicBrowseItem>[];
         _loading = false;
       } else {
+        _songs = <Song>[];
+        _videos = <Song>[];
+        _albums = <MusicBrowseItem>[];
+        _artists = <MusicBrowseItem>[];
         _loading = true;
       }
     });
-    if (term.isEmpty) return;
+    if (term.isEmpty) { ++_requestId; return; }
     final int id = ++_requestId;
     final YoutubeService youtube = context.read<YoutubeService>();
     // The three shelves load side by side; each handles its own errors.
     _loadSongs(youtube, term, id);
+    _loadVideos(youtube, term, id);
     _loadBrowse(youtube, term, id, albums: true);
     _loadBrowse(youtube, term, id, albums: false);
   }
@@ -140,6 +149,15 @@ class _SearchPageState extends State<SearchPage> {
           _failed = _songs.isEmpty;
         });
       }
+    }
+  }
+
+  Future<void> _loadVideos(YoutubeService youtube, String term, int id) async {
+    try {
+      final results = await youtube.searchVideoSongs(term);
+      if (mounted && id == _requestId) setState(() => _videos = results);
+    } catch (_) {
+      // YouTube may be unavailable while Music still works.
     }
   }
 
@@ -344,7 +362,7 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   Widget _results(BuildContext context) {
-    if (_loading && _songs.isEmpty && _albums.isEmpty && _artists.isEmpty) {
+    if (_loading && _songs.isEmpty && _videos.isEmpty && _albums.isEmpty && _artists.isEmpty) {
       return const Center(child: CircularProgressIndicator());
     }
     if (_failed) {
@@ -380,8 +398,16 @@ class _SearchPageState extends State<SearchPage> {
           for (int i = 0;
               i < _songs.length && (_tab == 'songs' || i < 8);
               i++)
-            TrackRow(tracks: _songs, index: i),
+            TrackRow(tracks: _songs, index: i,
+              onTap: () => context.read<PlaybackService>().playRadio(_songs[i])),
           const SizedBox(height: 24),
+        ],
+        if (_tab == 'all' || _tab == 'videos') ...<Widget>[
+          if (_videos.isNotEmpty) const SectionHeader(title: 'Video Songs'),
+          for (int i = 0; i < _videos.length; i++)
+            TrackRow(tracks: _videos, index: i,
+              onTap: () => context.read<PlaybackService>().playRadio(_videos[i])),
+          if (_videos.isNotEmpty) const SizedBox(height: 24),
         ],
         if ((_tab == 'all' || _tab == 'albums') && _albums.isNotEmpty) ...<Widget>[
           ShelfSection(

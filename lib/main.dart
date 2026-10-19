@@ -33,6 +33,7 @@ import 'ui/settings/update_dialog.dart';
 import 'core/theme/sidify_theme.dart';
 import 'services/lyrics_service.dart';
 import 'ui/onboarding/welcome_page.dart';
+import 'ui/boot/boot_screen.dart';
 import 'ui/shell/sidify_dock.dart';
 import 'ui/shell/sidify_shell.dart';
 import 'ui/shell/sidify_shell_controller.dart';
@@ -77,6 +78,7 @@ Future<void> main() async {
 
   runZonedGuarded(
     () async {
+      runApp(const BootScreen());
       AppBoot? boot;
       try {
         boot = await _initializeApp().timeout(const Duration(seconds: 20));
