@@ -1,4 +1,5 @@
 import '../models/song.dart';
+import 'ai_song_filter.dart';
 import '../../services/lyrics_query.dart';
 
 /// Only automatic radio deduplicates recordings. Explicit albums/playlists keep
@@ -45,7 +46,7 @@ List<Song> radioCandidates(
   final seen = <Song>[anchor, ...history];
   final result = <Song>[];
   for (final song in candidates) {
-    if (excludedIds.contains(song.id) ||
+    if (isLikelyAiSong(song) || excludedIds.contains(song.id) ||
         seen.any((s) => sameRecording(s, song)))
       continue;
     result.add(song);
