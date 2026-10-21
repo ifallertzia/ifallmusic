@@ -3,10 +3,14 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/services/app_feedback.dart';
 import '../../core/theme/sidify_theme.dart';
 import '../models/movie_models.dart';
 import '../services/eon_movies_service.dart';
+import '../services/movie_download_service.dart';
 import '../services/movie_library_service.dart';
+import 'movie_downloads_page.dart';
+import 'movie_player_page.dart';
 import 'movie_ui_widgets.dart';
 
 void openMovieDetailPage(BuildContext context, MoviePost post) {

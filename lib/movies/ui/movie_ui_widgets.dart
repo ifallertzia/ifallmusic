@@ -109,6 +109,17 @@ class MovieDownloadsActionButton extends StatelessWidget {
         context.watch<MovieDownloadService>();
     final int active = downloads.activeCount;
     final int total = downloads.totalCount;
+    String? activeLabel;
+    if (active > 0) {
+      final List<MovieDownloadItem> running = downloads.activeItems
+          .where((MovieDownloadItem e) => e.isActive)
+          .toList();
+      if (running.length == 1 && running.first.totalBytes > 0) {
+        activeLabel = '${(running.first.progress * 100).toStringAsFixed(0)}%';
+      } else {
+        activeLabel = '$active';
+      }
+    }
 
     return Material(
       color: t.raised,

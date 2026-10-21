@@ -25,7 +25,10 @@ void openMovieDownloadsPage(BuildContext context) {
 /// Dedicated Downloads manager page for Movies & Series showing active queues,
 /// live speeds/progress, pause/resume/cancel, file playback, and Downloads export.
 class MovieDownloadsPage extends StatefulWidget {
-  const MovieDownloadsPage({super.key});
+  const MovieDownloadsPage({super.key, this.embedded = false});
+
+  /// True when shown as the Movies-mode Downloads tab (no AppBar/back).
+  final bool embedded;
 
   @override
   State<MovieDownloadsPage> createState() => _MovieDownloadsPageState();
