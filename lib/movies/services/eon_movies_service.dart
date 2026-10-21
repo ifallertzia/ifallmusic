@@ -503,6 +503,67 @@ class EonMoviesService {
     );
   }
 
+  /// Whether this quality can be attempted in the online player.
+  ///
+  /// Season ZIP packs and episode entries contained inside a ZIP stay
+  /// download-first in this version: libmpv cannot seek directly into one
+  /// compressed entry of a remote archive without a local extraction/proxy
+  /// layer. Ordinary movie and per-episode links resolve to direct video
+  /// files and can be streamed.
+  static bool canAttemptOnlinePlayback(MovieQualityLink quality) {
+    return !quality.isZipPack && !quality.isZipEntryEpisode;
+  }
+
+  /// Filters a download resolution down to candidates that are safe to hand
+  /// to the streaming player, preserving mirror order and request headers.
+  static List<MovieStreamCandidate> streamableCandidates(
+    ResolvedMovieStream resolved,
+  ) {
+    final String filename = resolved.filename.trim().toLowerCase();
+    final String mimeType = resolved.mimeType.trim().toLowerCase();
+    if (filename.endsWith('.zip') || mimeType.contains('zip')) {
+      return const <MovieStreamCandidate>[];
+    }
+
+    return List<MovieStreamCandidate>.unmodifiable(
+      resolved.candidates.where((MovieStreamCandidate candidate) {
+        if (candidate.isZip) return false;
+        final Uri? uri = Uri.tryParse(candidate.url.trim());
+        if (uri == null || uri.host.isEmpty) return false;
+        if (uri.scheme != 'http' && uri.scheme != 'https') return false;
+        if (uri.path.toLowerCase().endsWith('.zip')) return false;
+        return true;
+      }),
+    );
+  }
+
+  /// Resolves a quality for online playback using the same mirror chain as
+  /// downloads, but rejects ZIP results and non-direct/non-HTTP candidates.
+  Future<ResolvedMovieStream> resolvePlaybackStream(
+    MovieQualityLink quality, {
+    required String fallbackTitle,
+  }) async {
+    if (!canAttemptOnlinePlayback(quality)) {
+      throw StateError(
+        quality.isZipEntryEpisode
+            ? 'Episodes inside ZIP packs need to be downloaded before playback.'
+            : 'ZIP season packs need to be downloaded before playback.',
+      );
+    }
+
+    final ResolvedMovieStream resolved = await resolveDownloadStream(
+      quality,
+      fallbackTitle: fallbackTitle,
+    );
+    return ResolvedMovieStream(
+      candidates: streamableCandidates(resolved),
+      filename: resolved.filename,
+      sizeLabel: resolved.sizeLabel,
+      mimeType: resolved.mimeType,
+      sharePageUrl: resolved.sharePageUrl,
+    );
+  }
+
   /// Lists the individual episodes inside a season ZIP pack **without
   /// downloading the pack**: the ZIP central directory at the end of the
   /// remote file is read with a few small HTTP Range requests.

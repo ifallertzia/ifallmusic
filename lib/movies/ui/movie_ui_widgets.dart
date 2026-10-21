@@ -8,6 +8,7 @@ import '../models/movie_models.dart';
 import '../services/eon_movies_service.dart';
 import '../services/movie_download_service.dart';
 import 'movie_downloads_page.dart';
+import 'movie_player_page.dart';
 
 /// Resilient network poster/backdrop widget with automatic secondary URL
 /// failover and zero-network placeholder when [imageUrl] is empty.
@@ -175,10 +176,34 @@ class MovieQualityDownloadTile extends StatelessWidget {
     super.key,
     required this.detail,
     required this.quality,
+    this.allQualities = const <MovieQualityLink>[],
   });
 
   final MovieDetail detail;
   final MovieQualityLink quality;
+
+  /// Sibling qualities for the same movie/episode. The online player uses
+  /// these for its in-player quality switcher; unrelated episode qualities
+  /// should not be passed here.
+  final List<MovieQualityLink> allQualities;
+
+  bool get _canWatch => EonMoviesService.canAttemptOnlinePlayback(quality);
+
+  List<MovieQualityLink> get _watchQualities {
+    final List<MovieQualityLink> source = allQualities.isNotEmpty
+        ? allQualities
+        : <MovieQualityLink>[quality];
+    final Map<String, MovieQualityLink> byId = <String, MovieQualityLink>{};
+    for (final MovieQualityLink item in source) {
+      if (EonMoviesService.canAttemptOnlinePlayback(item)) {
+        byId.putIfAbsent(item.id, () => item);
+      }
+    }
+    if (_canWatch) {
+      byId.putIfAbsent(quality.id, () => quality);
+    }
+    return List<MovieQualityLink>.unmodifiable(byId.values);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -348,6 +373,69 @@ class MovieQualityDownloadTile extends StatelessWidget {
     MovieDownloadService dlService,
     MovieDownloadItem? existing,
   ) {
+    final Widget downloadAction =
+        _buildDownloadAction(context, t, dlService, existing);
+    if (!_canWatch ||
+        existing?.status == MovieDownloadStatus.completed) {
+      return downloadAction;
+    }
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: <Widget>[
+        _buildWatchAction(context, t),
+        const SizedBox(height: 7),
+        downloadAction,
+      ],
+    );
+  }
+
+  Widget _buildWatchAction(BuildContext context, SidifyTokens t) {
+    return Material(
+      color: t.brand,
+      borderRadius: BorderRadius.circular(999),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: () => openOnlineMoviePlayer(
+          context,
+          detail: detail,
+          quality: quality,
+          allQualities: _watchQualities,
+        ),
+        child: const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Icon(
+                Icons.play_arrow_rounded,
+                size: 16,
+                color: Colors.white,
+              ),
+              SizedBox(width: 5),
+              Text(
+                'Watch',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  height: 1.3,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDownloadAction(
+    BuildContext context,
+    SidifyTokens t,
+    MovieDownloadService dlService,
+    MovieDownloadItem? existing,
+  ) {
     if (existing == null ||
         existing.status == MovieDownloadStatus.canceled ||
         existing.status == MovieDownloadStatus.failed) {
@@ -399,7 +487,13 @@ class MovieQualityDownloadTile extends StatelessWidget {
         borderRadius: BorderRadius.circular(999),
         child: InkWell(
           borderRadius: BorderRadius.circular(999),
-          onTap: () => dlService.openFile(existing),
+          onTap: () async {
+            if (existing.isZip) {
+              await dlService.openFile(existing);
+            } else {
+              await openLocalMoviePlayer(context, item: existing);
+            }
+          },
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
             child: Row(
@@ -712,7 +806,7 @@ class _ZipPackOptionsSheetState extends State<_ZipPackOptionsSheet> {
     } else if (existing?.status == MovieDownloadStatus.completed) {
       trailing = IconButton(
         tooltip: 'Play',
-        onPressed: () => dlService.openFile(existing!),
+        onPressed: () => openLocalMoviePlayer(context, item: existing!),
         icon: const Icon(
           Icons.play_circle_fill_rounded,
           color: Color(0xFF1DB954),

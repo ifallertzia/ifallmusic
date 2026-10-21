@@ -397,7 +397,13 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
       );
       widgets.add(const SizedBox(height: 12));
       for (final MovieQualityLink q in detail.directQualities) {
-        widgets.add(MovieQualityDownloadTile(detail: detail, quality: q));
+        widgets.add(
+          MovieQualityDownloadTile(
+            detail: detail,
+            quality: q,
+            allQualities: detail.directQualities,
+          ),
+        );
       }
     } else if (detail.episodeGroups.isNotEmpty) {
       final List<String> seasons = detail.episodeGroups
@@ -451,7 +457,13 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
       widgets.add(Text('Download Options', style: SidifyText.section(t.text)));
       widgets.add(const SizedBox(height: 12));
       for (final MovieQualityLink q in detail.directQualities) {
-        widgets.add(MovieQualityDownloadTile(detail: detail, quality: q));
+        widgets.add(
+          MovieQualityDownloadTile(
+            detail: detail,
+            quality: q,
+            allQualities: detail.directQualities,
+          ),
+        );
       }
     } else {
       widgets.add(
@@ -599,7 +611,11 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
                   for (final MovieQualityLink q in group.qualities)
-                    MovieQualityDownloadTile(detail: detail, quality: q),
+                    MovieQualityDownloadTile(
+                      detail: detail,
+                      quality: q,
+                      allQualities: group.qualities,
+                    ),
                   for (final MovieEpisodeGroup sub in group.nestedGroups)
                     Padding(
                       padding: const EdgeInsets.only(top: 6),
@@ -620,6 +636,7 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
                             MovieQualityDownloadTile(
                               detail: detail,
                               quality: nq,
+                              allQualities: sub.qualities,
                             ),
                         ],
                       ),
