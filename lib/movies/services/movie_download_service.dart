@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/services/app_feedback.dart';
 import '../../core/services/native_bridge.dart';
 import '../models/movie_models.dart';
 import 'eon_movies_service.dart';
@@ -540,7 +541,7 @@ class MovieDownloadService extends ChangeNotifier {
         throw lastServerError ??
             StateError('All download mirrors returned an error');
       }
-    } catch (err) {
+    } catch (_) {
       if (!_pausedExplicitly.contains(id) && !_canceledExplicitly.contains(id)) {
         final MovieDownloadItem? latest = itemById(id);
         if (latest != null) {
@@ -548,9 +549,13 @@ class MovieDownloadService extends ChangeNotifier {
             latest.copyWith(
               status: MovieDownloadStatus.failed,
               speedBytesPerSec: 0,
-              errorMessage: err.toString().replaceFirst('Bad state: ', ''),
+              errorMessage: 'Download failed. Please try again.',
             ),
             persistImmediate: true,
+          );
+          showAppNotice(
+            'Download failed: ${latest.movieTitle} — please try again.',
+            duration: const Duration(seconds: 2),
           );
         }
       }

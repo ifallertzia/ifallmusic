@@ -96,6 +96,7 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
   final GlobalKey<VideoState> _videoKey = GlobalKey<VideoState>();
   final ValueNotifier<String> _statusText =
       ValueNotifier<String>('Preparing player…');
+  final ValueNotifier<bool> _buffering = ValueNotifier<bool>(false);
   final List<StreamSubscription<dynamic>> _subscriptions =
       <StreamSubscription<dynamic>>[];
 
@@ -131,6 +132,7 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
   DateTime? _candidateStartedAt;
 
   double _rate = 1.0;
+  BoxFit _fit = BoxFit.contain;
   Tracks _tracks = const Tracks();
   String _audioSelectionId = 'auto';
   String _subtitleSelectionId = 'auto';
@@ -175,8 +177,13 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
     _controller = VideoController(_player);
     _controlsTheme = _buildControlsTheme();
     _listenToPlayer();
+    final String qualityLabel = widget.initialQuality?.displayQuality ?? '';
     _setStatus(
-      widget.isLocal ? 'Opening video…' : 'Finding streams…',
+      widget.isLocal
+          ? 'Opening video…'
+          : qualityLabel.isNotEmpty
+              ? 'Finding streams for $qualityLabel…'
+              : 'Finding streams…',
     );
   }
 
@@ -207,6 +214,7 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
       unawaited(sub.cancel());
     }
     _statusText.dispose();
+    _buffering.dispose();
     unawaited(_player.dispose());
     unawaited(_restorePortraitChrome());
     super.dispose();
@@ -325,6 +333,9 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
         const MaterialFullscreenButton(),
       ],
       buttonBarButtonColor: Colors.white,
+      seekBarHeight: 3,
+      seekBarContainerHeight: 30,
+      seekBarThumbSize: 12,
       seekBarColor: Colors.white24,
       seekBarPositionColor: const Color(0xFFFA2D48),
       seekBarBufferColor: Colors.white38,
@@ -372,6 +383,13 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
             _loading = false;
             _ready = true;
           });
+        }
+      }),
+      _player.stream.buffering.listen((bool buffering) {
+        if (_disposed) return;
+        if (_buffering.value != buffering) _buffering.value = buffering;
+        if (_ready && _errorMessage == null) {
+          _setStatus(buffering ? 'Buffering…' : _healthyStatusText());
         }
       }),
       _player.stream.error.listen(_handlePlayerError),
@@ -447,7 +465,7 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
       _armStartupTimer(generation);
     } catch (error) {
       if (_isCurrentGeneration(generation)) {
-        _showFatalError('Could not play this downloaded file. ${_friendlyError(error)}');
+        _showFatalError('Could not play this downloaded file.');
       }
     }
   }
@@ -508,7 +526,10 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
           setState(() => _loading = false);
         }
         _setStatus(_healthyStatusText());
-        showAppNotice('Could not switch quality: ${_friendlyError(error)}');
+        showAppNotice(
+          'Could not switch quality. Please try again.',
+          duration: const Duration(seconds: 2),
+        );
       } else {
         _showFatalError(_friendlyError(error));
       }
@@ -523,8 +544,7 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
     final int? next = _findNextCandidateIndex();
     if (next == null) {
       _showFatalError(
-        'All available streaming mirrors failed. Check your connection, '
-        'then Retry to fetch fresh links.',
+        'Connection problem — check your internet and tap Retry.',
       );
       return;
     }
@@ -555,7 +575,7 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
   }) async {
     if (!_isCurrentGeneration(generation)) return;
     if (index < 0 || index >= _candidates.length) {
-      _showFatalError('No streaming mirror is available right now.');
+      _showFatalError('No stream is available right now. Please try again.');
       return;
     }
 
@@ -822,15 +842,18 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
   }
 
   String _friendlyError(Object error) {
-    String message = error.toString().trim();
-    message = message.replaceFirst('Bad state: ', '').trim();
-    if (message.isEmpty) {
-      return 'Playback could not be started. Please try again.';
-    }
-    if (message.length > 220) {
-      message = '${message.substring(0, 217)}…';
-    }
-    return message;
+    final String raw = error.toString().toLowerCase();
+    final bool network = raw.contains('socket') ||
+        raw.contains('timeout') ||
+        raw.contains('timed out') ||
+        raw.contains('network') ||
+        raw.contains('connection') ||
+        raw.contains('host lookup') ||
+        raw.contains('unreachable') ||
+        raw.contains('mirror');
+    return network
+        ? 'Connection problem — check your internet and try again.'
+        : 'This video could not be played right now. Please try again.';
   }
 
   Future<void> _safeSetRate(double rate) async {
@@ -993,7 +1016,10 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
             : 'Download started: $_displayTitle (${quality.displayQuality})',
       );
     } catch (error) {
-      showAppNotice('Could not start download: ${_friendlyError(error)}');
+      showAppNotice(
+        'Could not start download. Please try again.',
+        duration: const Duration(seconds: 2),
+      );
     }
   }
 
@@ -1219,6 +1245,28 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
                             ),
                         ],
                       ),
+                      _settingsSectionHeader(
+                        t,
+                        icon: Icons.aspect_ratio_rounded,
+                        title: 'Aspect ratio',
+                      ),
+                      for (final (BoxFit fit, String label, String hint) in <(BoxFit, String, String)>[
+                        (BoxFit.contain, 'Fit screen', 'Whole video visible'),
+                        (BoxFit.cover, 'Fill screen', 'Crop to fill the screen'),
+                        (BoxFit.fill, 'Stretch', 'Stretch to the screen'),
+                      ])
+                        _settingsOptionTile(
+                          t,
+                          title: label,
+                          subtitle: hint,
+                          selected: _fit == fit,
+                          onTap: () {
+                            if (mounted) {
+                              setState(() => _fit = fit);
+                            }
+                            setSheetState(() {});
+                          },
+                        ),
                       if (!widget.isLocal) ...<Widget>[
                         const SizedBox(height: 8),
                         _settingsSectionHeader(
@@ -1431,7 +1479,7 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
               key: _videoKey,
               controller: _controller,
               controls: MaterialVideoControls,
-              fit: BoxFit.contain,
+              fit: _fit,
               fill: Colors.black,
               wakelock: true,
               pauseUponEnteringBackgroundMode: true,
@@ -1440,6 +1488,35 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
               onExitFullscreen: _restorePortraitChrome,
             ),
             if (_loading) _buildLoadingOverlay(t),
+            Positioned.fill(
+              child: ValueListenableBuilder<bool>(
+                valueListenable: _buffering,
+                builder: (_, bool buffering, __) {
+                  if (!buffering || _loading || error != null) {
+                    return const SizedBox.shrink();
+                  }
+                  return const IgnorePointer(
+                    child: Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          CircularProgressIndicator(color: Colors.white),
+                          SizedBox(height: 12),
+                          Text(
+                            'Buffering…',
+                            style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
             if (error != null) _buildErrorOverlay(t, error),
           ],
         ),

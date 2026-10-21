@@ -72,66 +72,126 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = 'Sorry yr, phir se try kr (ya internet connection check kr)';
+        _error = 'Check your connection and try again.';
         _loading = false;
       });
     }
   }
 
-  Future<void> _toggleOrExpandGroup(MovieEpisodeGroup group) async {
+  Future<MovieEpisodeGroup?> _ensureGroupLoaded(MovieEpisodeGroup group) async {
+    if (group.isLoaded) return group;
     final MovieDetail? current = _detail;
-    if (current == null) return;
-
-    if (group.isLoaded) {
-      setState(() {
-        if (_collapsedGroupIds.contains(group.id)) {
-          _collapsedGroupIds.remove(group.id);
-        } else {
-          _collapsedGroupIds.add(group.id);
-        }
-      });
-      return;
-    }
-
-    if (_loadingGroupIds.contains(group.id)) return;
+    if (current == null) return null;
+    if (_loadingGroupIds.contains(group.id)) return null;
     setState(() => _loadingGroupIds.add(group.id));
 
     try {
       final EonMoviesService svc = context.read<EonMoviesService>();
       final MovieEpisodeGroup loaded = await svc.expandEpisodeGroup(group);
-      if (!mounted) return;
-      final List<MovieEpisodeGroup> updated = current.episodeGroups
-          .map((MovieEpisodeGroup g) => g.id == group.id ? loaded : g)
-          .toList();
+      if (!mounted) return null;
+      final MovieDetail latest = _detail ?? current;
+      MovieEpisodeGroup replaceLoaded(MovieEpisodeGroup g) {
+        if (g.id == group.id) return loaded;
+        if (g.nestedGroups.isEmpty) return g;
+        return g.copyWith(
+          nestedGroups: g.nestedGroups.map(replaceLoaded).toList(),
+        );
+      }
+
+      final List<MovieEpisodeGroup> updated =
+          latest.episodeGroups.map(replaceLoaded).toList();
       setState(() {
         _loadingGroupIds.remove(group.id);
         _collapsedGroupIds.remove(group.id);
         _detail = MovieDetail(
-          title: current.title,
-          cleanTitle: current.cleanTitle,
-          type: current.type,
-          webUrl: current.webUrl,
-          year: current.year,
-          releaseDate: current.releaseDate,
-          backdropUrl: current.backdropUrl,
-          fallbackBackdropUrl: current.fallbackBackdropUrl,
-          posterUrl: current.posterUrl,
-          fallbackPosterUrl: current.fallbackPosterUrl,
-          languages: current.languages,
-          languageList: current.languageList,
-          genres: current.genres,
-          director: current.director,
-          qualityBadges: current.qualityBadges,
-          synopsis: current.synopsis,
-          defaultSeasonLabel: current.defaultSeasonLabel,
-          directQualities: current.directQualities,
+          title: latest.title,
+          cleanTitle: latest.cleanTitle,
+          type: latest.type,
+          webUrl: latest.webUrl,
+          year: latest.year,
+          releaseDate: latest.releaseDate,
+          backdropUrl: latest.backdropUrl,
+          fallbackBackdropUrl: latest.fallbackBackdropUrl,
+          posterUrl: latest.posterUrl,
+          fallbackPosterUrl: latest.fallbackPosterUrl,
+          languages: latest.languages,
+          languageList: latest.languageList,
+          genres: latest.genres,
+          director: latest.director,
+          qualityBadges: latest.qualityBadges,
+          synopsis: latest.synopsis,
+          defaultSeasonLabel: latest.defaultSeasonLabel,
+          directQualities: latest.directQualities,
           episodeGroups: updated,
-          relatedPosts: current.relatedPosts,
+          relatedPosts: latest.relatedPosts,
         );
       });
+      return loaded;
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted) return null;
       setState(() => _loadingGroupIds.remove(group.id));
+      showAppNotice(
+        'Could not load episodes right now. Please try again.',
+        duration: const Duration(seconds: 2),
+      );
+      return null;
+    }
+  }
+
+  Future<void> _toggleGroup(MovieEpisodeGroup group) async {
+    if (!group.isLoaded) {
+      await _ensureGroupLoaded(group);
+      return;
+    }
+    setState(() {
+      if (_collapsedGroupIds.contains(group.id)) {
+        _collapsedGroupIds.remove(group.id);
+      } else {
+        _collapsedGroupIds.add(group.id);
+      }
+    });
+  }
+
+  void _playQualities(MovieDetail detail, List<MovieQualityLink> qualities) {
+    final MovieQualityLink? lowest = lowestPlayableQuality(qualities);
+    if (lowest == null) {
+      showAppNotice(
+        'This title is download-only — no stream is available for it.',
+        duration: const Duration(seconds: 2),
+      );
+      return;
+    }
+    openOnlineMoviePlayer(
+      context,
+      detail: detail,
+      quality: lowest,
+      allQualities: playableQualitiesOf(qualities),
+    );
+  }
+
+  void _downloadQualities(
+    MovieDetail detail,
+    List<MovieQualityLink> qualities, {
+    required String heading,
+  }) {
+    final List<MovieQualityLink> zipQualities = qualities
+        .where((MovieQualityLink q) => q.isZipPack)
+        .toList();
+    final bool zipOnly = zipQualities.isNotEmpty &&
+        lowestPlayableQuality(qualities) == null;
+    if (zipOnly) {
+      showSeriesDownloadDialog(
+        context,
+        detail: detail,
+        packQualities: zipQualities,
+      );
+    } else {
+      showMovieDownloadQualityDialog(
+        context,
+        detail: detail,
+        qualities: qualities,
+        heading: heading,
+      );
     }
   }
 
@@ -278,7 +338,7 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
                     CircularProgressIndicator(color: t.brand),
                     const SizedBox(height: 14),
                     Text(
-                      'Loading download qualities & languages...',
+                      'Loading details…',
                       style: SidifyText.bodyS(t.text2),
                     ),
                   ],
@@ -317,7 +377,7 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
             )
           else if (detail != null)
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 190),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 48),
               sliver: SliverList(
                 delegate: SliverChildListDelegate(
                   _buildDetailBody(context, t, detail),
@@ -407,35 +467,12 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
       );
     }
 
+    widgets.add(const SizedBox(height: 18));
+    widgets.add(_buildActionsRow(context, t, detail));
+    widgets.add(_ActiveDownloadsStrip(detail: detail));
     widgets.add(const SizedBox(height: 22));
 
-    if (!detail.isSeries && detail.directQualities.isNotEmpty) {
-      widgets.add(
-        Text(
-          'Download Qualities',
-          style: SidifyText.section(t.text),
-        ),
-      );
-      widgets.add(const SizedBox(height: 4));
-      widgets.add(
-        Text(
-          detail.languages.isNotEmpty
-              ? 'Select resolution to start direct download (${detail.languages})'
-              : 'Select resolution to start direct download',
-          style: SidifyText.caption(t.text2),
-        ),
-      );
-      widgets.add(const SizedBox(height: 12));
-      for (final MovieQualityLink q in detail.directQualities) {
-        widgets.add(
-          MovieQualityDownloadTile(
-            detail: detail,
-            quality: q,
-            allQualities: detail.directQualities,
-          ),
-        );
-      }
-    } else if (detail.episodeGroups.isNotEmpty) {
+    if (detail.episodeGroups.isNotEmpty) {
       final List<String> seasons = detail.episodeGroups
           .map((MovieEpisodeGroup g) => g.seasonLabel)
           .where((String s) => s.isNotEmpty)
@@ -452,8 +489,8 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
       widgets.add(
         Text(
           detail.languages.isNotEmpty
-              ? 'Quality-wise downloads • Languages: ${detail.languages}'
-              : 'Choose season / episode and quality below',
+              ? 'Languages: ${detail.languages}'
+              : 'Choose a season and episode',
           style: SidifyText.caption(t.text2),
         ),
       );
@@ -483,19 +520,7 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
       for (final MovieEpisodeGroup group in visibleGroups) {
         widgets.add(_buildEpisodeGroupCard(t, detail, group));
       }
-    } else if (detail.directQualities.isNotEmpty) {
-      widgets.add(Text('Download Options', style: SidifyText.section(t.text)));
-      widgets.add(const SizedBox(height: 12));
-      for (final MovieQualityLink q in detail.directQualities) {
-        widgets.add(
-          MovieQualityDownloadTile(
-            detail: detail,
-            quality: q,
-            allQualities: detail.directQualities,
-          ),
-        );
-      }
-    } else {
+    } else if (detail.directQualities.isEmpty) {
       widgets.add(
         Container(
           padding: const EdgeInsets.all(20),
@@ -504,7 +529,7 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
             borderRadius: BorderRadius.circular(14),
           ),
           child: Text(
-            'No download links listed for this title right now.',
+            'No watch or download links are listed for this title right now.',
             style: SidifyText.bodyS(t.text2),
           ),
         ),
@@ -560,6 +585,110 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
     return widgets;
   }
 
+  Widget _buildActionsRow(
+    BuildContext context,
+    SidifyTokens t,
+    MovieDetail detail,
+  ) {
+    final bool isMovieLike =
+        detail.episodeGroups.isEmpty && detail.directQualities.isNotEmpty;
+    final MovieQualityLink? lowest =
+        isMovieLike ? lowestPlayableQuality(detail.directQualities) : null;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: <Widget>[
+            if (isMovieLike && lowest != null)
+              _primaryButton(
+                t,
+                icon: Icons.play_arrow_rounded,
+                label: 'Play',
+                filled: true,
+                onTap: () => _playQualities(detail, detail.directQualities),
+              ),
+            if (isMovieLike)
+              _primaryButton(
+                t,
+                icon: Icons.download_rounded,
+                label: 'Download',
+                filled: lowest == null,
+                onTap: () => _downloadQualities(
+                  detail,
+                  detail.directQualities,
+                  heading: 'Download',
+                ),
+              ),
+            Builder(
+              builder: (BuildContext context) {
+                final MovieLibraryService? library =
+                    context.watch<MovieLibraryService?>();
+                if (library == null) return const SizedBox.shrink();
+                final bool saved = library.contains(_currentPost);
+                return _primaryButton(
+                  t,
+                  icon: saved
+                      ? Icons.bookmark_rounded
+                      : Icons.bookmark_border_rounded,
+                  label: saved ? 'In Watchlist' : 'Watchlist',
+                  filled: false,
+                  onTap: () => library.toggleWatchlist(_currentPost),
+                );
+              },
+            ),
+          ],
+        ),
+        if (isMovieLike && lowest == null) ...<Widget>[
+          const SizedBox(height: 8),
+          Text(
+            'This title is download-only — no stream is available for it.',
+            style: SidifyText.caption(t.text2),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _primaryButton(
+    SidifyTokens t, {
+    required IconData icon,
+    required String label,
+    required bool filled,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: filled ? t.brand : t.raised,
+      borderRadius: BorderRadius.circular(999),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          decoration: filled
+              ? null
+              : BoxDecoration(
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: t.edge),
+                ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Icon(icon, size: 19, color: filled ? Colors.white : t.text),
+              const SizedBox(width: 7),
+              Text(
+                label,
+                style: SidifyText.label(filled ? Colors.white : t.text),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildEpisodeGroupCard(
     SidifyTokens t,
     MovieDetail detail,
@@ -570,9 +699,16 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
         group.isLoaded && !_collapsedGroupIds.contains(group.id);
     final String langs =
         group.languages.isNotEmpty ? group.languages : detail.languages;
+    final bool hasNested = group.nestedGroups.isNotEmpty;
+    final bool isContainer = hasNested || !group.isLoaded;
+    final MovieQualityLink? lowest =
+        group.isLoaded ? lowestPlayableQuality(group.qualities) : null;
+    final bool zipOnly = group.isLoaded &&
+        lowest == null &&
+        group.qualities.any((MovieQualityLink q) => q.isZipPack);
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 14),
+      margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
         color: t.surface,
         borderRadius: BorderRadius.circular(16),
@@ -581,100 +717,147 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          InkWell(
-            borderRadius: BorderRadius.circular(16),
-            onTap: () => _toggleOrExpandGroup(group),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-              child: Row(
-                children: <Widget>[
-                  Icon(
-                    group.isCompletePack
-                        ? Icons.folder_zip_rounded
-                        : Icons.movie_filter_rounded,
-                    size: 20,
-                    color: t.brand,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Text(
-                          group.fullHeading,
-                          style: SidifyText.titleM(t.text),
-                        ),
-                        if (langs.isNotEmpty) ...<Widget>[
-                          const SizedBox(height: 2),
-                          Text(
-                            'Audio: $langs',
-                            style: SidifyText.caption(t.text2),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                  if (loading)
-                    SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: t.brand,
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(
+              children: <Widget>[
+                Icon(
+                  group.isCompletePack || zipOnly
+                      ? Icons.folder_zip_rounded
+                      : Icons.movie_filter_rounded,
+                  size: 20,
+                  color: t.brand,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        group.fullHeading,
+                        style: SidifyText.titleM(t.text),
                       ),
-                    )
-                  else
-                    Icon(
+                      if (zipOnly) ...<Widget>[
+                        const SizedBox(height: 2),
+                        Text(
+                          'Season pack (ZIP) — download to watch',
+                          style: SidifyText.caption(t.text2),
+                        ),
+                      ] else if (langs.isNotEmpty) ...<Widget>[
+                        const SizedBox(height: 2),
+                        Text(
+                          'Audio: $langs',
+                          style: SidifyText.caption(t.text2),
+                        ),
+                      ],
+                      if (group.isLoaded &&
+                          !hasNested &&
+                          group.qualities.isEmpty) ...<Widget>[
+                        const SizedBox(height: 2),
+                        Text(
+                          'No links available',
+                          style: SidifyText.caption(t.text2),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                if (loading)
+                  SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: t.brand,
+                    ),
+                  )
+                else if (isContainer)
+                  IconButton(
+                    tooltip: expanded ? 'Collapse' : 'Show episodes',
+                    onPressed: () => _toggleGroup(group),
+                    icon: Icon(
                       expanded
                           ? Icons.keyboard_arrow_up_rounded
                           : Icons.keyboard_arrow_down_rounded,
                       color: t.text2,
                     ),
+                  )
+                else ...<Widget>[
+                  if (lowest != null)
+                    _groupActionButton(
+                      t,
+                      icon: Icons.play_arrow_rounded,
+                      label: 'Play',
+                      filled: true,
+                      onTap: () => _playQualities(detail, group.qualities),
+                    ),
+                  if (group.qualities.isNotEmpty) ...<Widget>[
+                    const SizedBox(width: 8),
+                    _groupActionButton(
+                      t,
+                      icon: Icons.download_rounded,
+                      label: 'Download',
+                      filled: lowest == null,
+                      onTap: () => _downloadQualities(
+                        detail,
+                        group.qualities,
+                        heading: group.fullHeading,
+                      ),
+                    ),
+                  ],
                 ],
-              ),
+              ],
             ),
           ),
-          if (expanded)
+          if (hasNested && expanded)
             Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+              padding: const EdgeInsets.fromLTRB(10, 0, 10, 4),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  for (final MovieQualityLink q in group.qualities)
-                    MovieQualityDownloadTile(
-                      detail: detail,
-                      quality: q,
-                      allQualities: group.qualities,
-                    ),
                   for (final MovieEpisodeGroup sub in group.nestedGroups)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 6),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          Padding(
-                            padding: const EdgeInsets.only(
-                              left: 4,
-                              bottom: 8,
-                            ),
-                            child: Text(
-                              sub.fullHeading,
-                              style: SidifyText.label(t.text),
-                            ),
-                          ),
-                          for (final MovieQualityLink nq in sub.qualities)
-                            MovieQualityDownloadTile(
-                              detail: detail,
-                              quality: nq,
-                              allQualities: sub.qualities,
-                            ),
-                        ],
-                      ),
-                    ),
+                    _buildEpisodeGroupCard(t, detail, sub),
                 ],
               ),
             ),
         ],
+      ),
+    );
+  }
+
+  Widget _groupActionButton(
+    SidifyTokens t, {
+    required IconData icon,
+    required String label,
+    required bool filled,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: filled ? t.brand : t.raised,
+      borderRadius: BorderRadius.circular(999),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
+          decoration: filled
+              ? null
+              : BoxDecoration(
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: t.edge),
+                ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Icon(icon, size: 16, color: filled ? Colors.white : t.text),
+              const SizedBox(width: 5),
+              Text(
+                label,
+                style: SidifyText.label(filled ? Colors.white : t.text),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -713,6 +896,96 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
       child: Text(
         label,
         style: SidifyText.caption(highlight ? Colors.white : t.text2),
+      ),
+    );
+  }
+}
+
+/// Compact live progress for this title's active/paused downloads, shown
+/// under the detail actions. Tapping opens the Downloads manager.
+class _ActiveDownloadsStrip extends StatelessWidget {
+  const _ActiveDownloadsStrip({required this.detail});
+
+  final MovieDetail detail;
+
+  @override
+  Widget build(BuildContext context) {
+    final MovieDownloadService? service =
+        context.watch<MovieDownloadService?>();
+    if (service == null) return const SizedBox.shrink();
+    final String title =
+        detail.cleanTitle.isNotEmpty ? detail.cleanTitle : detail.title;
+    final List<MovieDownloadItem> mine = service.items
+        .where((MovieDownloadItem e) =>
+            e.movieTitle == title &&
+            (e.isActive || e.status == MovieDownloadStatus.paused))
+        .toList();
+    if (mine.isEmpty) return const SizedBox.shrink();
+    final SidifyTokens t = context.sidify;
+    return Padding(
+      padding: const EdgeInsets.only(top: 14),
+      child: Material(
+        color: t.raised,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: () => openMovieDownloadsPage(context),
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: t.edge),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                for (final MovieDownloadItem item in mine) ...<Widget>[
+                  Row(
+                    children: <Widget>[
+                      Icon(Icons.downloading_rounded, size: 17, color: t.brand),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          item.subtitleSummary.isNotEmpty
+                              ? item.subtitleSummary
+                              : item.qualityLabel,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: SidifyText.bodyS(t.text),
+                        ),
+                      ),
+                      Text(
+                        item.status == MovieDownloadStatus.resolving
+                            ? 'Connecting…'
+                            : item.status == MovieDownloadStatus.paused
+                                ? 'Paused'
+                                : '${(item.progress * 100).toStringAsFixed(0)}%',
+                        style: SidifyText.label(t.brand),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(999),
+                    child: LinearProgressIndicator(
+                      value: item.status == MovieDownloadStatus.resolving
+                          ? null
+                          : item.progress,
+                      minHeight: 5,
+                      backgroundColor: t.fill2,
+                      valueColor: AlwaysStoppedAnimation<Color>(t.brand),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                ],
+                Text(
+                  'Open Downloads to manage',
+                  style: SidifyText.caption(t.text2),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

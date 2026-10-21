@@ -1,8 +1,10 @@
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// The five destinations of the floating tab bar, in order.
-enum SidifyTab { home, explore, search, library, together }
+/// The destinations of the floating tab bar, in order. [downloads] is a
+/// Movies-mode destination appended last so existing tab indices (and the
+/// music [IndexedStack]) keep their meaning.
+enum SidifyTab { home, explore, search, library, together, downloads }
 
 enum SearchMode { chooser, music, movies }
 
@@ -73,6 +75,7 @@ class SidifyShellController extends ChangeNotifier {
   void goExplore() => select(SidifyTab.explore);
   void goLibrary() => select(SidifyTab.library);
   void goTogether() => select(SidifyTab.together);
+  void goDownloads() => select(SidifyTab.downloads);
 
   void goSearch([String query = '']) {
     _searchQuery = query;

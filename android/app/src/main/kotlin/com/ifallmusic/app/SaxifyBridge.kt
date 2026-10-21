@@ -65,6 +65,7 @@ class SaxifyBridge(private val activity: Activity) {
                 }
                 "listDownloads" -> io(result) { listDownloads() }
                 "listLocalAudio" -> io(result) { listLocalAudio() }
+                "listLocalVideo" -> io(result) { listLocalVideo() }
                 "shareFile" -> {
                     shareFile(
                         call.argument<String>("path"),
@@ -325,6 +326,57 @@ class SaxifyBridge(private val activity: Activity) {
                         "track" to cursor.getInt(trackIdx),
                         "dateAdded" to cursor.getLong(addedIdx),
                         "mimeType" to (cursor.getString(mimeIdx) ?: ""),
+                    ),
+                )
+            }
+        }
+        return out
+    }
+
+    private fun listLocalVideo(): List<Map<String, Any?>> {
+        val collection = MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+        val columns = ArrayList<String>().apply {
+            add(MediaStore.Video.Media._ID)
+            add(MediaStore.Video.Media.TITLE)
+            add(MediaStore.Video.Media.DATA)
+            add(MediaStore.Video.Media.DURATION)
+            add(MediaStore.Video.Media.SIZE)
+            add(MediaStore.Video.Media.DATE_ADDED)
+            add(MediaStore.Video.Media.MIME_TYPE)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                add(MediaStore.Video.Media.WIDTH)
+                add(MediaStore.Video.Media.HEIGHT)
+            }
+        }
+        val out = ArrayList<Map<String, Any?>>()
+        activity.contentResolver.query(
+            collection,
+            columns.toTypedArray(),
+            "${MediaStore.Video.Media.DURATION}>?",
+            arrayOf("5000"),
+            "${MediaStore.Video.Media.DATE_ADDED} DESC",
+        )?.use { cursor ->
+            val idIdx = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
+            val titleIdx = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.TITLE)
+            val dataIdx = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DATA)
+            val durationIdx = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION)
+            val sizeIdx = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE)
+            val addedIdx = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DATE_ADDED)
+            val mimeIdx = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.MIME_TYPE)
+            val widthIdx = cursor.getColumnIndex("width")
+            val heightIdx = cursor.getColumnIndex("height")
+            while (cursor.moveToNext()) {
+                out.add(
+                    mapOf(
+                        "id" to cursor.getLong(idIdx),
+                        "title" to (cursor.getString(titleIdx) ?: ""),
+                        "path" to (cursor.getString(dataIdx) ?: ""),
+                        "durationMs" to cursor.getLong(durationIdx),
+                        "size" to cursor.getLong(sizeIdx),
+                        "dateAdded" to cursor.getLong(addedIdx),
+                        "mimeType" to (cursor.getString(mimeIdx) ?: ""),
+                        "width" to (if (widthIdx >= 0) cursor.getInt(widthIdx) else 0),
+                        "height" to (if (heightIdx >= 0) cursor.getInt(heightIdx) else 0),
                     ),
                 )
             }

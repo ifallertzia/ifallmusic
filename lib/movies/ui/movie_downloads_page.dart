@@ -7,6 +7,7 @@ import '../../core/services/native_bridge.dart';
 import '../../core/theme/sidify_theme.dart';
 import '../models/movie_models.dart';
 import '../services/movie_download_service.dart';
+import 'local_videos_page.dart';
 import 'movie_player_page.dart';
 import 'movie_ui_widgets.dart';
 
@@ -56,6 +57,9 @@ class _MovieDownloadsPageState extends State<MovieDownloadsPage> {
           .toList(),
     };
 
+    if (widget.embedded) {
+      return SafeArea(bottom: false, child: _body(t, service, filtered, all, embedded: true));
+    }
     return Scaffold(
       backgroundColor: t.bg,
       appBar: AppBar(
@@ -67,10 +71,39 @@ class _MovieDownloadsPageState extends State<MovieDownloadsPage> {
         ),
         title: Text('Movie Downloads', style: SidifyText.title(t.text)),
       ),
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
+      body: _body(t, service, filtered, all, embedded: false),
+    );
+  }
+
+  Widget _body(
+    SidifyTokens t,
+    MovieDownloadService service,
+    List<MovieDownloadItem> filtered,
+    List<MovieDownloadItem> all, {
+    required bool embedded,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        if (embedded)
           Padding(
+            padding: const EdgeInsets.fromLTRB(18, 14, 18, 4),
+            child: Row(
+              children: <Widget>[
+                Expanded(
+                  child: Text('Downloads', style: SidifyText.display(t.text)),
+                ),
+                Builder(
+                  builder: (BuildContext context) => IconButton(
+                    tooltip: 'On this device',
+                    onPressed: () => openLocalVideosPage(context),
+                    icon: Icon(Icons.smartphone_rounded, color: t.text),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        Padding(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
             child: Wrap(
               spacing: 8,
@@ -138,8 +171,7 @@ class _MovieDownloadsPageState extends State<MovieDownloadsPage> {
                     },
                   ),
           ),
-        ],
-      ),
+      ],
     );
   }
 
@@ -248,10 +280,10 @@ class _DownloadCard extends StatelessWidget {
               ),
             ),
           ],
-          if (item.errorMessage.isNotEmpty) ...<Widget>[
+          if (item.status == MovieDownloadStatus.failed) ...<Widget>[
             const SizedBox(height: 8),
             Text(
-              item.errorMessage,
+              'Download failed — check your connection and tap Retry.',
               style: SidifyText.caption(t.danger),
             ),
           ],
@@ -270,7 +302,7 @@ class _DownloadCard extends StatelessWidget {
     switch (item.status) {
       case MovieDownloadStatus.resolving:
         return Text(
-          'Resolving high-speed CDN link...',
+          'Connecting to Ifallertzia…',
           style: SidifyText.caption(t.brand),
         );
       case MovieDownloadStatus.queued:
@@ -283,7 +315,7 @@ class _DownloadCard extends StatelessWidget {
         final String speed = MovieByteFmt.speed(item.speedBytesPerSec);
         return Text(
           '$pct • $bytes${speed.isNotEmpty ? ' • $speed' : ''}'
-          '${item.activeServer.isNotEmpty ? ' • ${item.activeServer}' : ''}',
+          '${item.activeServer.isNotEmpty ? ' • Ifallertzia' : ''}',
           style: SidifyText.caption(t.brand),
         );
       case MovieDownloadStatus.paused:
@@ -365,7 +397,10 @@ class _DownloadCard extends StatelessWidget {
             }
             final OpenResult res = await service.openFile(item);
             if (res.type != ResultType.done) {
-              showAppNotice(res.message);
+              showAppNotice(
+                'Could not open this file.',
+                duration: const Duration(seconds: 2),
+              );
             }
           },
         ),
@@ -382,7 +417,8 @@ class _DownloadCard extends StatelessWidget {
             showAppNotice(
               saved != null
                   ? 'Saved to phone Downloads/IfallMusic folder'
-                  : 'Saved at ${item.savedPath}',
+                  : 'Kept in the app downloads folder',
+              duration: const Duration(seconds: 2),
             );
           },
         ),
