@@ -13,7 +13,9 @@ import 'core/models/playlist.dart';
 import 'core/models/song.dart';
 import 'core/services/app_feedback.dart';
 import 'core/services/artist_service.dart';
+import 'core/services/app_notifications.dart';
 import 'core/services/boot_log.dart';
+import 'core/services/download_notifications.dart';
 import 'core/services/home_catalog.dart';
 import 'core/services/library_service.dart';
 import 'core/services/listen_together_service.dart';
@@ -127,6 +129,10 @@ Future<AppBoot> _initializeApp() async {
   // the app is backgrounded. Its failure is isolated internally, so still try
   // it in safe mode rather than silently dropping background playback.
   await NotificationBootstrap.init();
+  // One plugin for every notification the app posts — playback, download
+  // progress and the update reminder. Started here so the first download card
+  // is never waiting on an initialize().
+  unawaited(AppNotifications.ensureInitialized());
 
   final SettingsService settings = SettingsService(prefs);
   // Lyrics lookup follows the saved provider order + translation target
@@ -151,6 +157,17 @@ Future<AppBoot> _initializeApp() async {
     moviesService: moviesService,
   );
   final MovieLibraryService movieLibrary = MovieLibraryService(prefs);
+
+  // Live percentage in the shade for every download — songs, movies and
+  // episodes — and a dismissible "Downloaded" card when one finishes. It
+  // watches the two services instead of being called from inside them, so
+  // neither download path has to know notifications exist.
+  final DownloadNotifications downloadNotifications = DownloadNotifications();
+  downloadNotifications.attach(
+    music: musicDownloads,
+    movies: movieDownloads,
+  );
+
   await playback.restorePersistedQueue();
   NotificationBootstrap.handler?.attach(
     playback,
@@ -205,6 +222,7 @@ Future<AppBoot> _initializeApp() async {
     moviesService: moviesService,
     movieDownloads: movieDownloads,
     movieLibrary: movieLibrary,
+    downloadNotifications: downloadNotifications,
     safeMode: native.safeMode,
     prefs: prefs,
   );
@@ -253,6 +271,7 @@ class AppBoot {
     required this.moviesService,
     required this.movieDownloads,
     required this.movieLibrary,
+    required this.downloadNotifications,
     required this.safeMode,
     required this.prefs,
   });
@@ -268,6 +287,9 @@ class AppBoot {
   final EonMoviesService moviesService;
   final MovieDownloadService movieDownloads;
   final MovieLibraryService movieLibrary;
+
+  /// Keeps the shade informed while anything is downloading.
+  final DownloadNotifications downloadNotifications;
   final bool safeMode;
   final SharedPreferences prefs;
 }

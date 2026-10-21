@@ -73,9 +73,20 @@ def check(path: Path) -> list[str]:
                 i += 1
             continue
 
-        # raw strings: r'...' and r"..."
+        # raw strings: r'...', r"...", r'''...''' and r"""..."""
+        # A raw triple-quoted string is how a RegExp character class holds both
+        # kinds of quote, and its brackets are not Dart brackets — scanning it
+        # as r'' + '…' used to report a phantom unclosed '['.
         if ch == "r" and nxt in ("'", '"'):
             quote = nxt
+            if src[i + 1 : i + 4] == quote * 3:
+                i += 4
+                while i < n and src[i : i + 3] != quote * 3:
+                    if src[i] == "\n":
+                        line += 1
+                    i += 1
+                i += 3
+                continue
             i += 2
             while i < n and src[i] != quote:
                 if src[i] == "\n":

@@ -10,6 +10,7 @@ import 'package:provider/provider.dart';
 import '../../core/services/app_feedback.dart';
 import '../../core/services/playback_service.dart';
 import '../../core/theme/sidify_theme.dart';
+import '../../core/utils/track_labels.dart';
 import '../models/movie_models.dart';
 import '../services/eon_movies_service.dart';
 import '../services/movie_download_service.dart';
@@ -98,6 +99,14 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
   final ValueNotifier<String> _statusText =
       ValueNotifier<String>('Preparing player…');
   final ValueNotifier<bool> _buffering = ValueNotifier<bool>(false);
+
+  /// The timestamp a seek was asked for and has not been confirmed yet. The
+  /// seek bar holds the thumb there instead of letting the position events
+  /// that are still arriving from the *old* place drag it back — that snap
+  /// back is what made a long drag look like it had failed while the mirror
+  /// was in fact still being asked.
+  final ValueNotifier<Duration?> _pendingSeek = ValueNotifier<Duration?>(null);
+
   final List<StreamSubscription<dynamic>> _subscriptions =
       <StreamSubscription<dynamic>>[];
 
@@ -119,6 +128,16 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
 
   Timer? _startupTimer;
 
+  /// The "still finding a stream" ticker: while nothing is playing, the line
+  /// under the spinner walks through [_waitingLines] instead of sitting on one
+  /// message, and stops the moment the picture arrives.
+  Timer? _waitingRotator;
+  int _waitingLine = 0;
+
+  /// mpv options that make a network stream seekable are applied once, after
+  /// the first media has been opened.
+  bool _tunedForSeeking = false;
+
   /// Watches a healthy stream after mpv reports an error (a far seek on a
   /// network mirror often does): only a real stall — no position movement at
   /// all — is a failure. Without this, a perfectly playing video used to be
@@ -127,11 +146,14 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
   Duration _lastPositionValue = Duration.zero;
   DateTime _lastPositionAt = DateTime.now();
 
-  /// Seek bookkeeping: the target still being waited on, which mirrors have
-  /// already refused to seek, and whether the "this stream cannot seek" note
-  /// has been shown.
+  /// Seek bookkeeping: the target still being waited on, where the picture was
+  /// when the seek was asked for, which step of the recovery ladder is next,
+  /// which mirrors have already refused to seek, and whether the "this stream
+  /// cannot seek" note has been shown.
   Timer? _seekWatchdog;
   Duration? _pendingSeekTarget;
+  Duration _seekFromPosition = Duration.zero;
+  int _seekRecoveryStep = 0;
   final Set<int> _seekFailedCandidates = <int>{};
   bool _seekLimitNoticed = false;
   int _generation = 0;
@@ -220,12 +242,54 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
     _controller = VideoController(_player);
     _controlsTheme = _buildControlsTheme();
     _listenToPlayer();
-    _setStatus(widget.isLocal ? 'Opening video…' : _waitingStatus);
+    if (widget.isLocal) {
+      _setStatus('Opening video…');
+    } else {
+      _startWaitingStatus();
+    }
   }
 
   /// What the player says while it is still finding a stream. Deliberately
-  /// quiet about the resolution: the fallback is meant to be invisible.
-  static const String _waitingStatus = 'Please wait a bit…';
+  /// quiet about resolutions and mirrors — the fallback is meant to be
+  /// invisible — but never a flat "please wait": the line moves on its own, so
+  /// a slow start still reads as the app working rather than as a stuck screen.
+  /// The rotation stops the instant a picture arrives.
+  static const List<String> _waitingLines = <String>[
+    'Connecting to Ifallertzia…',
+    'Asking Siddharth…',
+    'Trying server Sakshi…',
+    'Collecting from Ritu…',
+    'Picking the fastest mirror…',
+    'Threading the reel…',
+  ];
+
+  static const Duration _waitingLineEvery = Duration(milliseconds: 2200);
+
+  void _startWaitingStatus() {
+    if (_disposed) return;
+    _waitingLine = 0;
+    _setStatus(_waitingLines.first);
+    _waitingRotator?.cancel();
+    _waitingRotator = Timer.periodic(_waitingLineEvery, (Timer timer) {
+      if (_disposed) {
+        timer.cancel();
+        return;
+      }
+      // Only a page that is still hunting for a stream keeps talking: an error
+      // or a playing picture owns the status line from here on.
+      if (!_loading || _errorMessage != null) {
+        timer.cancel();
+        return;
+      }
+      _waitingLine = (_waitingLine + 1) % _waitingLines.length;
+      _setStatus(_waitingLines[_waitingLine]);
+    });
+  }
+
+  void _stopWaitingStatus() {
+    _waitingRotator?.cancel();
+    _waitingRotator = null;
+  }
 
   @override
   void didChangeDependencies() {
@@ -252,11 +316,13 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
     _startupTimer?.cancel();
     _stallTimer?.cancel();
     _seekWatchdog?.cancel();
+    _stopWaitingStatus();
     for (final StreamSubscription<dynamic> sub in _subscriptions) {
       unawaited(sub.cancel());
     }
     _statusText.dispose();
     _buffering.dispose();
+    _pendingSeek.dispose();
     unawaited(_player.dispose());
     unawaited(_restorePortraitChrome());
     super.dispose();
@@ -367,6 +433,7 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
                   height: 32,
                   child: _MovieSeekBar(
                     player: _player,
+                    pendingSeek: _pendingSeek,
                     onSeekStart: _handleSeekBarStart,
                     onSeek: _handleSeekBarSeek,
                     onSeekEnd: _handleSeekBarEnd,
@@ -536,6 +603,7 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
       );
       if (!_isCurrentGeneration(generation)) return;
       unawaited(_safeSetRate(_rate));
+      _tuneForSeekingOnce();
       _armStartupTimer(generation);
     } catch (error) {
       if (_isCurrentGeneration(generation)) {
@@ -565,9 +633,10 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
     final bool shouldPlay = !_ready || _desiredPlaying;
     _startupTimer?.cancel();
     _stallTimer?.cancel();
+    _clearPendingSeek();
     _isResolving = true;
     _currentQuality = quality;
-    _setStatus(_waitingStatus);
+    _startWaitingStatus();
     if (mounted) {
       setState(() {
         _loading = true;
@@ -651,7 +720,7 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
       _showPlaybackUnavailable();
       return;
     }
-    _setStatus(_waitingStatus);
+    _startWaitingStatus();
     await _resolveAndOpenQuality(
       next,
       start: _lastKnownPosition,
@@ -690,11 +759,19 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
     return null;
   }
 
+  /// Opens mirror [index].
+  ///
+  /// [overlay] decides whether the whole screen goes behind the "still finding
+  /// a stream" card. A seek recovery keeps it off: the picture stays up, only
+  /// the status line says it is jumping, because the stream itself is fine —
+  /// it just refused to move.
   Future<void> _openCandidate(
     int index, {
     required int generation,
     required Duration start,
     required bool play,
+    bool overlay = true,
+    String? status,
   }) async {
     if (!_isCurrentGeneration(generation)) return;
     if (index < 0 || index >= _candidates.length) {
@@ -707,10 +784,15 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
     _failedCandidates.remove(index);
     _desiredPlaying = play;
     _prepareForOpen(start);
-    _setStatus(_waitingStatus);
+    if (overlay) {
+      _startWaitingStatus();
+    } else {
+      _stopWaitingStatus();
+      _setStatus(status ?? _healthyStatusText());
+    }
     if (mounted) {
       setState(() {
-        _loading = true;
+        if (overlay) _loading = true;
         _errorMessage = null;
       });
     }
@@ -727,6 +809,7 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
       );
       if (!_isCurrentGeneration(generation)) return;
       unawaited(_safeSetRate(_rate));
+      _tuneForSeekingOnce();
       _armStartupTimer(generation);
     } catch (error) {
       if (_isCurrentGeneration(generation)) {
@@ -759,6 +842,13 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
   }
 
   void _handlePosition(Duration position) {
+    // The stream reached the timestamp that was asked for: the bar can go
+    // back to following the picture.
+    final Duration? pending = _pendingSeekTarget;
+    if (pending != null &&
+        (position - pending).abs() <= const Duration(seconds: 3)) {
+      _clearPendingSeek();
+    }
     if (position != _lastPositionValue) {
       _lastPositionValue = position;
       _lastPositionAt = DateTime.now();
@@ -800,6 +890,7 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
     if (_disposed || _candidateHealthy) return;
     _candidateHealthy = true;
     _startupTimer?.cancel();
+    _stopWaitingStatus();
     _tracks = _player.state.tracks;
     _setStatus(_healthyStatusText());
     if (mounted) {
@@ -939,7 +1030,7 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
     }
     // No "mirror failed", no resolution names: the swap happens quietly in
     // the same player.
-    _setStatus(_waitingStatus);
+    _startWaitingStatus();
 
     await _openNextCandidate(
       generation: generation,
@@ -974,7 +1065,7 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
       return;
     }
     _ready = false;
-    _setStatus(_waitingStatus);
+    _startWaitingStatus();
     await _resolveAndOpenQuality(quality, start: _lastKnownPosition);
   }
 
@@ -985,6 +1076,7 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
     final int generation = ++_generation;
     _startupTimer?.cancel();
     _stallTimer?.cancel();
+    _clearPendingSeek();
     _isResolving = false;
     _failedCandidates.remove(index);
     await _openCandidate(
@@ -1004,6 +1096,8 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
     if (_disposed) return;
     _startupTimer?.cancel();
     _stallTimer?.cancel();
+    _stopWaitingStatus();
+    _clearPendingSeek();
     _isResolving = false;
     _setStatus('Playback failed');
     if (mounted) {
@@ -1028,6 +1122,8 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
     if (_disposed) return;
     _startupTimer?.cancel();
     _stallTimer?.cancel();
+    _stopWaitingStatus();
+    _clearPendingSeek();
     _isResolving = false;
     _candidateHealthy = false;
     _setStatus('Playback failed');
@@ -1094,52 +1190,144 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
     await _seekTo(_player.state.position + offset);
   }
 
+  /// mpv defaults that make an HTTP stream behave like a file: keep the
+  /// demuxer cache (and make it searchable backwards), read further ahead, and
+  /// always seek exactly. Applied once, after the first media is open, and
+  /// never fatal — a property this mpv build does not know must not stop a
+  /// video that is already playing.
+  void _tuneForSeekingOnce() {
+    if (_tunedForSeeking || _disposed) return;
+    _tunedForSeeking = true;
+    final PlatformPlayer? platform = _player.platform;
+    if (platform is! NativePlayer) return;
+    unawaited(() async {
+      const Map<String, String> options = <String, String>{
+        'cache': 'yes',
+        'demuxer-seekable-cache': 'yes',
+        'demuxer-readahead-secs': '120',
+        'hr-seek': 'yes',
+        'hr-seek-framedrop': 'no',
+        'network-timeout': '30',
+      };
+      for (final MapEntry<String, String> option in options.entries) {
+        if (_disposed) return;
+        try {
+          await platform.setProperty(option.key, option.value);
+        } catch (_) {}
+      }
+    }());
+  }
+
   /// One way into a seek, whichever control asked for it. The target is
   /// clamped to the media, handed to mpv, and then watched: a mirror that
-  /// silently refuses to move (no HTTP Range support) is replaced by another
-  /// one — at the same timestamp — instead of leaving the bar stuck.
+  /// silently refuses to move (no HTTP Range support) is re-opened at that
+  /// timestamp, then replaced by another one — instead of leaving the bar
+  /// stuck where it was.
+  ///
+  /// The bar itself is told about the target right away ([_pendingSeek]), so
+  /// the thumb stays where the finger put it while the stream catches up.
   Future<void> _seekTo(Duration target) async {
     final Duration duration = _player.state.duration;
     Duration wanted = target < Duration.zero ? Duration.zero : target;
     if (duration > Duration.zero && wanted > duration) wanted = duration;
 
+    _seekWatchdog?.cancel();
+    _seekFromPosition = _player.state.position;
+    _seekRecoveryStep = 0;
     _pendingSeekTarget = wanted;
+    _pendingSeek.value = wanted;
     try {
       await _player.seek(wanted);
     } catch (_) {
+      _clearPendingSeek();
       return;
     }
-    _armSeekWatchdog(wanted, attemptsLeft: 2);
+    if (_disposed) return;
+    _armSeekWatchdog(wanted);
   }
 
-  void _armSeekWatchdog(Duration wanted, {required int attemptsLeft}) {
+  /// How long each look at a pending seek waits before deciding it failed.
+  /// Short on purpose: a mirror that cannot seek says so immediately, and
+  /// nine seconds of a bar sitting in the wrong place reads as a broken app.
+  static const List<Duration> _seekCheckDelays = <Duration>[
+    Duration(milliseconds: 1400),
+    Duration(seconds: 2),
+    Duration(seconds: 3),
+    Duration(seconds: 4),
+  ];
+
+  void _armSeekWatchdog(Duration wanted, {int attempt = 0}) {
     _seekWatchdog?.cancel();
-    _seekWatchdog = Timer(const Duration(seconds: 9), () {
+    final Duration delay = attempt < _seekCheckDelays.length
+        ? _seekCheckDelays[attempt]
+        : _seekCheckDelays.last;
+    _seekWatchdog = Timer(delay, () {
       if (_disposed || _pendingSeekTarget != wanted) return;
       final Duration position = _player.state.position;
-      final bool arrived =
-          (position - wanted).abs() <= const Duration(seconds: 6);
-      if (arrived) {
-        _pendingSeekTarget = null;
+      if ((position - wanted).abs() <= const Duration(seconds: 3)) {
+        _clearPendingSeek();
         return;
       }
-      // Still filling the buffer: give the mirror a second chance to land.
-      if (_player.state.buffering && attemptsLeft > 0) {
-        _armSeekWatchdog(wanted, attemptsLeft: attemptsLeft - 1);
+      // Either mpv is still pulling data for the new timestamp (a slow mirror,
+      // not a dead one) or the picture is visibly travelling there. Both get
+      // another look before anything is torn down.
+      final bool stillWorking = _player.state.buffering ||
+          (position - _seekFromPosition).abs() > const Duration(seconds: 1);
+      if (stillWorking && attempt < _seekCheckDelays.length) {
+        _armSeekWatchdog(wanted, attempt: attempt + 1);
         return;
       }
-      _pendingSeekTarget = null;
       unawaited(_recoverStuckSeek(wanted));
     });
   }
 
-  /// The current mirror cannot reach [wanted]. Switch to the next mirror of
-  /// this quality (or the next quality down) at that timestamp. If nothing
-  /// else is available, say so once and keep the picture that is playing —
-  /// a stream that cannot seek is still worth watching.
+  void _clearPendingSeek() {
+    _pendingSeekTarget = null;
+    _seekWatchdog?.cancel();
+    if (!_disposed && _pendingSeek.value != null) _pendingSeek.value = null;
+  }
+
+  /// `Jumping to 42:10…` — the status line while a seek is being recovered.
+  String _jumpingStatus(Duration target) => 'Jumping to ${_movieClock(target)}…';
+
+  /// The stream did not move to [wanted]. Walk the ladder: the same mirror
+  /// re-opened at that timestamp, then the other mirrors of this quality, then
+  /// the next quality down. If nothing else is available, say so once and keep
+  /// the picture that is playing — a stream that cannot seek is still worth
+  /// watching.
   Future<void> _recoverStuckSeek(Duration wanted) async {
-    if (_disposed || widget.isLocal || _errorMessage != null) return;
-    final bool playingBefore = _player.state.playing;
+    if (_disposed || _errorMessage != null) return;
+    final bool playAfter = _player.state.playing || _desiredPlaying;
+
+    if (widget.isLocal) {
+      _clearPendingSeek();
+      await _openLocalFile(start: wanted);
+      return;
+    }
+
+    final int step = _seekRecoveryStep++;
+
+    // Step one is the one that actually fixes a long drag: the mirror is asked
+    // for the timestamp in the request itself instead of being told to move a
+    // stream it has already declared unseekable.
+    if (step == 0 && _candidateIndex >= 0 && _candidateIndex < _candidates.length) {
+      final int generation = ++_generation;
+      _startupTimer?.cancel();
+      _stallTimer?.cancel();
+      _isResolving = false;
+      _failedCandidates.remove(_candidateIndex);
+      await _openCandidate(
+        _candidateIndex,
+        generation: generation,
+        start: wanted,
+        play: playAfter,
+        overlay: false,
+        status: _jumpingStatus(wanted),
+      );
+      if (!_isCurrentGeneration(generation)) return;
+      _armSeekWatchdog(wanted, attempt: 2);
+      return;
+    }
 
     for (int i = 0; i < _candidates.length; i++) {
       if (i == _candidateIndex) continue;
@@ -1149,18 +1337,33 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
       _seekFailedCandidates.add(_candidateIndex);
       final int generation = ++_generation;
       _startupTimer?.cancel();
+      _stallTimer?.cancel();
       _isResolving = false;
       _failedCandidates.remove(i);
       await _openCandidate(
         i,
         generation: generation,
         start: wanted,
-        play: playingBefore || _desiredPlaying,
+        play: playAfter,
+        overlay: false,
+        status: _jumpingStatus(wanted),
       );
+      if (!_isCurrentGeneration(generation)) return;
+      _armSeekWatchdog(wanted, attempt: 2);
       return;
     }
 
-    // No other mirror either: keep playing, explain the limit once.
+    // No mirror of this quality can reach it: try the next one down, from the
+    // timestamp the person asked for.
+    final MovieQualityLink? next = _nextQualityAfter(_currentQuality);
+    if (next != null && !_failedQualities.contains(next.id)) {
+      _seekFailedCandidates.add(_candidateIndex);
+      await _resolveAndOpenQuality(next, start: wanted, autoFallback: true);
+      return;
+    }
+
+    // Nothing left to try: keep playing, explain the limit once.
+    _clearPendingSeek();
     if (!_seekLimitNoticed) {
       _seekLimitNoticed = true;
       showAppNotice(
@@ -1169,14 +1372,14 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
         duration: const Duration(seconds: 4),
       );
     }
-    if (playingBefore && !_player.state.playing) {
+    if (playAfter && !_player.state.playing) {
       unawaited(_player.play());
     }
   }
 
   void _handleSeekBarStart() {
     _seekWatchdog?.cancel();
-    _pendingSeekTarget = null;
+    _clearPendingSeek();
   }
 
   void _handleSeekBarSeek(Duration target) {
@@ -1261,29 +1464,30 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
         .toList();
   }
 
+  /// The name shown for one audio track.
+  ///
+  /// Muxers name their tracks after whoever uploaded the file, so the raw title
+  /// arrives as something like `-eonmovies.com.hin.aac.2ch`. [describeAudioTrack]
+  /// swaps that domain for ours and makes the rest readable — the language,
+  /// codec and speaker layout all still say exactly what the file said.
   String _audioTrackLabel(AudioTrack track, int index) {
-    final String title = (track.title ?? '').trim();
-    final String base = title.isNotEmpty ? title : 'Audio ${index + 1}';
-    final List<String> details = <String>[
-      if ((track.language ?? '').trim().isNotEmpty)
-        track.language!.trim().toUpperCase(),
-      if ((track.codec ?? '').trim().isNotEmpty)
-        track.codec!.trim().toUpperCase(),
-      if ((track.channelscount ?? 0) > 0) '${track.channelscount} ch',
-    ];
-    return details.isEmpty ? base : '$base • ${details.join(' • ')}';
+    return describeAudioTrack(
+      title: track.title,
+      language: track.language,
+      codec: track.codec,
+      channels: track.channelscount ?? 0,
+      index: index,
+    );
   }
 
+  /// The same treatment for subtitle tracks.
   String _subtitleTrackLabel(SubtitleTrack track, int index) {
-    final String title = (track.title ?? '').trim();
-    final String base = title.isNotEmpty ? title : 'Subtitle ${index + 1}';
-    final List<String> details = <String>[
-      if ((track.language ?? '').trim().isNotEmpty)
-        track.language!.trim().toUpperCase(),
-      if ((track.codec ?? '').trim().isNotEmpty)
-        track.codec!.trim().toUpperCase(),
-    ];
-    return details.isEmpty ? base : '$base • ${details.join(' • ')}';
+    return describeSubtitleTrack(
+      title: track.title,
+      language: track.language,
+      codec: track.codec,
+      index: index,
+    );
   }
 
   Future<void> _setAudioTrack(AudioTrack track, String selectionId) async {
@@ -1867,6 +2071,15 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
 }
 
 
+/// `1:02:03` / `42:10` — one formatter for the bar, the drag bubble and the
+/// status line.
+String _movieClock(Duration d) {
+  final int h = d.inHours;
+  final int m = d.inMinutes.remainder(60);
+  final String s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+  return h > 0 ? '$h:${m.toString().padLeft(2, '0')}:$s' : '$m:$s';
+}
+
 /// The player's own seek bar.
 ///
 /// The stock material bar was the reason seeking felt broken: it is only 30 px
@@ -1881,12 +2094,19 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
 class _MovieSeekBar extends StatefulWidget {
   const _MovieSeekBar({
     required this.player,
+    required this.pendingSeek,
     required this.onSeekStart,
     required this.onSeek,
     required this.onSeekEnd,
   });
 
   final Player player;
+
+  /// The timestamp a seek was asked for and has not been confirmed yet. While
+  /// it is set the bar draws *that*, not the position events still arriving
+  /// from where the video used to be.
+  final ValueNotifier<Duration?> pendingSeek;
+
   final VoidCallback onSeekStart;
   final void Function(Duration target) onSeek;
   final VoidCallback onSeekEnd;
@@ -1917,6 +2137,7 @@ class _MovieSeekBarState extends State<_MovieSeekBar> {
     _position = widget.player.state.position;
     _duration = widget.player.state.duration;
     _buffer = widget.player.state.buffer;
+    widget.pendingSeek.addListener(_onPendingSeekChanged);
     _subs.addAll(<StreamSubscription<dynamic>>[
       widget.player.stream.position.listen((Duration value) {
         if (!mounted) return;
@@ -1939,10 +2160,15 @@ class _MovieSeekBarState extends State<_MovieSeekBar> {
 
   @override
   void dispose() {
+    widget.pendingSeek.removeListener(_onPendingSeekChanged);
     for (final StreamSubscription<dynamic> sub in _subs) {
       unawaited(sub.cancel());
     }
     super.dispose();
+  }
+
+  void _onPendingSeekChanged() {
+    if (mounted) setState(() {});
   }
 
   double get _played {
@@ -1950,20 +2176,17 @@ class _MovieSeekBarState extends State<_MovieSeekBar> {
     if (drag != null) return drag;
     final int total = _duration.inMilliseconds;
     if (total <= 0) return 0;
-    return (_position.inMilliseconds / total).clamp(0.0, 1.0);
+    // A drag that has been let go of but not landed yet stays under the
+    // finger's last position. Letting the stale position stream pull the thumb
+    // back is what made a long seek look like it never happened.
+    final Duration shown = widget.pendingSeek.value ?? _position;
+    return (shown.inMilliseconds / total).clamp(0.0, 1.0);
   }
 
   double get _buffered {
     final int total = _duration.inMilliseconds;
     if (total <= 0) return 0;
     return (_buffer.inMilliseconds / total).clamp(0.0, 1.0);
-  }
-
-  static String _clock(Duration d) {
-    final int h = d.inHours;
-    final int m = d.inMinutes.remainder(60);
-    final String s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
-    return h > 0 ? '$h:${m.toString().padLeft(2, '0')}:$s' : '$m:$s';
   }
 
   void _seekToFraction(double fraction) {
@@ -2059,7 +2282,7 @@ class _MovieSeekBarState extends State<_MovieSeekBar> {
                         borderRadius: BorderRadius.circular(7),
                       ),
                       child: Text(
-                        _clock(_duration * _drag!),
+                        _movieClock(_duration * _drag!),
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 11,

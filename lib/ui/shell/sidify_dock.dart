@@ -80,10 +80,12 @@ class SidifyRouteObserver extends NavigatorObserver {
 }
 
 /// Scroll-driven chrome: scrolling down folds the tab bar into a single row —
-/// Home staying as a small round button, the mini player sliding in beside it,
-/// and the round button keeping its seat on the right. The smallest upward nudge unfolds it
-/// back through the same path, so the pieces look like they are coming out of
-/// each other rather than being swapped for different widgets.
+/// Home staying as a small round button (Search in its place on the Movies
+/// page, where the right-hand seat is already the way back to Music), the mini
+/// player sliding in beside it, and the round button keeping its seat on the
+/// right. The smallest upward nudge unfolds it back through the same path, so
+/// the pieces look like they are coming out of each other rather than being
+/// swapped for different widgets.
 class SidifyDockScroll {
   SidifyDockScroll._();
 
@@ -680,6 +682,15 @@ class _TabPill extends StatelessWidget {
         ],
       );
 
+  /// Movies gives the folded bar's left seat to Search instead of Home.
+  ///
+  /// Scrolling down a long grid of posters is the gesture that says "I am
+  /// looking for something", and in Movies the right-hand seat is already
+  /// taken by the way back to Music — so there is nowhere else for search to
+  /// live. Unfolded (scrolled back up) the cell is Home again, exactly as it
+  /// is in Music: the swap is a property of the fold, not of the page.
+  bool get _leftSeatIsSearch => shell.isMoviesMode && fold >= 0.5;
+
   void _go(SidifyTab tab) {
     // Tapping a tab from a pushed page lands on that tab's root.
     if (observer.pushed.value) {
@@ -691,6 +702,18 @@ class _TabPill extends StatelessWidget {
       SidifyDockScroll.barHidden.value = false;
     }
     shell.select(tab);
+  }
+
+  /// Opens the movie search with its field focused — the same thing the
+  /// right-hand Search button does in Music.
+  void _goSearch() {
+    if (observer.pushed.value) {
+      navigatorKey.currentState?.popUntil((Route<dynamic> r) => r.isFirst);
+    }
+    if (SidifyDockScroll.barHidden.value) {
+      SidifyDockScroll.barHidden.value = false;
+    }
+    shell.goSearch();
   }
 
   @override
@@ -722,8 +745,11 @@ class _TabPill extends StatelessWidget {
   }
 
   Widget _cellWidget(SidifyTokens t, int index, double w) {
-    final (SidifyTab tab, String label, IconData icon) = _tabs[index];
-    final bool selected = shell.tab == tab;
+    final (SidifyTab tab, String homeLabel, IconData homeIcon) = _tabs[index];
+    final bool searchSeat = index == 0 && _leftSeatIsSearch;
+    final String label = searchSeat ? 'Search' : homeLabel;
+    final IconData icon = searchSeat ? Icons.search_rounded : homeIcon;
+    final bool selected = !searchSeat && shell.tab == tab;
     // The cell's *window* shrinks; its content keeps its own size and is
     // clipped, which is what makes the row fold instead of squelching.
     final double contentW = math.max(w, _cell);
@@ -731,7 +757,7 @@ class _TabPill extends StatelessWidget {
       width: w,
       height: _cell,
       child: GestureDetector(
-        onTap: () => _go(tab),
+        onTap: searchSeat ? _goSearch : () => _go(tab),
         behavior: HitTestBehavior.opaque,
         child: ClipRect(
           child: OverflowBox(

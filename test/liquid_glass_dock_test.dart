@@ -466,6 +466,41 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('in Movies the folded bar hands Home\'s seat to Search',
+      (WidgetTester tester) async {
+    final _Dock dock = await pumpDock(tester);
+    await dock.shell.chooseMode(movies: true);
+    await settle(tester);
+
+    // At the top of the page: Home on the left, the way back to Music on the
+    // right, and no search seat anywhere — Movies searches from its own header.
+    expect(find.byIcon(Icons.home_rounded), findsOneWidget);
+    expect(find.byIcon(Icons.music_note_rounded), findsOneWidget);
+    expect(find.byIcon(Icons.search_rounded), findsNothing);
+
+    // Scrolling down folds the bar, and in Movies the button that survives on
+    // the left is Search, not Home. The right-hand seat is left alone.
+    SidifyDockScroll.barHidden.value = true;
+    await settle(tester);
+    expect(find.byIcon(Icons.home_rounded), findsNothing);
+    expect(find.byIcon(Icons.search_rounded), findsOneWidget);
+    expect(find.byIcon(Icons.music_note_rounded), findsOneWidget,
+        reason: 'the right button keeps its job while folded');
+
+    // Tapping it opens the search box and brings the bar back.
+    await tester.tap(find.byIcon(Icons.search_rounded));
+    await settle(tester);
+    expect(dock.shell.tab, SidifyTab.search);
+    expect(dock.shell.searchMode, SearchMode.movies);
+    expect(SidifyDockScroll.barHidden.value, isFalse);
+
+    // Scrolled back up, the seat is Home again — the swap belongs to the fold,
+    // not to the page.
+    expect(find.byIcon(Icons.home_rounded), findsOneWidget);
+    expect(find.byIcon(Icons.search_rounded), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('the dock still drives tabs and transport',
       (WidgetTester tester) async {
     final _Dock dock = await pumpDock(tester);
