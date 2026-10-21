@@ -759,20 +759,38 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Search Results for "vision"'), findsOneWidget);
 
-      // 4. Open Series detail -> shows Languages, Season & Episode names, and Qualities
+      // 4. Open Series detail -> languages, season/episode rows with Play +
+      // Download actions; raw quality links stay hidden until Download.
       await tester.tap(find.text('VisionQuest - Season 1'));
       await tester.pumpAndSettle();
 
       expect(find.text('Hindi, English'), findsWidgets);
       expect(find.text('Season 1 • Episode 1'), findsOneWidget);
-      expect(find.text('480p HEVC'), findsOneWidget);
-      // Watch is available for normal episode links. Do not tap it here:
+      expect(find.text('480p HEVC'), findsNothing);
+      // Play is available for normal episode links. Do not tap it here:
       // the native media_kit player is intentionally not mounted in tests.
-      expect(find.text('Watch'), findsWidgets);
+      expect(find.text('Play'), findsWidgets);
 
-      // 5. Start quality download & open Movie Downloads page
+      // 5. Download opens the compact quality popup (no Play inside);
+      // picking a quality closes it and starts the download immediately.
       await tester.ensureVisible(find.text('Download').first);
       await tester.tap(find.text('Download').first);
+      await tester.pumpAndSettle();
+
+      expect(find.byType(Dialog), findsOneWidget);
+      expect(find.text('480p HEVC'), findsOneWidget);
+      expect(find.text('720p HEVC'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(Dialog),
+          matching: find.text('Play'),
+        ),
+        findsNothing,
+      );
+
+      await tester.tap(find.text('480p HEVC'));
+      await tester.pumpAndSettle();
+      expect(find.byType(Dialog), findsNothing);
       for (int i = 0; i < 40; i++) {
         await tester.runAsync(
           () => Future<void>.delayed(const Duration(milliseconds: 20)),

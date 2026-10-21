@@ -60,6 +60,7 @@ class SidifyRouteObserver extends NavigatorObserver {
     final bool covering = top is PopupRoute ||
         (top is PageRoute<dynamic> &&
             (routeName == SidifyRoutes.fullPlayer ||
+                routeName == 'sidify/movie-detail' ||
                 routeName.startsWith('sidify/movie-player-')));
     final bool over = _stack.length > 1;
     if (hidden.value != covering) hidden.value = covering;
@@ -642,7 +643,7 @@ class _TabPill extends StatelessWidget {
   final SidifyRouteObserver observer;
   final GlobalKey<NavigatorState> navigatorKey;
 
-  /// 0 = three cells side by side, 1 = Home alone as a round button.
+  /// 0 = all cells side by side, 1 = Home alone as a round button.
   final double fold;
   final double width;
   final double sheen;
@@ -651,6 +652,8 @@ class _TabPill extends StatelessWidget {
         (SidifyTab.home, 'Home', Icons.home_rounded),
         (SidifyTab.explore, 'Explore', Icons.explore_rounded),
         (SidifyTab.library, 'Library', shell.isMoviesMode ? Icons.video_library_rounded : Icons.library_music_rounded),
+        if (shell.isMoviesMode)
+          (SidifyTab.downloads, 'Downloads', Icons.download_rounded),
       ];
 
   /// The selected destination: a soft translucent pane, a shade brighter
@@ -682,12 +685,13 @@ class _TabPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final SidifyTokens t = context.sidify;
-    // The two outer cells hand their width to Home as the bar folds. Home is
-    // what is left over, so the three cells always add up to exactly the pill —
+    // The side cells hand their width to Home as the bar folds. Home is
+    // what is left over, so the cells always add up to exactly the pill —
     // no rounding drift, no overflow stripe down the middle of the dock.
+    final int count = _tabs.length;
     final double inner = width - _glassPad * 2;
-    final double sideW = math.max(inner / 3 * (1 - fold), 0.0);
-    final double homeW = inner - sideW * 2;
+    final double sideW = math.max(inner / count * (1 - fold), 0.0);
+    final double homeW = inner - sideW * (count - 1);
 
     return GlassBox(
       bar: true,
@@ -698,9 +702,8 @@ class _TabPill extends StatelessWidget {
         height: _cell,
         child: Row(
           children: <Widget>[
-            _cellWidget(t, 0, homeW),
-            _cellWidget(t, 1, sideW),
-            _cellWidget(t, 2, sideW),
+            for (int i = 0; i < count; i++)
+              _cellWidget(t, i, i == 0 ? homeW : sideW),
           ],
         ),
       ),

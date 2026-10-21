@@ -8,6 +8,7 @@ import '../../ui/shell/sidify_shell_controller.dart';
 import '../models/movie_models.dart';
 import '../services/eon_movies_service.dart';
 import 'movie_detail_page.dart';
+import 'movie_settings_page.dart';
 import 'movie_ui_widgets.dart';
 
 /// Movies & Series browse + search hub:
@@ -16,10 +17,18 @@ import 'movie_ui_widgets.dart';
 /// - Category chips (`Bollywood`, `Hollywood`, `South Indian`, `Web Series`, `Anime`)
 /// - Header shortcut to [MovieDownloadsPage] with live active badge.
 class MoviesHomePage extends StatefulWidget {
-  const MoviesHomePage({super.key, this.onBackToChooser, this.initialCategory = MovieCategory.recommended});
+  const MoviesHomePage({
+    super.key,
+    this.onBackToChooser,
+    this.initialCategory = MovieCategory.recommended,
+    this.autofocusSearch = false,
+    this.initialQuery = '',
+  });
 
   final VoidCallback? onBackToChooser;
   final MovieCategory initialCategory;
+  final bool autofocusSearch;
+  final String initialQuery;
 
   @override
   State<MoviesHomePage> createState() => _MoviesHomePageState();
@@ -43,6 +52,10 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
   void initState() {
     super.initState();
     _category = widget.initialCategory;
+    if (widget.initialQuery.trim().isNotEmpty) {
+      _activeQuery = widget.initialQuery.trim();
+      _searchController.text = _activeQuery;
+    }
     _fetchFirstPage();
   }
 
@@ -115,7 +128,7 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
     } catch (e) {
       if (!mounted || token != _requestToken) return;
       setState(() {
-        _error = 'Sorry yr, phir se try kr (ya internet connection check kr)';
+        _error = 'Check your connection and try again.';
         _loading = false;
       });
     }
@@ -210,6 +223,11 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
                           onPressed: () => context.read<SidifyShellController>().switchMode(),
                           icon: Icon(Icons.music_note_rounded, color: t.text),
                         ),
+                        IconButton(
+                          tooltip: 'Settings',
+                          onPressed: () => openMovieSettingsPage(context),
+                          icon: Icon(Icons.settings_rounded, color: t.text),
+                        ),
                         const MovieDownloadsActionButton(),
                       ],
                     ),
@@ -223,6 +241,7 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
                       ),
                       child: TextField(
                         controller: _searchController,
+                        autofocus: widget.autofocusSearch,
                         textInputAction: TextInputAction.search,
                         style: SidifyText.body(t.text),
                         onChanged: _onSearchChanged,
@@ -371,7 +390,10 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
                   delegate: SliverChildBuilderDelegate(
                     (BuildContext context, int index) {
                       final MoviePost post = _posts[index];
-                      return _MovieGridCard(post: post);
+                      return MovieGridCard(
+                        post: post,
+                        onTap: () => openMovieDetailPage(context, post),
+                      );
                     },
                     childCount: _posts.length,
                   ),
@@ -396,76 +418,6 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
             ],
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _MovieGridCard extends StatelessWidget {
-  const _MovieGridCard({required this.post});
-
-  final MoviePost post;
-
-  @override
-  Widget build(BuildContext context) {
-    final SidifyTokens t = context.sidify;
-    return GestureDetector(
-      onTap: () => openMovieDetailPage(context, post),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Expanded(
-            child: Stack(
-              fit: StackFit.expand,
-              children: <Widget>[
-                MoviePosterImage(
-                  imageUrl: post.imageUrl,
-                  fallbackUrl: post.fallbackImageUrl,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                if (post.badge.isNotEmpty || post.isSeries)
-                  Positioned(
-                    top: 6,
-                    left: 6,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 3,
-                      ),
-                      decoration: BoxDecoration(
-                        color: post.isSeries ? t.brand : t.scrim,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        post.isSeries ? 'SERIES' : 'MOVIE',
-                        style: const TextStyle(
-                          fontSize: 9.5,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            post.title,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: SidifyText.label(t.text),
-          ),
-          if (post.subtitle.isNotEmpty) ...<Widget>[
-            const SizedBox(height: 2),
-            Text(
-              post.subtitle,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: SidifyText.caption(t.text2),
-            ),
-          ],
-        ],
       ),
     );
   }

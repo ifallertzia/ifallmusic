@@ -2,8 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
-import '../../movies/models/movie_models.dart';
+import '../../movies/ui/movie_downloads_page.dart';
 import '../../movies/ui/movie_library_page.dart';
+import '../../movies/ui/movies_explore_page.dart';
 import '../../movies/ui/movies_home_page.dart';
 import '../../movies/ui/search_hub_page.dart';
 import '../explore/explore_page.dart';
@@ -29,15 +30,7 @@ class SidifyShell extends StatelessWidget {
       },
       child: Scaffold(
         body: shell.isMoviesMode
-            ? shell.tab == SidifyTab.library
-                ? const MovieLibraryPage()
-                : shell.tab == SidifyTab.together
-                    ? const _WatchTogetherSoonPage()
-                    : MoviesHomePage(
-                        initialCategory: shell.tab == SidifyTab.explore
-                            ? MovieCategory.bollywood
-                            : MovieCategory.recommended,
-                      )
+            ? _moviesBody(shell)
             : IndexedStack(
                 index: shell.index,
                 children: const <Widget>[
@@ -50,6 +43,29 @@ class SidifyShell extends StatelessWidget {
               ),
       ),
     );
+  }
+
+  Widget _moviesBody(SidifyShellController shell) {
+    switch (shell.tab) {
+      case SidifyTab.explore:
+        return const MoviesExplorePage();
+      case SidifyTab.search:
+        // Direct movie search: same catalog page with the search field
+        // focused, remounted per search request so the field regains focus.
+        return MoviesHomePage(
+          key: ValueKey<int>(shell.searchNonce),
+          autofocusSearch: true,
+          initialQuery: shell.searchQuery,
+        );
+      case SidifyTab.library:
+        return const MovieLibraryPage();
+      case SidifyTab.downloads:
+        return const MovieDownloadsPage(embedded: true);
+      case SidifyTab.together:
+        return const _WatchTogetherSoonPage();
+      case SidifyTab.home:
+        return const MoviesHomePage();
+    }
   }
 }
 

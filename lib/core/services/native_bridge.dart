@@ -156,6 +156,21 @@ class NativeBridge {
     }
   }
 
+  static Future<List<LocalVideoFile>> listLocalVideo() async {
+    if (kIsWeb || !Platform.isAndroid) return <LocalVideoFile>[];
+    try {
+      final Object? raw = await _channel.invokeMethod<Object>('listLocalVideo');
+      if (raw is! List) return <LocalVideoFile>[];
+      return raw
+          .whereType<Map>()
+          .map((Map item) => LocalVideoFile.fromMap(item.cast<Object?, Object?>()))
+          .toList();
+    } catch (e) {
+      debugPrint('[IfallMusic][MediaStore] listLocalVideo failed: $e');
+      return <LocalVideoFile>[];
+    }
+  }
+
   static Future<void> shareFile({
     required String path,
     required String mime,
@@ -314,6 +329,45 @@ class LocalAudioFile {
     if (value is num) return value.round();
     return int.tryParse(value?.toString() ?? '') ?? 0;
   }
+}
+
+class LocalVideoFile {
+  const LocalVideoFile({
+    required this.id,
+    required this.title,
+    required this.path,
+    required this.durationMs,
+    required this.size,
+    required this.dateAdded,
+    required this.mimeType,
+    required this.width,
+    required this.height,
+  });
+
+  final int id;
+  final String title;
+
+  /// Direct filesystem path (MediaStore `DATA`). The video player can only
+  /// open real paths, not `content://` URIs, so playback needs this value.
+  final String path;
+  final int durationMs;
+  final int size;
+  final int dateAdded;
+  final String mimeType;
+  final int width;
+  final int height;
+
+  factory LocalVideoFile.fromMap(Map<Object?, Object?> raw) => LocalVideoFile(
+        id: LocalAudioFile._int(raw['id']),
+        title: raw['title']?.toString() ?? '',
+        path: raw['path']?.toString() ?? '',
+        durationMs: LocalAudioFile._int(raw['durationMs']),
+        size: LocalAudioFile._int(raw['size']),
+        dateAdded: LocalAudioFile._int(raw['dateAdded']),
+        mimeType: raw['mimeType']?.toString() ?? '',
+        width: LocalAudioFile._int(raw['width']),
+        height: LocalAudioFile._int(raw['height']),
+      );
 }
 
 class BootSnapshot {
