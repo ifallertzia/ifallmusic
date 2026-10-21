@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Generate all app-branding images from the latest uploaded IfallMusic logo.
+"""Generate all app-branding images from the app's logo.
 
-The committed upload is the single source of truth. Its central Spotify + YouTube
-Music mark is cropped with generous padding, then exported to the Android, Apple,
-web, desktop and in-app slots. Run after replacing the uploaded source image:
+`assets/branding/new_logo.png` is the single source of truth — the silver "S"
+that holds a music note and a film frame. It is already a finished rounded-square
+app icon, so it is squared, trimmed of its outer canvas margin and exported to
+the Android, Apple, web, desktop and in-app slots. Run after replacing the source:
 
     python3 scripts/generate_logo_assets.py
 
@@ -17,7 +18,7 @@ from pathlib import Path
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parent.parent
-SOURCE = ROOT / "file_000000006f348208a9e754d805017c9c.png"
+SOURCE = ROOT / "assets/branding/new_logo.png"
 ANDROID_RES = ROOT / "android/app/src/main/res"
 
 ANDROID_MIPMAP = {"mdpi": 48, "hdpi": 72, "xhdpi": 96,
@@ -40,6 +41,28 @@ WEB_ICONS = {"Icon-192.png": 192, "Icon-512.png": 512,
              "Icon-maskable-192.png": 192, "Icon-maskable-512.png": 512}
 
 
+
+def _content_bbox(image: Image.Image, background: tuple[int, int, int],
+                  tolerance: int = 12) -> tuple[int, int, int, int]:
+    """Bounding box of everything that is visibly not the flat canvas."""
+    width, height = image.size
+    pixels = image.load()
+    left, top, right, bottom = width, height, 0, 0
+    for y in range(0, height, 2):
+        for x in range(0, width, 2):
+            r, g, b = pixels[x, y]
+            if (abs(r - background[0]) + abs(g - background[1]) +
+                    abs(b - background[2])) <= tolerance:
+                continue
+            left = min(left, x)
+            top = min(top, y)
+            right = max(right, x + 1)
+            bottom = max(bottom, y + 1)
+    if right <= left or bottom <= top:
+        return (0, 0, width, height)
+    return (left, top, right, bottom)
+
+
 def save(image: Image.Image, path: Path, size: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     image.resize((size, size), Image.Resampling.LANCZOS).save(
@@ -56,13 +79,23 @@ def main() -> None:
     if width < 500 or height < 500:
         raise SystemExit(f"Uploaded logo must be at least 500x500: {uploaded.size}")
 
-    # The uploaded graphic is a black square. Keep only the combined Spotify +
-    # YouTube Music symbol and a small part of its black surround, so the mark
-    # reads clearly at launcher size and does not shrink behind empty margins.
-    side = int(min(width, height) * 0.585)
-    center_x, center_y = width // 2, height // 2
+    # The source is a finished rounded-square icon on a near-black canvas. Trim
+    # that canvas down to the icon (plus a hair of breathing room) so the mark
+    # does not shrink behind empty margins at launcher size, then square it.
+    canvas = uploaded.getpixel((1, 1))
+    bbox = _content_bbox(uploaded, canvas, tolerance=12)
+    pad = int(min(width, height) * 0.02)
+    left = max(0, bbox[0] - pad)
+    top = max(0, bbox[1] - pad)
+    right = min(width, bbox[2] + pad)
+    bottom = min(height, bbox[3] + pad)
+    side = max(right - left, bottom - top)
+    center_x, center_y = (left + right) // 2, (top + bottom) // 2
     left, top = center_x - side // 2, center_y - side // 2
-    mark = uploaded.crop((left, top, left + side, top + side)).convert("RGBA")
+
+    squared = Image.new("RGB", (side, side), canvas)
+    squared.paste(uploaded.crop((left, top, left + side, top + side)), (0, 0))
+    mark = squared.convert("RGBA")
     mark = mark.resize((1024, 1024), Image.Resampling.LANCZOS)
 
     # Both legacy asset names are still referenced throughout the Flutter UI;

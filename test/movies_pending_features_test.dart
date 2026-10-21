@@ -191,6 +191,31 @@ void main() {
       );
       expect(movieQualityRank(_quality('x', '720p HEVC')), 720);
     });
+
+    test('playback starts on the highest stream, not the lowest', () {
+      final List<MovieQualityLink> qualities = <MovieQualityLink>[
+        _quality('sd', '480p'),
+        _quality('hd', '720p'),
+        _quality('fhd', '1080p'),
+        _quality('pack', '1080p', zip: true),
+        _quality('ep', '1080p', zipEntry: 'S01E01.mkv'),
+        _quality('unknown', 'WEB-DL'),
+      ];
+      expect(highestPlayableQuality(qualities)?.id, 'fhd');
+      expect(
+        playableQualitiesBestFirst(qualities)
+            .map((MovieQualityLink q) => q.id)
+            .toList(),
+        <String>['fhd', 'hd', 'sd', 'unknown'],
+        reason: 'best first, ZIP packs skipped, unlabelled last',
+      );
+      expect(
+        highestPlayableQuality(
+          <MovieQualityLink>[_quality('only', '480p', zip: true)],
+        ),
+        isNull,
+      );
+    });
   });
 
   group('Movie library persistence', () {
@@ -287,8 +312,10 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Settings'), findsWidgets);
     expect(find.text('Theme'), findsOneWidget);
-    expect(find.text('Accent colour'), findsOneWidget);
     expect(find.text('Check for update'), findsOneWidget);
+    // The accent-colour picker lived only here and never actually recoloured
+    // the app; it is gone rather than left as a dead control.
+    expect(find.text('Accent colour'), findsNothing);
     shell.dispose();
   });
 

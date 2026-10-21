@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/theme/sidify_theme.dart';
-import '../../ui/shell/sidify_shell_controller.dart';
 import '../models/movie_models.dart';
 import '../services/movie_library_service.dart';
 import 'local_videos_page.dart';
@@ -18,7 +17,6 @@ class MovieLibraryPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final SidifyTokens t = context.sidify;
     final MovieLibraryService library = context.watch<MovieLibraryService>();
-    final SidifyShellController shell = context.read<SidifyShellController>();
     return SafeArea(
       bottom: false,
       child: ListView(
@@ -26,11 +24,8 @@ class MovieLibraryPage extends StatelessWidget {
         children: <Widget>[
           Row(children: <Widget>[
             Expanded(child: Text('Library', style: SidifyText.display(t.text))),
-            IconButton(
-              tooltip: 'Switch to music',
-              onPressed: shell.switchMode,
-              icon: Icon(Icons.music_note_rounded, color: t.text),
-            ),
+            // Music is one tap away in the floating bar (the music note),
+            // so the movies headers keep only their own actions.
             IconButton(
               tooltip: 'Settings',
               onPressed: () => openMovieSettingsPage(context),

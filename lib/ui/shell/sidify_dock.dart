@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -49,6 +50,16 @@ class SidifyRouteObserver extends NavigatorObserver {
     _sync();
   }
 
+  /// Routes the dock must never draw on: the full music player, a movie
+  /// detail page and the movie/series player.
+  static bool _coversDock(Route<dynamic> route) {
+    if (route is! PageRoute<dynamic>) return false;
+    final String name = route.settings.name ?? '';
+    return name == SidifyRoutes.fullPlayer ||
+        name == 'sidify/movie-detail' ||
+        name.startsWith('sidify/movie-player-');
+  }
+
   void _sync() {
     if (_stack.isEmpty) {
       if (hidden.value) hidden.value = false;
@@ -56,12 +67,12 @@ class SidifyRouteObserver extends NavigatorObserver {
       return;
     }
     final Route<dynamic> top = _stack.last;
-    final String routeName = top.settings.name ?? '';
-    final bool covering = top is PopupRoute ||
-        (top is PageRoute<dynamic> &&
-            (routeName == SidifyRoutes.fullPlayer ||
-                routeName == 'sidify/movie-detail' ||
-                routeName.startsWith('sidify/movie-player-')));
+    // The movie player pushes a second, *unnamed* route for fullscreen
+    // (media_kit's own PageRouteBuilder). Looking only at the top route made
+    // the dock believe it was on a plain page again and pop back over the
+    // video — the menu bar that "came back" on the player. A covering route
+    // anywhere in the stack keeps the dock away until it is gone.
+    final bool covering = _stack.any(_coversDock) || top is PopupRoute;
     final bool over = _stack.length > 1;
     if (hidden.value != covering) hidden.value = covering;
     if (pushed.value != over) pushed.value = over;
@@ -70,7 +81,7 @@ class SidifyRouteObserver extends NavigatorObserver {
 
 /// Scroll-driven chrome: scrolling down folds the tab bar into a single row —
 /// Home staying as a small round button, the mini player sliding in beside it,
-/// Search keeping its seat on the right. The smallest upward nudge unfolds it
+/// and the round button keeping its seat on the right. The smallest upward nudge unfolds it
 /// back through the same path, so the pieces look like they are coming out of
 /// each other rather than being swapped for different widgets.
 class SidifyDockScroll {
@@ -786,8 +797,13 @@ class _TabPill extends StatelessWidget {
   }
 }
 
-/// The round glass Search button. It sits at the right end of the row in both
-/// states, so folding the bar costs it nothing but a seat change.
+/// The round glass button at the right end of the row.
+///
+/// In Music it is Search. In Movies the search entry lives in the movies
+/// header itself, so the same seat becomes the way back to the music UI — a
+/// music note that switches the shell to Music and opens Sidify. It sits at
+/// the right end of the row in both states, so folding the bar costs it
+/// nothing but a seat change.
 class _SearchButton extends StatelessWidget {
   const _SearchButton({
     required this.shell,
@@ -811,30 +827,42 @@ class _SearchButton extends StatelessWidget {
     shell.goSearch();
   }
 
+  void _goMusic() {
+    if (observer.pushed.value) {
+      navigatorKey.currentState?.popUntil((Route<dynamic> r) => r.isFirst);
+    }
+    if (SidifyDockScroll.barHidden.value) {
+      SidifyDockScroll.barHidden.value = false;
+    }
+    // Movies has no Search button of its own: tapping the note hands the
+    // shell back to Music, which is the Sidify UI.
+    unawaited(shell.switchMode());
+  }
+
   @override
   Widget build(BuildContext context) {
     final SidifyTokens t = context.sidify;
+    final bool movies = shell.isMoviesMode;
+    final bool selected = !movies && shell.tab == SidifyTab.search;
     return GlassBox(
       bar: true,
       radius: 999,
       sheen: sheen,
       padding: const EdgeInsets.all(_glassPad),
       child: GestureDetector(
-        onTap: _goSearch,
+        onTap: movies ? _goMusic : _goSearch,
         behavior: HitTestBehavior.opaque,
         child: Container(
           width: _cell,
           height: _cell,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            gradient: shell.tab == SidifyTab.search ? _TabPill._selection(t) : null,
+            gradient: selected ? _TabPill._selection(t) : null,
           ),
           child: Icon(
-            Icons.search_rounded,
+            movies ? Icons.music_note_rounded : Icons.search_rounded,
             size: 22,
-            color: shell.tab == SidifyTab.search
-                ? t.text
-                : t.text.withValues(alpha: 0.72),
+            color: selected ? t.text : t.text.withValues(alpha: 0.72),
           ),
         ),
       ),

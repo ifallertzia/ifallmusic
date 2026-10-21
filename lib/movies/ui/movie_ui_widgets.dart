@@ -7,8 +7,11 @@ import '../../core/theme/sidify_theme.dart';
 import '../models/movie_models.dart';
 import '../services/eon_movies_service.dart';
 import '../services/movie_download_service.dart';
+import '../services/movie_quality_order.dart';
 import 'movie_downloads_page.dart';
 import 'movie_player_page.dart';
+
+export '../services/movie_quality_order.dart';
 
 /// Resilient network poster/backdrop widget with automatic secondary URL
 /// failover and zero-network placeholder when [imageUrl] is empty.
@@ -180,33 +183,6 @@ class MovieDownloadsActionButton extends StatelessWidget {
   }
 }
 
-/// Numeric resolution rank (e.g. `720p` -> 720); unknown labels sort last.
-int movieQualityRank(MovieQualityLink quality) {
-  return int.tryParse(
-        RegExp(r'\d+').firstMatch(quality.resolution)?.group(0) ?? '',
-      ) ??
-      99999;
-}
-
-/// Deduplicated subset of [qualities] the online player can attempt.
-List<MovieQualityLink> playableQualitiesOf(List<MovieQualityLink> qualities) {
-  final Map<String, MovieQualityLink> byId = <String, MovieQualityLink>{};
-  for (final MovieQualityLink item in qualities) {
-    if (EonMoviesService.canAttemptOnlinePlayback(item)) {
-      byId.putIfAbsent(item.id, () => item);
-    }
-  }
-  return List<MovieQualityLink>.unmodifiable(byId.values);
-}
-
-/// Lowest streamable quality, used as the no-prompt Play default.
-MovieQualityLink? lowestPlayableQuality(List<MovieQualityLink> qualities) {
-  final List<MovieQualityLink> options = playableQualitiesOf(qualities).toList()
-    ..sort((MovieQualityLink a, MovieQualityLink b) =>
-        movieQualityRank(a).compareTo(movieQualityRank(b)));
-  return options.isEmpty ? null : options.first;
-}
-
 /// Poster grid card shared by Movies Home, Explore and related shelves.
 class MovieGridCard extends StatelessWidget {
   const MovieGridCard({super.key, required this.post, required this.onTap});
@@ -304,7 +280,7 @@ class MovieQualityDownloadTile extends StatelessWidget {
   }
 
   MovieQualityLink get _defaultPlayQuality =>
-      lowestPlayableQuality(_watchQualities) ?? quality;
+      highestPlayableQuality(_watchQualities) ?? quality;
 
   @override
   Widget build(BuildContext context) {
@@ -411,6 +387,27 @@ class MovieQualityDownloadTile extends StatelessWidget {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: SidifyText.caption(t.brand),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                    if (!_canWatch && !quality.isZipPack) ...<Widget>[
+                      const SizedBox(height: 5),
+                      Row(
+                        children: <Widget>[
+                          Icon(
+                            Icons.download_for_offline_rounded,
+                            size: 14,
+                            color: t.text2,
+                          ),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              'Cannot play online but you can still download '
+                              'it and play offline.',
+                              maxLines: 2,
+                              style: SidifyText.caption(t.text2),
                             ),
                           ),
                         ],

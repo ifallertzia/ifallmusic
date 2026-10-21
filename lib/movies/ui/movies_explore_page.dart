@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/theme/sidify_theme.dart';
-import '../../ui/shell/sidify_shell_controller.dart';
 import '../models/movie_models.dart';
 import '../services/eon_movies_service.dart';
 import '../services/movie_catalog_filters.dart';
@@ -233,13 +232,6 @@ class _MoviesExplorePageState extends State<MoviesExplorePage> {
                             overflow: TextOverflow.ellipsis,
                             style: SidifyText.headline(t.text),
                           ),
-                        ),
-                        IconButton(
-                          tooltip: 'Switch to music',
-                          onPressed: () => context
-                              .read<SidifyShellController>()
-                              .switchMode(),
-                          icon: Icon(Icons.music_note_rounded, color: t.text),
                         ),
                         IconButton(
                           tooltip: 'Settings',

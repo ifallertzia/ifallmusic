@@ -19,14 +19,15 @@ class SidifyBranding {
 
   static const double logoWidth = 1024;
   static const double logoHeight = 1024;
-  static const String logoFormat = 'PNG (uploaded Spotify + YouTube Music mark)';
+  static const String logoFormat = 'PNG (silver S with a music note and a film frame)';
 
-  /// The combined Spotify + YouTube Music mark cropped from the latest upload.
+  /// The app mark from `assets/branding/new_logo.png`: the silver "S" holding
+  /// a music note and a film frame — one symbol for both halves of the app.
   /// It is used at larger sizes, including the welcome screen and About card.
   static const String logoAsset = 'assets/images/sidify_logo.png';
 
-  /// The uploaded combined mark, used in the home header, empty states and
-  /// the liked-songs sleeve fallback.
+  /// The same mark, used in the home header, empty states and the liked-songs
+  /// sleeve fallback.
   static const String markAsset = 'assets/images/sidify_mark.png';
 
   /// Kept for the artwork fallback in the engine: the mark, never a letter.
