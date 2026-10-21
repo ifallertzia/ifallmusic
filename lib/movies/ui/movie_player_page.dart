@@ -287,7 +287,6 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
       seekOnDoubleTapBackwardDuration: const Duration(seconds: 10),
       seekOnDoubleTapForwardDuration: const Duration(seconds: 10),
       visibleOnMount: true,
-      controlsHoverDuration: const Duration(seconds: 3),
       backdropColor: Colors.black.withValues(alpha: 0.45),
       primaryButtonBar: <Widget>[
         const Spacer(flex: 2),
