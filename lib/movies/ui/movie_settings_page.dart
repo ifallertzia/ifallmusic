@@ -45,24 +45,36 @@ class MovieSettingsPage extends StatelessWidget {
             header: 'Appearance',
             footer: 'Theme applies across Music and Movies.',
             children: <Widget>[
-              SidifyGroupRow(
-                icon: Icons.dark_mode_rounded,
-                title: 'Theme',
-                trailing: SidifyChips(
-                  small: true,
-                  value: settings.themeModeRaw,
-                  options: const <(String, String)>[
-                    ('dark', 'Dark'),
-                    ('light', 'Light'),
-                    ('system', 'Auto'),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Row(
+                      children: <Widget>[
+                        Icon(Icons.dark_mode_rounded, size: 19, color: t.text2),
+                        const SizedBox(width: 10),
+                        Text('Theme', style: SidifyText.label(t.text)),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    SidifyChips(
+                      small: true,
+                      value: settings.themeModeRaw,
+                      options: const <(String, String)>[
+                        ('dark', 'Dark'),
+                        ('light', 'Light'),
+                        ('system', 'Auto'),
+                      ],
+                      onChanged: (String v) => settings.setThemeMode(
+                        v == 'light'
+                            ? ThemeMode.light
+                            : v == 'system'
+                                ? ThemeMode.system
+                                : ThemeMode.dark,
+                      ),
+                    ),
                   ],
-                  onChanged: (String v) => settings.setThemeMode(
-                    v == 'light'
-                        ? ThemeMode.light
-                        : v == 'system'
-                            ? ThemeMode.system
-                            : ThemeMode.dark,
-                  ),
                 ),
               ),
               Padding(
