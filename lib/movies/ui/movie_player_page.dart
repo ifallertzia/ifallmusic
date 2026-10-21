@@ -135,13 +135,6 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
   String _audioSelectionId = 'auto';
   String _subtitleSelectionId = 'auto';
 
-  MovieStreamCandidate? get _currentCandidate {
-    if (_candidateIndex < 0 || _candidateIndex >= _candidates.length) {
-      return null;
-    }
-    return _candidates[_candidateIndex];
-  }
-
   String get _displayTitle {
     final MovieDownloadItem? item = widget.localItem;
     if (item != null) return item.movieTitle;
