@@ -199,10 +199,19 @@ class MovieQualityDownloadTile extends StatelessWidget {
         byId.putIfAbsent(item.id, () => item);
       }
     }
-    if (_canWatch) {
-      byId.putIfAbsent(quality.id, () => quality);
-    }
+    if (_canWatch) byId.putIfAbsent(quality.id, () => quality);
     return List<MovieQualityLink>.unmodifiable(byId.values);
+  }
+
+  MovieQualityLink get _defaultPlayQuality {
+    final List<MovieQualityLink> options = _watchQualities.toList();
+    options.sort((MovieQualityLink a, MovieQualityLink b) {
+      int rank(MovieQualityLink item) => int.tryParse(
+            RegExp(r'\d+').firstMatch(item.resolution)?.group(0) ?? '',
+          ) ?? 99999;
+      return rank(a).compareTo(rank(b));
+    });
+    return options.isEmpty ? quality : options.first;
   }
 
   @override
@@ -400,7 +409,7 @@ class MovieQualityDownloadTile extends StatelessWidget {
         onTap: () => openOnlineMoviePlayer(
           context,
           detail: detail,
-          quality: quality,
+          quality: _defaultPlayQuality,
           allQualities: _watchQualities,
         ),
         child: const Padding(

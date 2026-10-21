@@ -56,9 +56,11 @@ class SidifyRouteObserver extends NavigatorObserver {
       return;
     }
     final Route<dynamic> top = _stack.last;
+    final String routeName = top.settings.name ?? '';
     final bool covering = top is PopupRoute ||
         (top is PageRoute<dynamic> &&
-            top.settings.name == SidifyRoutes.fullPlayer);
+            (routeName == SidifyRoutes.fullPlayer ||
+                routeName.startsWith('sidify/movie-player-')));
     final bool over = _stack.length > 1;
     if (hidden.value != covering) hidden.value = covering;
     if (pushed.value != over) pushed.value = over;
@@ -161,7 +163,7 @@ class SidifyDock extends StatelessWidget {
     final PlaybackService playback = context.watch<PlaybackService>();
     final SidifyShellController shell = context.watch<SidifyShellController>();
     final double safe = MediaQuery.paddingOf(context).bottom;
-    final bool hasTrack = playback.hasTrack;
+    final bool hasTrack = playback.hasTrack && !shell.isMoviesMode;
 
     return ValueListenableBuilder<bool>(
       valueListenable: observer.hidden,
@@ -645,12 +647,11 @@ class _TabPill extends StatelessWidget {
   final double width;
   final double sheen;
 
-  static const List<(SidifyTab, String, IconData)> _tabs =
-      <(SidifyTab, String, IconData)>[
-    (SidifyTab.home, 'Home', Icons.home_rounded),
-    (SidifyTab.explore, 'Explore', Icons.explore_rounded),
-    (SidifyTab.library, 'Library', Icons.library_music_rounded),
-  ];
+  List<(SidifyTab, String, IconData)> get _tabs => <(SidifyTab, String, IconData)>[
+        (SidifyTab.home, 'Home', Icons.home_rounded),
+        (SidifyTab.explore, 'Explore', Icons.explore_rounded),
+        (SidifyTab.library, 'Library', shell.isMoviesMode ? Icons.video_library_rounded : Icons.library_music_rounded),
+      ];
 
   /// The selected destination: a soft translucent pane, a shade brighter
   /// along the top so it reads as glass resting on glass. Legible for the icon

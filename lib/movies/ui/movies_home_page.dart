@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/theme/sidify_theme.dart';
+import '../../ui/shell/sidify_shell_controller.dart';
 import '../models/movie_models.dart';
 import '../services/eon_movies_service.dart';
 import 'movie_detail_page.dart';
@@ -15,9 +16,10 @@ import 'movie_ui_widgets.dart';
 /// - Category chips (`Bollywood`, `Hollywood`, `South Indian`, `Web Series`, `Anime`)
 /// - Header shortcut to [MovieDownloadsPage] with live active badge.
 class MoviesHomePage extends StatefulWidget {
-  const MoviesHomePage({super.key, this.onBackToChooser});
+  const MoviesHomePage({super.key, this.onBackToChooser, this.initialCategory = MovieCategory.recommended});
 
   final VoidCallback? onBackToChooser;
+  final MovieCategory initialCategory;
 
   @override
   State<MoviesHomePage> createState() => _MoviesHomePageState();
@@ -27,7 +29,7 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
   final TextEditingController _searchController = TextEditingController();
   Timer? _debounce;
 
-  MovieCategory _category = MovieCategory.recommended;
+  late MovieCategory _category;
   String _activeQuery = '';
   int _page = 1;
   bool _hasMore = true;
@@ -40,7 +42,18 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
   @override
   void initState() {
     super.initState();
+    _category = widget.initialCategory;
     _fetchFirstPage();
+  }
+
+  @override
+  void didUpdateWidget(covariant MoviesHomePage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialCategory != widget.initialCategory &&
+        _activeQuery.isEmpty) {
+      _category = widget.initialCategory;
+      _fetchFirstPage();
+    }
   }
 
   @override
@@ -102,7 +115,7 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
     } catch (e) {
       if (!mounted || token != _requestToken) return;
       setState(() {
-        _error = e.toString();
+        _error = 'Sorry yr, phir se try kr (ya internet connection check kr)';
         _loading = false;
       });
     }
@@ -192,6 +205,11 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
                           ),
                         ),
                         const SizedBox(width: 8),
+                        IconButton(
+                          tooltip: 'Switch to music',
+                          onPressed: () => context.read<SidifyShellController>().switchMode(),
+                          icon: Icon(Icons.music_note_rounded, color: t.text),
+                        ),
                         const MovieDownloadsActionButton(),
                       ],
                     ),

@@ -313,6 +313,15 @@ class _HomePageState extends State<HomePage> {
                 ),
                 const SizedBox(width: 8),
                 SidifyIconButton(
+                  icon: Icons.movie_creation_outlined,
+                  label: 'Switch to movies',
+                  tone: 'fill',
+                  size: 36,
+                  iconSize: 18,
+                  onTap: () => shell.switchMode(),
+                ),
+                const SizedBox(width: 8),
+                SidifyIconButton(
                   icon: Icons.settings_rounded,
                   label: 'Settings',
                   tone: 'fill',
