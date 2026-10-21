@@ -463,10 +463,15 @@ void main() {
         (WidgetTester tester) async {
       SharedPreferences.setMockInitialValues(<String, Object>{});
       final SharedPreferences prefs = await SharedPreferences.getInstance();
-      final Directory tempDir =
-          await Directory.systemTemp.createTemp('movie_ui_test_');
+      final Directory tempDir = await tester.runAsync(
+        () => Directory.systemTemp.createTemp('movie_ui_test_'),
+      ) as Directory;
       addTearDown(() async {
-        if (tempDir.existsSync()) await tempDir.delete(recursive: true);
+        await tester.runAsync(() async {
+          if (tempDir.existsSync()) {
+            await tempDir.delete(recursive: true);
+          }
+        });
       });
 
       final _FakeMovieTransport transport = _FakeMovieTransport();
@@ -615,10 +620,22 @@ void main() {
       // 5. Start quality download & open Movie Downloads page
       await tester.ensureVisible(find.text('Download').first);
       await tester.tap(find.text('Download').first);
-      await tester.pumpAndSettle();
+      for (int i = 0; i < 40; i++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
+        );
+        await tester.pump();
+        if (movieDownloads.items.isNotEmpty &&
+            movieDownloads.items.first.status ==
+                MovieDownloadStatus.completed) {
+          break;
+        }
+      }
+      await tester.pump(const Duration(milliseconds: 300));
 
       await tester.tap(find.text('Downloads').first);
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
 
       expect(find.text('Movie Downloads'), findsOneWidget);
       expect(find.text('Play Video'), findsOneWidget);
