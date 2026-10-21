@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/theme/sidify_theme.dart';
-import '../../ui/shell/sidify_shell_controller.dart';
 import '../models/movie_models.dart';
 import '../services/eon_movies_service.dart';
 import 'movie_detail_page.dart';
@@ -217,12 +216,10 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
                             style: SidifyText.headline(t.text),
                           ),
                         ),
-                        const SizedBox(width: 8),
-                        IconButton(
-                          tooltip: 'Switch to music',
-                          onPressed: () => context.read<SidifyShellController>().switchMode(),
-                          icon: Icon(Icons.music_note_rounded, color: t.text),
-                        ),
+                        const SizedBox(width: 4),
+                        // The way back to Music is the round music button in
+                        // the floating bar (it replaced Search there), so the
+                        // header keeps only this section's own actions.
                         IconButton(
                           tooltip: 'Settings',
                           onPressed: () => openMovieSettingsPage(context),

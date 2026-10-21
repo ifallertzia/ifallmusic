@@ -13,6 +13,7 @@ import '../../core/theme/sidify_theme.dart';
 import '../models/movie_models.dart';
 import '../services/eon_movies_service.dart';
 import '../services/movie_download_service.dart';
+import '../services/movie_quality_order.dart';
 
 /// Opens the in-app streaming player for a movie or per-episode quality.
 ///
@@ -104,13 +105,35 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
   MovieDownloadService? _downloadService;
   PlaybackService? _musicPlayback;
 
+  /// Every streamable quality for this title/episode, best first. The player
+  /// starts on [first] and walks down the list when a quality's mirrors die.
   List<MovieQualityLink> _availableQualities = const <MovieQualityLink>[];
   MovieQualityLink? _currentQuality;
+
+  /// Qualities already attempted and given up on (mirrors exhausted).
+  final Set<String> _failedQualities = <String>{};
+
   List<MovieStreamCandidate> _candidates = const <MovieStreamCandidate>[];
   final Set<int> _failedCandidates = <int>{};
   int _candidateIndex = -1;
 
   Timer? _startupTimer;
+
+  /// Watches a healthy stream after mpv reports an error (a far seek on a
+  /// network mirror often does): only a real stall — no position movement at
+  /// all — is a failure. Without this, a perfectly playing video used to be
+  /// torn down and replaced by "Couldn't start playback".
+  Timer? _stallTimer;
+  Duration _lastPositionValue = Duration.zero;
+  DateTime _lastPositionAt = DateTime.now();
+
+  /// Seek bookkeeping: the target still being waited on, which mirrors have
+  /// already refused to seek, and whether the "this stream cannot seek" note
+  /// has been shown.
+  Timer? _seekWatchdog;
+  Duration? _pendingSeekTarget;
+  final Set<int> _seekFailedCandidates = <int>{};
+  bool _seekLimitNoticed = false;
   int _generation = 0;
   bool _providersReady = false;
   bool _disposed = false;
@@ -168,24 +191,41 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
     return parts.where((String e) => e.trim().isNotEmpty).join(' • ');
   }
 
+  /// Season/episode only — never the resolution while the player is still
+  /// hunting for a stream that works.
+  String get _loadingSubtitle {
+    if (widget.isLocal) return _displaySubtitle;
+    final MovieDetail? detail = widget.detail;
+    final MovieQualityLink? quality = _currentQuality;
+    if (detail == null || quality == null) return '';
+    final String season = quality.seasonLabel.isNotEmpty
+        ? quality.seasonLabel
+        : detail.defaultSeasonLabel;
+    return <String>[
+      if (season.isNotEmpty) season,
+      if (quality.episodeLabel.isNotEmpty) quality.episodeLabel,
+    ].join(' • ');
+  }
+
   @override
   void initState() {
     super.initState();
     _availableQualities = _buildAvailableQualities();
-    _currentQuality = widget.initialQuality;
+    // Playback always starts on the best stream on offer — not on whatever
+    // row was tapped. The pick drops one step at a time if it is dead.
+    _currentQuality = _availableQualities.isNotEmpty
+        ? _availableQualities.first
+        : widget.initialQuality;
     _player = Player();
     _controller = VideoController(_player);
     _controlsTheme = _buildControlsTheme();
     _listenToPlayer();
-    final String qualityLabel = widget.initialQuality?.displayQuality ?? '';
-    _setStatus(
-      widget.isLocal
-          ? 'Opening video…'
-          : qualityLabel.isNotEmpty
-              ? 'Finding streams for $qualityLabel…'
-              : 'Finding streams…',
-    );
+    _setStatus(widget.isLocal ? 'Opening video…' : _waitingStatus);
   }
+
+  /// What the player says while it is still finding a stream. Deliberately
+  /// quiet about the resolution: the fallback is meant to be invisible.
+  static const String _waitingStatus = 'Please wait a bit…';
 
   @override
   void didChangeDependencies() {
@@ -210,6 +250,8 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
     _disposed = true;
     _generation++;
     _startupTimer?.cancel();
+    _stallTimer?.cancel();
+    _seekWatchdog?.cancel();
     for (final StreamSubscription<dynamic> sub in _subscriptions) {
       unawaited(sub.cancel());
     }
@@ -222,20 +264,12 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
 
   List<MovieQualityLink> _buildAvailableQualities() {
     if (widget.isLocal) return const <MovieQualityLink>[];
-    final MovieQualityLink initial = widget.initialQuality!;
-    final List<MovieQualityLink> source = widget.qualities.isNotEmpty
-        ? widget.qualities
-        : <MovieQualityLink>[initial];
-    final Map<String, MovieQualityLink> byId = <String, MovieQualityLink>{};
-    for (final MovieQualityLink quality in source) {
-      if (EonMoviesService.canAttemptOnlinePlayback(quality)) {
-        byId.putIfAbsent(quality.id, () => quality);
-      }
-    }
-    if (EonMoviesService.canAttemptOnlinePlayback(initial)) {
-      byId.putIfAbsent(initial.id, () => initial);
-    }
-    return List<MovieQualityLink>.unmodifiable(byId.values);
+    final MovieQualityLink? initial = widget.initialQuality;
+    final List<MovieQualityLink> source = <MovieQualityLink>[
+      ...widget.qualities,
+      if (initial != null) initial,
+    ];
+    return playableQualitiesBestFirst(source);
   }
 
   MaterialVideoControlsThemeData _buildControlsTheme() {
@@ -253,7 +287,6 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
       seekOnDoubleTapBackwardDuration: const Duration(seconds: 10),
       seekOnDoubleTapForwardDuration: const Duration(seconds: 10),
       visibleOnMount: true,
-      controlsHoverDuration: const Duration(seconds: 3),
       backdropColor: Colors.black.withValues(alpha: 0.45),
       primaryButtonBar: <Widget>[
         const Spacer(flex: 2),
@@ -317,22 +350,62 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
             onPressed: () => unawaited(_downloadCurrentQuality()),
           ),
       ],
+      // The seek bar is ours, not media_kit's: it is mounted above the button
+      // row (clear of Android's bottom gesture strip), it seeks on a plain tap
+      // to where the finger landed, and a drag follows the finger live. The
+      // built-in bar only moved on a completed drag — a tap jumped at a stale
+      // value — which is why tapping or dragging it never landed on the frame
+      // people aimed at.
       bottomButtonBar: <Widget>[
-        const MaterialPositionIndicator(
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
+        Expanded(
+          child: SizedBox(
+            height: 80,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                SizedBox(
+                  height: 32,
+                  child: _MovieSeekBar(
+                    player: _player,
+                    onSeekStart: _handleSeekBarStart,
+                    onSeek: _handleSeekBarSeek,
+                    onSeekEnd: _handleSeekBarEnd,
+                  ),
+                ),
+                SizedBox(
+                  height: 48,
+                  child: Row(
+                    children: <Widget>[
+                      const MaterialPositionIndicator(
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const Spacer(),
+                      MaterialCustomButton(
+                        icon: const Icon(Icons.tune_rounded),
+                        onPressed: _showSettingsSheet,
+                      ),
+                      const MaterialFullscreenButton(),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
-        const Spacer(),
-        MaterialCustomButton(
-          icon: const Icon(Icons.tune_rounded),
-          onPressed: _showSettingsSheet,
-        ),
-        const MaterialFullscreenButton(),
       ],
       buttonBarButtonColor: Colors.white,
+      displaySeekBar: false,
+      buttonBarHeight: 80,
+      bottomButtonBarMargin:
+          const EdgeInsets.only(left: 12, right: 4, bottom: 16),
+      topButtonBarMargin: const EdgeInsets.only(left: 8, right: 8, top: 4),
+      controlsHoverDuration: const Duration(seconds: 5),
+      // The transient double-tap seek indicator keeps the same red as the
+      // player's own bar.
       seekBarHeight: 3,
       seekBarContainerHeight: 30,
       seekBarThumbSize: 12,
@@ -388,7 +461,7 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
       _player.stream.buffering.listen((bool buffering) {
         if (_disposed) return;
         if (_buffering.value != buffering) _buffering.value = buffering;
-        if (_ready && _errorMessage == null) {
+        if (_ready && !_loading && _errorMessage == null) {
           _setStatus(buffering ? 'Buffering…' : _healthyStatusText());
         }
       }),
@@ -442,6 +515,7 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
     _candidates = const <MovieStreamCandidate>[];
     _candidateIndex = -1;
     _failedCandidates.clear();
+    _seekFailedCandidates.clear();
     _desiredPlaying = true;
     _prepareForOpen(start);
     _setStatus('Opening downloaded video…');
@@ -470,9 +544,15 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
     }
   }
 
+  /// Resolves [quality] and opens its first mirror.
+  ///
+  /// [autoFallback] marks a step in the automatic walk down the quality list,
+  /// where a failure is expected to continue further down instead of showing
+  /// a message. The user never sees which resolution is being attempted.
   Future<void> _resolveAndOpenQuality(
     MovieQualityLink quality, {
     Duration? start,
+    bool autoFallback = false,
   }) async {
     final EonMoviesService? service = _moviesService;
     final MovieDetail? detail = widget.detail;
@@ -484,8 +564,10 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
     final int generation = ++_generation;
     final bool shouldPlay = !_ready || _desiredPlaying;
     _startupTimer?.cancel();
+    _stallTimer?.cancel();
     _isResolving = true;
-    _setStatus('Finding streams for ${quality.displayQuality}…');
+    _currentQuality = quality;
+    _setStatus(_waitingStatus);
     if (mounted) {
       setState(() {
         _loading = true;
@@ -504,8 +586,8 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
       _isResolving = false;
       _candidates = resolved.candidates;
       _failedCandidates.clear();
+      _seekFailedCandidates.clear();
       _candidateIndex = -1;
-      _currentQuality = quality;
 
       if (_candidates.isEmpty) {
         throw StateError(
@@ -521,19 +603,60 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
     } catch (error) {
       if (!_isCurrentGeneration(generation)) return;
       _isResolving = false;
-      if (_ready) {
-        if (mounted) {
-          setState(() => _loading = false);
-        }
-        _setStatus(_healthyStatusText());
-        showAppNotice(
-          'Could not switch quality. Please try again.',
-          duration: const Duration(seconds: 2),
-        );
-      } else {
-        _showFatalError(_friendlyError(error));
+      if (autoFallback || !_ready) {
+        // This quality's link is dead (or the page never started): step down
+        // to the next one instead of bothering the person with it.
+        await _advanceToNextQuality(generation: generation);
+        return;
+      }
+      if (mounted) {
+        setState(() => _loading = false);
+      }
+      _candidateHealthy = true;
+      _setStatus(_healthyStatusText());
+      showAppNotice(
+        'Could not switch quality. Please try again.',
+        duration: const Duration(seconds: 2),
+      );
+    }
+  }
+
+  /// True when there is a lower, untried quality to fall back to.
+  MovieQualityLink? _nextQualityAfter(MovieQualityLink? current) {
+    if (_availableQualities.isEmpty) return null;
+    final int from = current == null
+        ? -1
+        : _availableQualities.indexWhere(
+            (MovieQualityLink q) => q.id == current.id,
+          );
+    // Deliberately only *down* the list: 1080p -> 720p -> 480p. Once the
+    // bottom is reached the title is treated as not streamable.
+    for (int i = from + 1; i < _availableQualities.length; i++) {
+      if (!_failedQualities.contains(_availableQualities[i].id)) {
+        return _availableQualities[i];
       }
     }
+    return null;
+  }
+
+  /// Marks the current quality dead and tries the next-lower one. When every
+  /// quality (and every mirror inside it) has failed, the player shows the
+  /// honest "download it and watch offline" message instead.
+  Future<void> _advanceToNextQuality({required int generation}) async {
+    if (!_isCurrentGeneration(generation)) return;
+    final MovieQualityLink? current = _currentQuality;
+    if (current != null) _failedQualities.add(current.id);
+    final MovieQualityLink? next = _nextQualityAfter(current);
+    if (next == null) {
+      _showPlaybackUnavailable();
+      return;
+    }
+    _setStatus(_waitingStatus);
+    await _resolveAndOpenQuality(
+      next,
+      start: _lastKnownPosition,
+      autoFallback: true,
+    );
   }
 
   Future<void> _openNextCandidate({
@@ -543,9 +666,9 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
   }) async {
     final int? next = _findNextCandidateIndex();
     if (next == null) {
-      _showFatalError(
-        'Connection problem — check your internet and tap Retry.',
-      );
+      // Every mirror of this quality is dead — step down to the next-lower
+      // quality rather than giving up on the title.
+      await _advanceToNextQuality(generation: generation);
       return;
     }
     await _openCandidate(
@@ -584,7 +707,7 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
     _failedCandidates.remove(index);
     _desiredPlaying = play;
     _prepareForOpen(start);
-    _setStatus('Connecting to Ifallertzia…');
+    _setStatus(_waitingStatus);
     if (mounted) {
       setState(() {
         _loading = true;
@@ -630,9 +753,16 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
     _tracks = const Tracks();
     _audioSelectionId = 'auto';
     _subtitleSelectionId = 'auto';
+    _lastPositionValue = start;
+    _lastPositionAt = DateTime.now();
+    _stallTimer?.cancel();
   }
 
   void _handlePosition(Duration position) {
+    if (position != _lastPositionValue) {
+      _lastPositionValue = position;
+      _lastPositionAt = DateTime.now();
+    }
     _healthPosition = position;
     if (_candidateHealthy ||
         _candidateStartPosition == Duration.zero ||
@@ -702,8 +832,10 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
 
   void _armStartupTimer(int generation) {
     _startupTimer?.cancel();
+    // A dead mirror must not hold the player hostage: if nothing has been
+    // decoded in 18 s the next stream is tried, quietly.
     _startupTimer = Timer(
-      Duration(seconds: widget.isLocal ? 20 : 35),
+      Duration(seconds: widget.isLocal ? 20 : 18),
       () {
         if (!_isCurrentGeneration(generation) || _candidateHealthy) return;
         if (widget.isLocal) {
@@ -724,6 +856,17 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
 
   void _handlePlayerError(String error) {
     if (_disposed || _isResolving || error.trim().isEmpty) return;
+
+    // A stream that is already playing can still make mpv report an error —
+    // seeking far ahead on an HTTP mirror routinely does, and mpv recovers on
+    // its own. Tearing the candidate down here is what produced the false
+    // "Couldn't start playback" over a video that never stopped. Watch the
+    // position instead, and only fail when it really stops moving.
+    if (_ready && _candidateHealthy) {
+      _scheduleStallCheck();
+      return;
+    }
+
     if (widget.isLocal) {
       _showFatalError('Could not play this downloaded file.');
       return;
@@ -735,6 +878,37 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
         reason: error,
       ),
     );
+  }
+
+  /// Gives a playing stream a few seconds to prove it is still alive after an
+  /// error. A paused video is never treated as stalled.
+  void _scheduleStallCheck() {
+    if (_disposed) return;
+    if (_stallTimer?.isActive ?? false) return;
+    final int generation = _generation;
+    final Duration probe = _player.state.position;
+    _stallTimer = Timer(const Duration(seconds: 10), () {
+      if (!_isCurrentGeneration(generation) || _disposed) return;
+      if (!_player.state.playing) return;
+      if (_player.state.buffering) {
+        // Still waiting on data after the seek: not a dead stream, just a
+        // slow one. Look again later instead of swapping underneath it.
+        _stallTimer = null;
+        _scheduleStallCheck();
+        return;
+      }
+      final Duration now = _player.state.position;
+      final bool moved = now > probe + const Duration(milliseconds: 750);
+      final bool recent = DateTime.now().difference(_lastPositionAt) <
+          const Duration(seconds: 3);
+      if (moved || recent) return;
+      unawaited(
+        _handleCandidateFailure(
+          generation: generation,
+          reason: 'The stream stopped responding.',
+        ),
+      );
+    });
   }
 
   Future<void> _handleCandidateFailure({
@@ -751,11 +925,11 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
     if (_failedCandidates.contains(failedIndex)) return;
 
     _startupTimer?.cancel();
+    _stallTimer?.cancel();
     _failedCandidates.add(failedIndex);
     _candidateHealthy = false;
     final Duration resumePosition = _lastKnownPosition;
     final bool shouldPlay = _desiredPlaying || !_ready;
-    const String failedServer = 'Ifallertzia';
 
     if (mounted) {
       setState(() {
@@ -763,7 +937,9 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
         _errorMessage = null;
       });
     }
-    _setStatus('$failedServer failed. Trying another mirror…');
+    // No "mirror failed", no resolution names: the swap happens quietly in
+    // the same player.
+    _setStatus(_waitingStatus);
 
     await _openNextCandidate(
       generation: generation,
@@ -786,12 +962,19 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
       return;
     }
 
-    final MovieQualityLink? quality = _currentQuality;
+    // Retry means retry *everything* again, best quality first: the list of
+    // qualities and mirrors that failed a moment ago is cleared.
+    _failedQualities.clear();
+    _failedCandidates.clear();
+    final MovieQualityLink? quality = _availableQualities.isNotEmpty
+        ? _availableQualities.first
+        : _currentQuality;
     if (quality == null) {
-      _showFatalError('No playable quality is selected.');
+      _showPlaybackUnavailable();
       return;
     }
     _ready = false;
+    _setStatus(_waitingStatus);
     await _resolveAndOpenQuality(quality, start: _lastKnownPosition);
   }
 
@@ -801,6 +984,7 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
 
     final int generation = ++_generation;
     _startupTimer?.cancel();
+    _stallTimer?.cancel();
     _isResolving = false;
     _failedCandidates.remove(index);
     await _openCandidate(
@@ -819,6 +1003,7 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
   void _showFatalError(String message) {
     if (_disposed) return;
     _startupTimer?.cancel();
+    _stallTimer?.cancel();
     _isResolving = false;
     _setStatus('Playback failed');
     if (mounted) {
@@ -829,6 +1014,49 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
       });
     }
     unawaited(_exitFullscreenSafely());
+  }
+
+  /// The sentence shown when nothing at all could be streamed.
+  String get _offlineLine =>
+      'Cannot play $_displayTitle online but you can still download it '
+      'and play offline.';
+
+  /// Every quality and every mirror has been tried and failed. The player
+  /// stays open on purpose: the download button beside the message is the
+  /// way to still watch this title offline.
+  void _showPlaybackUnavailable() {
+    if (_disposed) return;
+    _startupTimer?.cancel();
+    _stallTimer?.cancel();
+    _isResolving = false;
+    _candidateHealthy = false;
+    _setStatus('Playback failed');
+    if (mounted) {
+      setState(() {
+        _loading = false;
+        _ready = false;
+        _errorMessage = _offlineLine;
+      });
+    }
+    unawaited(_exitFullscreenSafely());
+  }
+
+  /// The quality the download button should save: the one on screen when
+  /// something is playing, otherwise the best one this title has.
+  MovieQualityLink? get _downloadQuality {
+    if (widget.isLocal) return null;
+    return _currentQuality ??
+        (_availableQualities.isNotEmpty
+            ? _availableQualities.first
+            : widget.initialQuality);
+  }
+
+  /// When streaming failed at every quality, the offline copy should still be
+  /// the best one available.
+  MovieQualityLink? get _bestDownloadQuality {
+    if (widget.isLocal) return null;
+    if (_availableQualities.isNotEmpty) return _availableQualities.first;
+    return _currentQuality ?? widget.initialQuality;
   }
 
   bool _isCurrentGeneration(int generation) {
@@ -863,14 +1091,99 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
   }
 
   Future<void> _seekRelative(Duration offset) async {
-    try {
-      Duration target = _player.state.position + offset;
-      if (target < Duration.zero) target = Duration.zero;
-      final Duration duration = _player.state.duration;
-      if (duration > Duration.zero && target > duration) target = duration;
-      await _player.seek(target);
-    } catch (_) {}
+    await _seekTo(_player.state.position + offset);
   }
+
+  /// One way into a seek, whichever control asked for it. The target is
+  /// clamped to the media, handed to mpv, and then watched: a mirror that
+  /// silently refuses to move (no HTTP Range support) is replaced by another
+  /// one — at the same timestamp — instead of leaving the bar stuck.
+  Future<void> _seekTo(Duration target) async {
+    final Duration duration = _player.state.duration;
+    Duration wanted = target < Duration.zero ? Duration.zero : target;
+    if (duration > Duration.zero && wanted > duration) wanted = duration;
+
+    _pendingSeekTarget = wanted;
+    try {
+      await _player.seek(wanted);
+    } catch (_) {
+      return;
+    }
+    _armSeekWatchdog(wanted, attemptsLeft: 2);
+  }
+
+  void _armSeekWatchdog(Duration wanted, {required int attemptsLeft}) {
+    _seekWatchdog?.cancel();
+    _seekWatchdog = Timer(const Duration(seconds: 9), () {
+      if (_disposed || _pendingSeekTarget != wanted) return;
+      final Duration position = _player.state.position;
+      final bool arrived =
+          (position - wanted).abs() <= const Duration(seconds: 6);
+      if (arrived) {
+        _pendingSeekTarget = null;
+        return;
+      }
+      // Still filling the buffer: give the mirror a second chance to land.
+      if (_player.state.buffering && attemptsLeft > 0) {
+        _armSeekWatchdog(wanted, attemptsLeft: attemptsLeft - 1);
+        return;
+      }
+      _pendingSeekTarget = null;
+      unawaited(_recoverStuckSeek(wanted));
+    });
+  }
+
+  /// The current mirror cannot reach [wanted]. Switch to the next mirror of
+  /// this quality (or the next quality down) at that timestamp. If nothing
+  /// else is available, say so once and keep the picture that is playing —
+  /// a stream that cannot seek is still worth watching.
+  Future<void> _recoverStuckSeek(Duration wanted) async {
+    if (_disposed || widget.isLocal || _errorMessage != null) return;
+    final bool playingBefore = _player.state.playing;
+
+    for (int i = 0; i < _candidates.length; i++) {
+      if (i == _candidateIndex) continue;
+      if (_failedCandidates.contains(i) || _seekFailedCandidates.contains(i)) {
+        continue;
+      }
+      _seekFailedCandidates.add(_candidateIndex);
+      final int generation = ++_generation;
+      _startupTimer?.cancel();
+      _isResolving = false;
+      _failedCandidates.remove(i);
+      await _openCandidate(
+        i,
+        generation: generation,
+        start: wanted,
+        play: playingBefore || _desiredPlaying,
+      );
+      return;
+    }
+
+    // No other mirror either: keep playing, explain the limit once.
+    if (!_seekLimitNoticed) {
+      _seekLimitNoticed = true;
+      showAppNotice(
+        'This stream cannot jump around. Download it to watch offline with '
+        'full seeking.',
+        duration: const Duration(seconds: 4),
+      );
+    }
+    if (playingBefore && !_player.state.playing) {
+      unawaited(_player.play());
+    }
+  }
+
+  void _handleSeekBarStart() {
+    _seekWatchdog?.cancel();
+    _pendingSeekTarget = null;
+  }
+
+  void _handleSeekBarSeek(Duration target) {
+    unawaited(_seekTo(target));
+  }
+
+  void _handleSeekBarEnd() {}
 
   Future<void> _enterFullscreenSafely() async {
     try {
@@ -999,21 +1312,21 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
     await _safeSetRate(rate);
   }
 
-  Future<void> _downloadCurrentQuality() async {
+  Future<void> _downloadCurrentQuality({MovieQualityLink? quality}) async {
     final MovieDownloadService? service = _downloadService;
     final MovieDetail? detail = widget.detail;
-    final MovieQualityLink? quality = _currentQuality;
-    if (service == null || detail == null || quality == null) return;
+    final MovieQualityLink? target = quality ?? _downloadQuality;
+    if (service == null || detail == null || target == null) return;
 
     try {
       final MovieDownloadItem item = await service.enqueueDownload(
         detail: detail,
-        quality: quality,
+        quality: target,
       );
       showAppNotice(
         item.status == MovieDownloadStatus.completed
-            ? 'Already downloaded: $_displayTitle (${quality.displayQuality})'
-            : 'Download started: $_displayTitle (${quality.displayQuality})',
+            ? 'Already downloaded: $_displayTitle (${target.displayQuality})'
+            : 'Download started: $_displayTitle (${target.displayQuality})',
       );
     } catch (error) {
       showAppNotice(
@@ -1375,10 +1688,10 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
                   overflow: TextOverflow.ellipsis,
                   style: SidifyText.titleM(Colors.white),
                 ),
-                if (_displaySubtitle.isNotEmpty) ...<Widget>[
+                if (_loadingSubtitle.isNotEmpty) ...<Widget>[
                   const SizedBox(height: 6),
                   Text(
-                    _displaySubtitle,
+                    _loadingSubtitle,
                     textAlign: TextAlign.center,
                     style: SidifyText.caption(Colors.white70),
                   ),
@@ -1403,23 +1716,26 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
   }
 
   Widget _buildErrorOverlay(SidifyTokens t, String message) {
+    final bool offline = !widget.isLocal && message == _offlineLine;
     return Positioned.fill(
       child: Container(
-        color: Colors.black.withValues(alpha: 0.78),
+        color: Colors.black.withValues(alpha: 0.82),
         alignment: Alignment.center,
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(28),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
               Icon(
-                Icons.error_outline_rounded,
+                offline
+                    ? Icons.download_for_offline_rounded
+                    : Icons.error_outline_rounded,
                 size: 46,
-                color: t.danger,
+                color: offline ? t.brand : t.danger,
               ),
               const SizedBox(height: 16),
               Text(
-                "Couldn't start playback",
+                offline ? 'Not streamable right now' : "Couldn't start playback",
                 textAlign: TextAlign.center,
                 style: SidifyText.titleM(Colors.white),
               ),
@@ -1429,18 +1745,43 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
                 textAlign: TextAlign.center,
                 style: SidifyText.bodyS(Colors.white70),
               ),
+              if (offline) ...<Widget>[
+                const SizedBox(height: 6),
+                Text(
+                  'Downloading keeps the highest quality available and plays '
+                  'without a connection.',
+                  textAlign: TextAlign.center,
+                  style: SidifyText.caption(Colors.white54),
+                ),
+              ],
               const SizedBox(height: 22),
               Wrap(
                 spacing: 10,
                 runSpacing: 10,
                 alignment: WrapAlignment.center,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: <Widget>[
+                  // Right beside the message, as asked: the way to still
+                  // watch this title is to download it once.
+                  if (offline)
+                    FilledButton.icon(
+                      onPressed: () => unawaited(
+                        _downloadCurrentQuality(quality: _bestDownloadQuality),
+                      ),
+                      icon: const Icon(Icons.download_rounded),
+                      label: const Text('Download'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: t.brand,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
                   FilledButton.icon(
                     onPressed: () => unawaited(_retryPlayback()),
                     icon: const Icon(Icons.refresh_rounded),
                     label: const Text('Retry'),
                     style: FilledButton.styleFrom(
-                      backgroundColor: t.brand,
+                      backgroundColor:
+                          offline ? Colors.white24 : t.brand,
                       foregroundColor: Colors.white,
                     ),
                   ),
@@ -1521,6 +1862,217 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
           ],
         ),
       ),
+    );
+  }
+}
+
+
+/// The player's own seek bar.
+///
+/// The stock material bar was the reason seeking felt broken: it is only 30 px
+/// tall at the very bottom of the screen (over Android's gesture strip, where
+/// a drag is often taken by the system), and on a plain tap it seeks to the
+/// *previous* drag value instead of where the finger went down.
+///
+/// This one is a 32 px tall grab area mounted above the button row (well clear
+/// of the bottom gesture strip), with a 5 px track and a 16 px thumb. A tap
+/// lands exactly where the finger went down; a drag scrubs live and shows the
+/// target timestamp above the thumb while the finger is on the bar.
+class _MovieSeekBar extends StatefulWidget {
+  const _MovieSeekBar({
+    required this.player,
+    required this.onSeekStart,
+    required this.onSeek,
+    required this.onSeekEnd,
+  });
+
+  final Player player;
+  final VoidCallback onSeekStart;
+  final void Function(Duration target) onSeek;
+  final VoidCallback onSeekEnd;
+
+  @override
+  State<_MovieSeekBar> createState() => _MovieSeekBarState();
+}
+
+class _MovieSeekBarState extends State<_MovieSeekBar> {
+  static const Color _accent = Color(0xFFFA2D48);
+  static const double _track = 5;
+  static const double _height = 32;
+  static const double _thumb = 16;
+
+  final List<StreamSubscription<dynamic>> _subs =
+      <StreamSubscription<dynamic>>[];
+
+  Duration _position = Duration.zero;
+  Duration _duration = Duration.zero;
+  Duration _buffer = Duration.zero;
+
+  /// 0..1 while a finger is on the bar; null when it follows the video.
+  double? _drag;
+
+  @override
+  void initState() {
+    super.initState();
+    _position = widget.player.state.position;
+    _duration = widget.player.state.duration;
+    _buffer = widget.player.state.buffer;
+    _subs.addAll(<StreamSubscription<dynamic>>[
+      widget.player.stream.position.listen((Duration value) {
+        if (!mounted) return;
+        setState(() => _position = value);
+      }),
+      widget.player.stream.duration.listen((Duration value) {
+        if (!mounted) return;
+        setState(() => _duration = value);
+      }),
+      widget.player.stream.buffer.listen((Duration value) {
+        if (!mounted) return;
+        setState(() => _buffer = value);
+      }),
+      widget.player.stream.completed.listen((bool done) {
+        if (!mounted || !done) return;
+        setState(() => _position = Duration.zero);
+      }),
+    ]);
+  }
+
+  @override
+  void dispose() {
+    for (final StreamSubscription<dynamic> sub in _subs) {
+      unawaited(sub.cancel());
+    }
+    super.dispose();
+  }
+
+  double get _played {
+    final double? drag = _drag;
+    if (drag != null) return drag;
+    final int total = _duration.inMilliseconds;
+    if (total <= 0) return 0;
+    return (_position.inMilliseconds / total).clamp(0.0, 1.0);
+  }
+
+  double get _buffered {
+    final int total = _duration.inMilliseconds;
+    if (total <= 0) return 0;
+    return (_buffer.inMilliseconds / total).clamp(0.0, 1.0);
+  }
+
+  static String _clock(Duration d) {
+    final int h = d.inHours;
+    final int m = d.inMinutes.remainder(60);
+    final String s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return h > 0 ? '$h:${m.toString().padLeft(2, '0')}:$s' : '$m:$s';
+  }
+
+  void _seekToFraction(double fraction) {
+    if (_duration <= Duration.zero) return;
+    widget.onSeek(_duration * fraction.clamp(0.0, 1.0));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        final double width = constraints.maxWidth;
+        double fractionOf(Offset local) => width <= 0
+            ? 0
+            : (local.dx / width).clamp(0.0, 1.0);
+        final double played = _played;
+        final double buffered = _buffered;
+        final double maxThumbX = width > _thumb ? width - _thumb : 0;
+        final double thumbX = (played * width - _thumb / 2)
+            .clamp(0.0, maxThumbX);
+
+        Widget bar(double fraction, Color color) => Positioned(
+              left: 0,
+              width: width * fraction,
+              child: Container(
+                height: _track,
+                decoration: BoxDecoration(
+                  color: color,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+            );
+
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTapDown: (TapDownDetails details) {
+            final double fraction = fractionOf(details.localPosition);
+            widget.onSeekStart();
+            _seekToFraction(fraction);
+            widget.onSeekEnd();
+          },
+          onHorizontalDragStart: (DragStartDetails details) {
+            widget.onSeekStart();
+            setState(() => _drag = fractionOf(details.localPosition));
+          },
+          onHorizontalDragUpdate: (DragUpdateDetails details) {
+            setState(() => _drag = fractionOf(details.localPosition));
+          },
+          onHorizontalDragEnd: (DragEndDetails details) {
+            final double? fraction = _drag;
+            setState(() => _drag = null);
+            if (fraction != null) _seekToFraction(fraction);
+            widget.onSeekEnd();
+          },
+          onHorizontalDragCancel: () {
+            setState(() => _drag = null);
+            widget.onSeekEnd();
+          },
+          child: SizedBox(
+            height: _height,
+            child: Stack(
+              clipBehavior: Clip.none,
+              alignment: Alignment.centerLeft,
+              children: <Widget>[
+                bar(1, Colors.white24),
+                bar(buffered, Colors.white38),
+                bar(played, _accent),
+                Positioned(
+                  left: thumbX,
+                  child: Container(
+                    width: _thumb,
+                    height: _thumb,
+                    decoration: const BoxDecoration(
+                      color: _accent,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ),
+                if (_drag != null)
+                  Positioned(
+                    left: (thumbX - 26).clamp(
+                      0.0,
+                      width > 52 ? width - 52 : 0.0,
+                    ),
+                    bottom: _height - 2,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 7,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.78),
+                        borderRadius: BorderRadius.circular(7),
+                      ),
+                      child: Text(
+                        _clock(_duration * _drag!),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }

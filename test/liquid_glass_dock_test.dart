@@ -413,6 +413,59 @@ void main() {
     );
   });
 
+  testWidgets('the dock stays away while a movie player route is open',
+      (WidgetTester tester) async {
+    await pumpDock(tester);
+    final NavigatorState nav =
+        tester.state<NavigatorState>(find.byType(Navigator).first);
+
+    nav.push(
+      MaterialPageRoute<void>(
+        builder: (_) => const Scaffold(body: ColoredBox(color: Colors.black)),
+        settings: const RouteSettings(name: 'sidify/movie-player-online'),
+      ),
+    );
+    await settle(tester);
+    expect(find.text('Home'), findsNothing);
+
+    // media_kit enters fullscreen by pushing a second route with *no* name.
+    // The dock must not mistake that for a normal page and pop back over the
+    // video — the bug where the menu bar reappeared on the player.
+    nav.push(
+      MaterialPageRoute<void>(
+        builder: (_) => const Scaffold(body: ColoredBox(color: Colors.black)),
+      ),
+    );
+    await settle(tester);
+    expect(find.text('Home'), findsNothing);
+    expect(find.byIcon(Icons.search_rounded), findsNothing);
+
+    nav.pop();
+    await settle(tester);
+    expect(find.text('Home'), findsNothing);
+
+    nav.pop();
+    await settle(tester);
+    expect(find.text('Home'), findsOneWidget);
+  });
+
+  testWidgets('in Movies the right-hand button is Music, not Search',
+      (WidgetTester tester) async {
+    final _Dock dock = await pumpDock(tester);
+    await dock.shell.chooseMode(movies: true);
+    await settle(tester);
+
+    expect(find.byIcon(Icons.search_rounded), findsNothing);
+    expect(find.byIcon(Icons.music_note_rounded), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.music_note_rounded));
+    await settle(tester);
+
+    expect(dock.shell.isMoviesMode, isFalse);
+    expect(find.byIcon(Icons.search_rounded), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('the dock still drives tabs and transport',
       (WidgetTester tester) async {
     final _Dock dock = await pumpDock(tester);

@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 
 import '../../config/foss_build.dart';
 import '../../core/services/settings_service.dart';
-import '../../core/theme/saxify_accents.dart';
 import '../../core/theme/sidify_theme.dart';
 import '../../ui/settings/update_dialog.dart';
 import '../../ui/shell/sidify_shell_controller.dart';
@@ -77,28 +76,6 @@ class MovieSettingsPage extends StatelessWidget {
                   ],
                 ),
               ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 14),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Text('Accent colour', style: SidifyText.label(t.text)),
-                    const SizedBox(height: 10),
-                    Wrap(
-                      spacing: 10,
-                      runSpacing: 10,
-                      children: <Widget>[
-                        for (final SaxifyAccent accent in SaxifyAccents.presets)
-                          _AccentSwatch(
-                            accent: accent,
-                            selected: settings.accentId == accent.id,
-                            onTap: () => settings.setAccentId(accent.id),
-                          ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
             ],
           ),
           const SizedBox(height: 20),
@@ -125,44 +102,6 @@ class MovieSettingsPage extends StatelessWidget {
             ],
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _AccentSwatch extends StatelessWidget {
-  const _AccentSwatch({
-    required this.accent,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final SaxifyAccent accent;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final SidifyTokens t = context.sidify;
-    return Tooltip(
-      message: accent.label,
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          width: 38,
-          height: 38,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            gradient: accent.gradient,
-            border: Border.all(
-              color: selected ? t.text : Colors.transparent,
-              width: 2,
-            ),
-          ),
-          child: selected
-              ? const Icon(Icons.check_rounded, size: 18, color: Colors.white)
-              : null,
-        ),
       ),
     );
   }

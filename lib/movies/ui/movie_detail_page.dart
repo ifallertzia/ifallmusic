@@ -156,20 +156,28 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
     });
   }
 
+  /// The one sentence a person should read when a title cannot be streamed.
+  String _offlineLine(String title) =>
+      'Cannot play $title online but you can still download it and play offline.';
+
   void _playQualities(MovieDetail detail, List<MovieQualityLink> qualities) {
-    final MovieQualityLink? lowest = lowestPlayableQuality(qualities);
-    if (lowest == null) {
+    // Playback starts on the *best* stream available, then the player walks
+    // down the list itself if that one is dead.
+    final MovieQualityLink? best = highestPlayableQuality(qualities);
+    if (best == null) {
       showAppNotice(
-        'This title is download-only — no stream is available for it.',
-        duration: const Duration(seconds: 2),
+        _offlineLine(
+          detail.cleanTitle.isNotEmpty ? detail.cleanTitle : detail.title,
+        ),
+        duration: const Duration(seconds: 4),
       );
       return;
     }
     openOnlineMoviePlayer(
       context,
       detail: detail,
-      quality: lowest,
-      allQualities: playableQualitiesOf(qualities),
+      quality: best,
+      allQualities: playableQualitiesBestFirst(qualities),
     );
   }
 
@@ -182,7 +190,7 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
         .where((MovieQualityLink q) => q.isZipPack)
         .toList();
     final bool zipOnly = zipQualities.isNotEmpty &&
-        lowestPlayableQuality(qualities) == null;
+        highestPlayableQuality(qualities) == null;
     if (zipOnly) {
       showSeriesDownloadDialog(
         context,
@@ -596,17 +604,28 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
   ) {
     final bool isMovieLike =
         detail.episodeGroups.isEmpty && detail.directQualities.isNotEmpty;
-    final MovieQualityLink? lowest =
-        isMovieLike ? lowestPlayableQuality(detail.directQualities) : null;
+    final MovieQualityLink? best =
+        isMovieLike ? highestPlayableQuality(detail.directQualities) : null;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
+        // Nothing streamable: say it first, then offer the download right
+        // underneath it — that is the way to watch this title at all.
+        if (isMovieLike && best == null) ...<Widget>[
+          Text(
+            _offlineLine(
+              detail.cleanTitle.isNotEmpty ? detail.cleanTitle : detail.title,
+            ),
+            style: SidifyText.bodyS(t.text2),
+          ),
+          const SizedBox(height: 12),
+        ],
         Wrap(
           spacing: 10,
           runSpacing: 10,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: <Widget>[
-            if (isMovieLike && lowest != null)
+            if (isMovieLike && best != null)
               _primaryButton(
                 t,
                 icon: Icons.play_arrow_rounded,
@@ -619,7 +638,7 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
                 t,
                 icon: Icons.download_rounded,
                 label: 'Download',
-                filled: lowest == null,
+                filled: best == null,
                 onTap: () => _downloadQualities(
                   detail,
                   detail.directQualities,
@@ -645,13 +664,6 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
             ),
           ],
         ),
-        if (isMovieLike && lowest == null) ...<Widget>[
-          const SizedBox(height: 8),
-          Text(
-            'This title is download-only — no stream is available for it.',
-            style: SidifyText.caption(t.text2),
-          ),
-        ],
       ],
     );
   }
@@ -705,10 +717,10 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
         group.languages.isNotEmpty ? group.languages : detail.languages;
     final bool hasNested = group.nestedGroups.isNotEmpty;
     final bool isContainer = hasNested || !group.isLoaded;
-    final MovieQualityLink? lowest =
-        group.isLoaded ? lowestPlayableQuality(group.qualities) : null;
+    final MovieQualityLink? best =
+        group.isLoaded ? highestPlayableQuality(group.qualities) : null;
     final bool zipOnly = group.isLoaded &&
-        lowest == null &&
+        best == null &&
         group.qualities.any((MovieQualityLink q) => q.isZipPack);
 
     return Container(
@@ -744,7 +756,7 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
                       if (zipOnly) ...<Widget>[
                         const SizedBox(height: 2),
                         Text(
-                          'Season pack (ZIP) — download to watch',
+                          _offlineLine(group.fullHeading),
                           style: SidifyText.caption(t.text2),
                         ),
                       ] else if (langs.isNotEmpty) ...<Widget>[
@@ -787,7 +799,7 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
                     ),
                   )
                 else ...<Widget>[
-                  if (lowest != null)
+                  if (best != null)
                     _groupActionButton(
                       t,
                       icon: Icons.play_arrow_rounded,
@@ -801,7 +813,7 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
                       t,
                       icon: Icons.download_rounded,
                       label: 'Download',
-                      filled: lowest == null,
+                      filled: best == null,
                       onTap: () => _downloadQualities(
                         detail,
                         group.qualities,
