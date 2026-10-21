@@ -111,7 +111,10 @@ String movieDownloadDetail(MovieDownloadItem item) {
       '${Fmt.bytes(item.downloadedBytes)} of ${Fmt.bytes(item.totalBytes)}'
     else if (item.downloadedBytes > 0)
       Fmt.bytes(item.downloadedBytes),
-    if (item.speedBytesPerSec >= 1024)
+    // Only a download that is actually moving has a speed. A queued or paused
+    // one would otherwise carry the last number it happened to see.
+    if (item.status == MovieDownloadStatus.downloading &&
+        item.speedBytesPerSec >= 1024)
       '${Fmt.bytes(item.speedBytesPerSec.round())}/s',
   ].join(' · ');
 }

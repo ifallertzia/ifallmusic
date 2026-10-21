@@ -101,6 +101,7 @@ void main() {
           _movie(status: MovieDownloadStatus.queued, done: 0, total: 0),
         ).body,
         'Waiting in the queue',
+        reason: 'a queue slot has no bytes and no speed of its own to report',
       );
     });
 
