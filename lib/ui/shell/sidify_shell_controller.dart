@@ -3,6 +3,12 @@ import 'package:flutter/foundation.dart';
 /// The five destinations of the floating tab bar, in order.
 enum SidifyTab { home, explore, search, library, together }
 
+/// Sub-view inside the Search tab:
+/// - [chooser]: asks between Music and Movies & Series
+/// - [music]: existing untouched Music search experience
+/// - [movies]: Movies & Series search, recommended catalog, and downloads
+enum SearchMode { chooser, music, movies }
+
 /// Owns which tab is showing, a small back-history of tab visits, and the
 /// query handed to the Search tab from elsewhere (Home chips, artist pages…).
 ///
@@ -10,17 +16,25 @@ enum SidifyTab { home, explore, search, library, together }
 /// the app at Home. [back] returns true when it consumed the press.
 class SidifyShellController extends ChangeNotifier {
   SidifyTab _tab = SidifyTab.home;
+  SearchMode _searchMode = SearchMode.chooser;
   final List<SidifyTab> _history = <SidifyTab>[];
   String _searchQuery = '';
   int _searchNonce = 0;
 
   SidifyTab get tab => _tab;
   int get index => _tab.index;
+  SearchMode get searchMode => _searchMode;
 
   /// The query the Search tab should adopt, and a nonce that changes even
   /// when the same query is handed over twice.
   String get searchQuery => _searchQuery;
   int get searchNonce => _searchNonce;
+
+  void setSearchMode(SearchMode mode) {
+    if (_searchMode == mode) return;
+    _searchMode = mode;
+    notifyListeners();
+  }
 
   void select(SidifyTab tab) {
     if (tab == _tab) return;
@@ -38,6 +52,8 @@ class SidifyShellController extends ChangeNotifier {
   void goSearch([String query = '']) {
     _searchQuery = query;
     _searchNonce++;
+    _searchMode =
+        query.trim().isNotEmpty ? SearchMode.music : SearchMode.chooser;
     select(SidifyTab.search);
     notifyListeners();
   }
