@@ -1,5 +1,59 @@
 # Sidify 2.10.0
 
+## Unreleased — the player talks, downloads post, Movies folds into Search
+
+### Player
+
+- **The waiting screen now tells you what it is doing.** One "please wait a bit"
+  line has been replaced by a ticker that rotates through the steps the player
+  is really taking while a stream comes up — *Connecting to Ifallertzia…*,
+  *Asking Siddharth…* , *Trying server Sakshi…*, *Collecting from Ritu…*,
+  *Picking the fastest mirror…*, *Threading the reel…* — and the moment picture
+  or sound arrives every line disappears. Local files keep their own "Opening
+  video…" line, and an error always takes precedence over the ticker.
+- **Dragging the progress bar actually lands where you dragged it.** Before,
+  only the ±10 s taps worked: long drags snapped back to the old position,
+  because a mirror that ignores HTTP Range requests also ignores an absolute
+  seek, and the only recovery on offer was "try another mirror". The bar now
+  paints the thumb where you put it straight away, a watchdog checks at
+  1.4 / 2 / 3 / 4 s whether playback followed, and a stuck jump runs a ladder —
+  reopen the same mirror starting *at* the new position, then the other mirrors,
+  then a fresh quality resolve — before Sidify says once, plainly, that this
+  particular stream cannot jump around and suggests downloading it to watch
+  offline with full seeking.
+- **Track names are readable.** Audio and subtitle labels that used to render as
+  `-eonmovies.com.hin.aac.2 ch` now read `Ifallertzia Hindi AAC Stereo`. The
+  source domain is shown as **Ifallertzia** everywhere it appears (including
+  `EONMOVIES.COM`, `[EonMovies.Com]` tags and bare stream URLs), while
+  everything else the label carried — language, codec, channel layout, season
+  and episode text, group tags — is preserved and cleaned up into words. Tracks
+  with nothing to say fall back to `Audio 1`, `Subtitle 2` and so on.
+
+### Downloads
+
+- **Live progress notifications.** Every download — movie, episode or song —
+  posts a notification with a real progress bar and percentage that updates as
+  bytes arrive, and switches to *Downloaded · 1.2 GB* when it finishes.
+  Failures say why, paused ones say they are paused, and a cancelled download
+  withdraws its card instead of leaving a corpse in the shade.
+- **They stay yours to dismiss.** The cards are deliberately *not* ongoing:
+  swipe one away and Sidify notices through the active-notification list and
+  stops redrawing it. Nothing here can be made unremovable.
+
+### Library
+
+- **Recently watched can be pruned.** Each entry in Recently watched now has its
+  own delete button, and the section header has a *Clear all* action. Both
+  confirm with a notice, and the rest of your library is untouched.
+
+### Bottom bar
+
+- **Movies folds into Search.** On the Movies page, scrolling down still folds
+  the bar into two round glass buttons — but the left one is now **Search**
+  rather than Home, and tapping it opens the movie search box and brings the bar
+  back. Scroll up and the seat is Home again. The right-hand button keeps its
+  job, and Music mode is unchanged.
+
 ## Unreleased — refreshed app identity
 
 - Replaced the launcher, in-app, splash-screen, web, desktop and store-listing

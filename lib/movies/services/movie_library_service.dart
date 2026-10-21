@@ -38,6 +38,27 @@ class MovieLibraryService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Drops one title from Recently watched. True when something was removed.
+  ///
+  /// This is history only — a watchlist entry, a download or anything saved on
+  /// the device is untouched.
+  Future<bool> removeFromHistory(MoviePost post) async {
+    final int before = _history.length;
+    _history.removeWhere((MoviePost item) => item.link == post.link);
+    if (_history.length == before) return false;
+    await _store('ifall.movies.history', _history);
+    notifyListeners();
+    return true;
+  }
+
+  /// Empties Recently watched in one go.
+  Future<void> clearHistory() async {
+    if (_history.isEmpty) return;
+    _history = <MoviePost>[];
+    await _store('ifall.movies.history', _history);
+    notifyListeners();
+  }
+
   List<MoviePost> _decode(String key) {
     final String? value = _prefs.getString(key);
     if (value == null || value.isEmpty) return <MoviePost>[];

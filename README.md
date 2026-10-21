@@ -23,9 +23,11 @@ See `docs/RELEASE_SIGNING.md`.
 
 - **Folding dock** — scroll down and the tab bar folds into the mini player:
   Home stays as a small round button on the left, the player slimmed into the
-  bar's row beside it, Search keeping its seat on the right. Scroll up and it
-  unfolds through the same path. One driven animation, on liquid glass you can
-  see straight through.
+  bar's row beside it, Search keeping its seat on the right. On the **Movies**
+  page that left button becomes **Search** while folded and opens the movie
+  search box; scroll up and it is Home again. Everything unfolds through the
+  same path. One driven animation, on liquid glass you can see straight
+  through.
 - **Home** — greeting with your name, Top picks, Quick picks, Recently
   played, New releases, Top artists with real faces, and picks from your
   Liked Songs.

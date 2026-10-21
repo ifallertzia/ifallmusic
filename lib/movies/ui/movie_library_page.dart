@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/services/app_feedback.dart';
 import '../../core/theme/sidify_theme.dart';
 import '../models/movie_models.dart';
 import '../services/movie_library_service.dart';
@@ -51,12 +52,54 @@ class MovieLibraryPage extends StatelessWidget {
             onTap: () => openLocalVideosPage(context),
           ),
           const SizedBox(height: 24),
-          _section(context, t, 'Watchlist', library.watchlist, library: library),
+          _section(
+            context,
+            t,
+            'Watchlist',
+            library.watchlist,
+            emptyText: 'Saved movies and series will appear here.',
+            removeIcon: Icons.bookmark_remove_rounded,
+            removeTooltip: 'Remove from watchlist',
+            onRemove: (MoviePost post) => library.toggleWatchlist(post),
+          ),
           const SizedBox(height: 24),
-          _section(context, t, 'Recently watched', library.history),
+          // Every history row carries its own delete: clearing one title must
+          // not mean clearing the whole list.
+          _section(
+            context,
+            t,
+            'Recently watched',
+            library.history,
+            emptyText: 'Your viewing history will appear here.',
+            removeIcon: Icons.delete_outline_rounded,
+            removeTooltip: 'Remove from recently watched',
+            onRemove: (MoviePost post) => _removeFromHistory(context, library, post),
+            onRemoveAll: library.history.isEmpty
+                ? null
+                : () => _clearHistory(context, library),
+          ),
         ],
       ),
     );
+  }
+
+  Future<void> _removeFromHistory(
+    BuildContext context,
+    MovieLibraryService library,
+    MoviePost post,
+  ) async {
+    final bool removed = await library.removeFromHistory(post);
+    if (!removed || !context.mounted) return;
+    showAppNotice('Removed "${post.title}" from Recently watched');
+  }
+
+  Future<void> _clearHistory(
+    BuildContext context,
+    MovieLibraryService library,
+  ) async {
+    await library.clearHistory();
+    if (!context.mounted) return;
+    showAppNotice('Recently watched cleared');
   }
 
   Widget _entryTile(
@@ -112,21 +155,26 @@ class MovieLibraryPage extends StatelessWidget {
     SidifyTokens t,
     String title,
     List<MoviePost> posts, {
-    MovieLibraryService? library,
+    required String emptyText,
+    required IconData removeIcon,
+    required String removeTooltip,
+    required void Function(MoviePost post) onRemove,
+    VoidCallback? onRemoveAll,
   }) {
-    final bool isWatchlist = library != null;
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
-      Text(title, style: SidifyText.section(t.text)),
+      Row(children: <Widget>[
+        Expanded(child: Text(title, style: SidifyText.section(t.text))),
+        if (onRemoveAll != null)
+          TextButton(
+            onPressed: onRemoveAll,
+            child: Text('Clear all', style: SidifyText.caption(t.text2)),
+          ),
+      ]),
       const SizedBox(height: 10),
       if (posts.isEmpty)
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 12),
-          child: Text(
-            isWatchlist
-                ? 'Saved movies and series will appear here.'
-                : 'Your viewing history will appear here.',
-            style: SidifyText.bodyS(t.text2),
-          ),
+          child: Text(emptyText, style: SidifyText.bodyS(t.text2)),
         )
       else
         for (final MoviePost post in posts)
@@ -147,13 +195,15 @@ class MovieLibraryPage extends StatelessWidget {
               style: SidifyText.body(t.text),
             ),
             subtitle: Text(post.badge, style: SidifyText.caption(t.text2)),
-            trailing: isWatchlist
-                ? IconButton(
-                    tooltip: 'Remove from watchlist',
-                    onPressed: () => library.toggleWatchlist(post),
-                    icon: Icon(Icons.bookmark_remove_rounded, color: t.text2, size: 20),
-                  )
-                : Icon(Icons.chevron_right_rounded, color: t.text3),
+            trailing: Row(mainAxisSize: MainAxisSize.min, children: <Widget>[
+              IconButton(
+                tooltip: removeTooltip,
+                visualDensity: VisualDensity.compact,
+                onPressed: () => onRemove(post),
+                icon: Icon(removeIcon, color: t.text2, size: 20),
+              ),
+              Icon(Icons.chevron_right_rounded, color: t.text3),
+            ]),
             onTap: () => openMovieDetailPage(context, post),
           ),
     ]);
