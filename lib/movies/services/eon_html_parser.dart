@@ -334,9 +334,10 @@ abstract final class EonHtmlParser {
   static ({String resolution, String codec}) _parseQualityComponents(
     String rawLabel,
   ) {
+    // Generic `\d{3,4}p` so unusual rungs the site serves (396p, 240p, ...)
+    // are recognised as qualities too, not only the standard ladder.
     final RegExpMatch? resMatch =
-        RegExp(r'\b(2160p|1440p|1080p|720p|540p|480p|360p|4K)\b',
-                caseSensitive: false)
+        RegExp(r'\b(\d{3,4}p|4K)\b', caseSensitive: false)
             .firstMatch(rawLabel);
     String resolution = resMatch != null ? resMatch.group(1)! : '';
     if (resolution.toUpperCase() == '2160P') {
@@ -364,7 +365,7 @@ abstract final class EonHtmlParser {
 
   static bool _isQualityRow(String label, String sizeLabel) {
     if (RegExp(
-      r'\b(?:2160p|1440p|1080p|720p|540p|480p|360p|4K)\b',
+      r'\b(?:\d{3,4}p|4K)\b',
       caseSensitive: false,
     ).hasMatch(label)) {
       return true;
@@ -589,13 +590,22 @@ abstract final class EonHtmlParser {
         _extractRawDlRows(doc, baseUrl);
 
     final List<MovieQualityLink> directQualities = <MovieQualityLink>[];
+    final List<MovieQualityLink> directEpisodeQualities =
+        <MovieQualityLink>[];
     final List<MovieEpisodeGroup> episodeGroups = <MovieEpisodeGroup>[];
 
     for (final ({String dlUrl, String label, String size}) row in rawRows) {
       if (_isQualityRow(row.label, row.size)) {
         final ({String codec, String resolution}) q =
             _parseQualityComponents(row.label);
-        directQualities.add(
+        // A quality row that itself names an episode ("Episode 1 720p",
+        // "S01E02 480p") is a direct single-episode file — it must stay
+        // episode-wise instead of being swallowed into the season ZIP pack.
+        final ({String episode, String season}) rowSe = isSeries
+            ? _parseSeasonEpisodeLabels(row.label, defaultSeason)
+            : (season: '', episode: '');
+        final bool isDirectEpisode = isSeries && rowSe.episode.isNotEmpty;
+        (isDirectEpisode ? directEpisodeQualities : directQualities).add(
           MovieQualityLink(
             id: _extractDlId(row.dlUrl),
             rawLabel: row.label,
@@ -604,11 +614,17 @@ abstract final class EonHtmlParser {
             sizeLabel: row.size,
             dlUrl: row.dlUrl,
             languages: languages,
-            isZipPack: isSeries,
-            seasonLabel: isSeries
-                ? (defaultSeason.isNotEmpty ? defaultSeason : 'Complete Pack')
-                : '',
-            episodeLabel: isSeries ? 'All Episodes (ZIP)' : '',
+            isZipPack: isSeries && !isDirectEpisode,
+            seasonLabel: isDirectEpisode
+                ? rowSe.season
+                : (isSeries
+                    ? (defaultSeason.isNotEmpty
+                        ? defaultSeason
+                        : 'Complete Pack')
+                    : ''),
+            episodeLabel: isDirectEpisode
+                ? rowSe.episode
+                : (isSeries ? 'All Episodes (ZIP)' : ''),
           ),
         );
       } else {
@@ -628,9 +644,43 @@ abstract final class EonHtmlParser {
       }
     }
 
+    // Group direct single-episode quality rows ("Episode 1 720p") under
+    // their episode so they download episode-wise, in first-seen order.
+    final List<MovieEpisodeGroup> directEpisodeGroups = <MovieEpisodeGroup>[];
+    final Map<String, List<MovieQualityLink>> byEpisode =
+        <String, List<MovieQualityLink>>{};
+    for (final MovieQualityLink q in directEpisodeQualities) {
+      byEpisode
+          .putIfAbsent(
+            '${q.seasonLabel}|${q.episodeLabel}',
+            () => <MovieQualityLink>[],
+          )
+          .add(q);
+    }
+    byEpisode.forEach((String _, List<MovieQualityLink> qs) {
+      final MovieQualityLink first = qs.first;
+      directEpisodeGroups.add(
+        MovieEpisodeGroup(
+          id: 'direct-${first.seasonLabel}-${first.episodeLabel}'
+              .replaceAll(RegExp(r'[^A-Za-z0-9]+'), '-')
+              .toLowerCase(),
+          title: '${first.seasonLabel} • ${first.episodeLabel}'.trim(),
+          seasonLabel: first.seasonLabel,
+          episodeLabel: first.episodeLabel,
+          languages: languages,
+          qualities: qs,
+          isLoaded: true,
+        ),
+      );
+    });
+
     // If a series exposes Complete Season ZIP qualities directly on the detail
     // page (e.g. "The Terminal List - Season 2"), also expose it cleanly as a
     // named Season group so Season Name + ZIP Pack + Qualities show clearly.
+    // NOTE: the source site hosts those as one ZIP per quality — they carry
+    // no per-episode links of their own. Episode-wise download for such
+    // packs is offered by listing the ZIP's contents over HTTP Range and
+    // fetching just one episode's bytes (see RemoteZipReader).
     final List<MovieEpisodeGroup> finalGroups = <MovieEpisodeGroup>[
       if (isSeries && directQualities.isNotEmpty)
         MovieEpisodeGroup(
@@ -645,6 +695,7 @@ abstract final class EonHtmlParser {
           qualities: directQualities,
           isLoaded: true,
         ),
+      ...directEpisodeGroups,
       ...episodeGroups,
     ];
 
@@ -705,6 +756,7 @@ abstract final class EonHtmlParser {
     final List<({String dlUrl, String label, String size})> rawRows =
         _extractRawDlRows(doc, baseUrl);
     final List<MovieQualityLink> qualities = <MovieQualityLink>[];
+    final List<MovieQualityLink> episodeQualities = <MovieQualityLink>[];
     final List<MovieEpisodeGroup> nested = <MovieEpisodeGroup>[];
     final bool isSeasonPack = episode.isEmpty && season.isNotEmpty;
 
@@ -712,7 +764,13 @@ abstract final class EonHtmlParser {
       if (_isQualityRow(row.label, row.size)) {
         final ({String codec, String resolution}) q =
             _parseQualityComponents(row.label);
-        qualities.add(
+        // On a Season sub-page, a quality row naming an episode is a direct
+        // single-episode file, not part of the season ZIP pack.
+        final ({String episode, String season}) rowSe =
+            _parseSeasonEpisodeLabels(row.label, season);
+        final bool isDirectEpisode =
+            isSeasonPack && rowSe.episode.isNotEmpty;
+        (isDirectEpisode ? episodeQualities : qualities).add(
           MovieQualityLink(
             id: _extractDlId(row.dlUrl),
             rawLabel: row.label,
@@ -721,9 +779,11 @@ abstract final class EonHtmlParser {
             sizeLabel: row.size,
             dlUrl: row.dlUrl,
             languages: effectiveLang,
-            isZipPack: isSeasonPack,
-            seasonLabel: season,
-            episodeLabel: isSeasonPack ? 'Complete Season (ZIP)' : episode,
+            isZipPack: isSeasonPack && !isDirectEpisode,
+            seasonLabel: isDirectEpisode ? rowSe.season : season,
+            episodeLabel: isDirectEpisode
+                ? rowSe.episode
+                : (isSeasonPack ? 'Complete Season (ZIP)' : episode),
           ),
         );
       } else {
@@ -743,13 +803,43 @@ abstract final class EonHtmlParser {
       }
     }
 
+    // Direct single-episode rows on a Season page become nested episode
+    // groups (first-seen order) so they stay episode-wise downloadable.
+    final Map<String, List<MovieQualityLink>> byEpisode =
+        <String, List<MovieQualityLink>>{};
+    for (final MovieQualityLink q in episodeQualities) {
+      byEpisode
+          .putIfAbsent(
+            '${q.seasonLabel}|${q.episodeLabel}',
+            () => <MovieQualityLink>[],
+          )
+          .add(q);
+    }
+    final List<MovieEpisodeGroup> directEpisodeGroups = <MovieEpisodeGroup>[];
+    byEpisode.forEach((String _, List<MovieQualityLink> qs) {
+      final MovieQualityLink first = qs.first;
+      directEpisodeGroups.add(
+        MovieEpisodeGroup(
+          id: 'direct-${first.seasonLabel}-${first.episodeLabel}'
+              .replaceAll(RegExp(r'[^A-Za-z0-9]+'), '-')
+              .toLowerCase(),
+          title: '${first.seasonLabel} • ${first.episodeLabel}'.trim(),
+          seasonLabel: first.seasonLabel,
+          episodeLabel: first.episodeLabel,
+          languages: effectiveLang,
+          qualities: qs,
+          isLoaded: true,
+        ),
+      );
+    });
+
     return parentGroup.copyWith(
       seasonLabel: season,
       episodeLabel: episode,
       languages: effectiveLang,
       isCompletePack: isSeasonPack && qualities.isNotEmpty,
       qualities: qualities,
-      nestedGroups: nested,
+      nestedGroups: <MovieEpisodeGroup>[...directEpisodeGroups, ...nested],
       isLoaded: true,
     );
   }

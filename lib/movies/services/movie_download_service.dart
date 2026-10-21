@@ -12,6 +12,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/services/native_bridge.dart';
 import '../models/movie_models.dart';
 import 'eon_movies_service.dart';
+import 'remote_zip.dart';
 
 class OpenedByteStream {
   const OpenedByteStream({
@@ -185,6 +186,13 @@ class MovieDownloadService extends ChangeNotifier {
     return target;
   }
 
+  static String _videoMimeForName(String name) {
+    final String lower = name.toLowerCase();
+    return lower.endsWith('.mp4') || lower.endsWith('.m4v')
+        ? 'video/mp4'
+        : 'video/x-matroska';
+  }
+
   static String _sanitizeFileName(String raw) {
     final String cleaned = raw
         .replaceAll(RegExp(r'[<>:"/\\|?*\x00-\x1F]+'), '_')
@@ -273,7 +281,12 @@ class MovieDownloadService extends ChangeNotifier {
           quality.languages.isNotEmpty ? quality.languages : detail.languages,
       sizeLabel: quality.sizeLabel,
       sourceDlUrl: quality.dlUrl,
-      mimeType: quality.isZipPack ? 'application/zip' : 'video/x-matroska',
+      mimeType: quality.isZipEntryEpisode
+          ? _videoMimeForName(quality.zipEntryName)
+          : quality.isZipPack
+              ? 'application/zip'
+              : 'video/x-matroska',
+      zipEntryName: quality.zipEntryName,
       status: MovieDownloadStatus.queued,
       createdAtMs: DateTime.now().millisecondsSinceEpoch,
     );
@@ -326,6 +339,8 @@ class MovieDownloadService extends ChangeNotifier {
       try {
         final File part = File('${current.savedPath}.part');
         if (part.existsSync()) await part.delete();
+        final File extracting = File('${current.savedPath}.extracting');
+        if (extracting.existsSync()) await extracting.delete();
       } catch (_) {}
     }
 
@@ -447,7 +462,15 @@ class MovieDownloadService extends ChangeNotifier {
         isZipPack: current.isZip,
         seasonLabel: current.seasonLabel,
         episodeLabel: current.episodeLabel,
+        zipEntryName: current.zipEntryName,
       );
+
+      // Episode-wise download out of a season ZIP pack: fetch only this
+      // episode's byte window from the remote ZIP, then extract it locally.
+      if (current.isZipEntryEpisode) {
+        await _executeZipEntryDownload(id, linkSpec);
+        return;
+      }
 
       final ResolvedMovieStream resolved =
           await _moviesService.resolveDownloadStream(
@@ -535,6 +558,249 @@ class MovieDownloadService extends ChangeNotifier {
       _cancelTokens.remove(id);
       _runningIds.remove(id);
       _pumpQueue();
+    }
+  }
+
+  /// Episode-wise download from a season ZIP pack.
+  ///
+  /// Completed seasons are hosted as a single ZIP per quality, so instead of
+  /// pulling the whole pack we: (1) probe the ZIP's central directory with
+  /// tiny Range requests to locate this episode's bytes, (2) range-download
+  /// exactly that byte window into the `.part` file (fully resumable — the
+  /// part holds *compressed* bytes, so resume is a plain Range offset), and
+  /// (3) store/inflate the finished segment into the final video file.
+  Future<void> _executeZipEntryDownload(
+    String id,
+    MovieQualityLink linkSpec,
+  ) async {
+    MovieDownloadItem? current = itemById(id);
+    if (current == null) return;
+
+    final ({MovieStreamCandidate candidate, MovieZipEpisode episode}) prep =
+        await _moviesService.prepareZipEpisodeDownload(
+      linkSpec,
+      fallbackTitle: current.movieTitle,
+    );
+
+    if (_pausedExplicitly.contains(id) || _canceledExplicitly.contains(id)) {
+      return;
+    }
+
+    final MovieZipEpisode episode = prep.episode;
+    if (episode.dataOffset < 0 || episode.compressedSize <= 0) {
+      throw StateError('Could not locate the episode data inside the ZIP.');
+    }
+
+    final Directory dir = await _resolveMoviesDir();
+    current = itemById(id)!;
+    final String finalName = _sanitizeFileName(
+      current.fileName.isNotEmpty ? current.fileName : episode.fileName,
+    );
+    final String targetPath = '${dir.path}/$finalName';
+    final File partFile = File('$targetPath.part');
+
+    current = current.copyWith(
+      fileName: finalName,
+      savedPath: targetPath,
+      mimeType: _videoMimeForName(finalName),
+      sizeLabel:
+          current.sizeLabel.isNotEmpty ? current.sizeLabel : episode.sizeLabel,
+    );
+    _upsertItem(current, persistImmediate: true);
+
+    await _streamZipEntrySegment(
+      id: id,
+      candidate: prep.candidate,
+      episode: episode,
+      partFile: partFile,
+      finalPath: targetPath,
+    );
+  }
+
+  Future<void> _streamZipEntrySegment({
+    required String id,
+    required MovieStreamCandidate candidate,
+    required MovieZipEpisode episode,
+    required File partFile,
+    required String finalPath,
+  }) async {
+    final int dataStart = episode.dataOffset;
+    final int compressedTotal = episode.compressedSize;
+
+    int existingBytes = partFile.existsSync() ? partFile.lengthSync() : 0;
+    if (existingBytes > compressedTotal) {
+      await partFile.delete();
+      existingBytes = 0;
+    }
+
+    if (existingBytes < compressedTotal) {
+      final CancelToken cancelToken = CancelToken();
+      _cancelTokens[id] = cancelToken;
+
+      final OpenedByteStream opened = await _openStream(
+        url: candidate.url,
+        headers: <String, String>{
+          ...candidate.headers,
+          'Range':
+              'bytes=${dataStart + existingBytes}-${dataStart + compressedTotal - 1}',
+          'Accept-Encoding': 'identity',
+        },
+        cancelToken: cancelToken,
+      );
+
+      if (opened.statusCode == 200) {
+        throw StateError(
+          '${candidate.server} does not support partial (Range) downloads '
+          '— episode-wise is not possible on this mirror, try the Complete ZIP.',
+        );
+      }
+      if (opened.statusCode != 206) {
+        throw StateError('${candidate.server} HTTP ${opened.statusCode}');
+      }
+      if (opened.contentType.toLowerCase().contains('text/html')) {
+        throw StateError(
+          '${candidate.server} returned an HTML page instead of media',
+        );
+      }
+
+      int received = existingBytes;
+      int lastTickBytes = received;
+      DateTime lastTickTime = DateTime.now();
+      double smoothedSpeed = 0;
+
+      final MovieDownloadItem? startSnap = itemById(id);
+      if (startSnap != null) {
+        _upsertItem(
+          startSnap.copyWith(
+            status: MovieDownloadStatus.downloading,
+            activeServer: candidate.server,
+            downloadedBytes: received,
+            totalBytes: compressedTotal,
+            errorMessage: '',
+          ),
+        );
+      }
+
+      final IOSink sink = partFile.openWrite(
+        mode: existingBytes > 0 ? FileMode.append : FileMode.write,
+      );
+      try {
+        await for (final List<int> chunk in opened.stream) {
+          if (_pausedExplicitly.contains(id) ||
+              _canceledExplicitly.contains(id)) {
+            break;
+          }
+          final int remaining = compressedTotal - received;
+          if (remaining <= 0) break;
+          final List<int> slice =
+              chunk.length > remaining ? chunk.sublist(0, remaining) : chunk;
+          sink.add(slice);
+          received += slice.length;
+
+          final DateTime now = DateTime.now();
+          final int elapsedMs = now.difference(lastTickTime).inMilliseconds;
+          if (elapsedMs >= 250) {
+            final double instant =
+                ((received - lastTickBytes) * 1000.0) / elapsedMs;
+            smoothedSpeed = smoothedSpeed <= 0
+                ? instant
+                : (smoothedSpeed * 0.65 + instant * 0.35);
+            lastTickBytes = received;
+            lastTickTime = now;
+
+            final MovieDownloadItem? snap = itemById(id);
+            if (snap != null) {
+              _upsertItem(
+                snap.copyWith(
+                  status: MovieDownloadStatus.downloading,
+                  activeServer: candidate.server,
+                  downloadedBytes: received,
+                  totalBytes: compressedTotal,
+                  speedBytesPerSec: smoothedSpeed,
+                ),
+              );
+            }
+          }
+        }
+        await sink.flush();
+      } finally {
+        await sink.close();
+      }
+
+      if (_pausedExplicitly.contains(id) || _canceledExplicitly.contains(id)) {
+        return;
+      }
+      if (received < compressedTotal) {
+        throw StateError(
+          'Episode arrived incomplete from ${candidate.server} '
+          '($received/$compressedTotal bytes) — resume to continue.',
+        );
+      }
+    }
+
+    if (_pausedExplicitly.contains(id) || _canceledExplicitly.contains(id)) {
+      return;
+    }
+
+    // Compressed segment complete — now turn it into the playable video.
+    final MovieDownloadItem? extractSnap = itemById(id);
+    if (extractSnap != null) {
+      _upsertItem(
+        extractSnap.copyWith(
+          status: MovieDownloadStatus.downloading,
+          activeServer: candidate.server,
+          downloadedBytes: compressedTotal,
+          totalBytes: compressedTotal,
+          speedBytesPerSec: 0,
+        ),
+      );
+    }
+
+    final File finalFile = File(finalPath);
+    if (episode.compressionMethod == 0) {
+      if (finalFile.existsSync()) {
+        await finalFile.delete();
+      }
+      await partFile.rename(finalPath);
+    } else {
+      final File tmpOut = File('$finalPath.extracting');
+      final bool ok = await extractZipEntryFile(
+        compressedFile: partFile,
+        outFile: tmpOut,
+        compressionMethod: episode.compressionMethod,
+        expectedSize: episode.uncompressedSize,
+        shouldAbort: () =>
+            _pausedExplicitly.contains(id) || _canceledExplicitly.contains(id),
+      );
+      if (!ok) {
+        // Paused mid-extract: the compressed .part is complete, so Resume
+        // goes straight back to extraction without re-downloading.
+        return;
+      }
+      if (finalFile.existsSync()) {
+        await finalFile.delete();
+      }
+      await tmpOut.rename(finalPath);
+      try {
+        if (partFile.existsSync()) await partFile.delete();
+      } catch (_) {}
+    }
+
+    final int finalSize = File(finalPath).lengthSync();
+    final MovieDownloadItem? doneSnap = itemById(id);
+    if (doneSnap != null) {
+      _upsertItem(
+        doneSnap.copyWith(
+          status: MovieDownloadStatus.completed,
+          activeServer: candidate.server,
+          downloadedBytes: finalSize,
+          totalBytes: finalSize,
+          speedBytesPerSec: 0,
+          completedAtMs: DateTime.now().millisecondsSinceEpoch,
+          errorMessage: '',
+        ),
+        persistImmediate: true,
+      );
     }
   }
 

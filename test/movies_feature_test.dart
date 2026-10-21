@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
@@ -25,6 +26,7 @@ class _FakeMovieTransport implements MovieHttpTransport {
   final Map<String, MovieHttpResponse Function(String body, Map<String, String> headers)>
       postRoutes =
       <String, MovieHttpResponse Function(String body, Map<String, String> headers)>{};
+  final Map<String, List<int>> rangeRoutes = <String, List<int>>{};
   final List<String> requestedUrls = <String>[];
 
   @override
@@ -62,6 +64,42 @@ class _FakeMovieTransport implements MovieHttpTransport {
       statusCode: 404,
       body: '',
       headers: const <String, String>{},
+      effectiveUrl: url,
+    );
+  }
+
+  @override
+  Future<MovieRangeResponse> getRange(
+    String url, {
+    Map<String, String> headers = const <String, String>{},
+    required int start,
+    int? end,
+  }) async {
+    requestedUrls.add(url);
+    final List<int>? data = rangeRoutes[url];
+    if (data == null) {
+      return MovieRangeResponse(
+        statusCode: 404,
+        bytes: Uint8List(0),
+        headers: const <String, String>{},
+        effectiveUrl: url,
+      );
+    }
+    if (start >= data.length) {
+      return MovieRangeResponse(
+        statusCode: 416,
+        bytes: Uint8List(0),
+        headers: <String, String>{'content-range': 'bytes */${data.length}'},
+        effectiveUrl: url,
+      );
+    }
+    final int last = end == null || end >= data.length ? data.length - 1 : end;
+    return MovieRangeResponse(
+      statusCode: 206,
+      bytes: Uint8List.fromList(data.sublist(start, last + 1)),
+      headers: <String, String>{
+        'content-range': 'bytes $start-$last/${data.length}',
+      },
       effectiveUrl: url,
     );
   }

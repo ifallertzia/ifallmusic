@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
@@ -26,6 +27,39 @@ class MovieHttpResponse {
   }
 }
 
+/// Binary response of an HTTP Range request.
+class MovieRangeResponse {
+  const MovieRangeResponse({
+    required this.statusCode,
+    required this.bytes,
+    required this.headers,
+    required this.effectiveUrl,
+  });
+
+  final int statusCode;
+  final Uint8List bytes;
+  final Map<String, String> headers;
+  final String effectiveUrl;
+
+  String? header(String name) {
+    final String lower = name.toLowerCase();
+    for (final MapEntry<String, String> entry in headers.entries) {
+      if (entry.key.toLowerCase() == lower) return entry.value;
+    }
+    return null;
+  }
+
+  /// Total size of the full remote file parsed from
+  /// `Content-Range: bytes <start>-<end>/<total>`, or -1 when unavailable.
+  int get totalSize {
+    final String? range = header('content-range');
+    if (range == null) return -1;
+    final RegExpMatch? m = RegExp(r'/(\d+)\s*$').firstMatch(range.trim());
+    if (m == null) return -1;
+    return int.tryParse(m.group(1)!) ?? -1;
+  }
+}
+
 abstract class MovieHttpTransport {
   Future<MovieHttpResponse> get(
     String url, {
@@ -37,6 +71,17 @@ abstract class MovieHttpTransport {
     String url, {
     required String body,
     Map<String, String> headers = const <String, String>{},
+  });
+
+  /// Fetches bytes `[start, end]` (inclusive) of a remote binary file.
+  /// `end == null` fetches through the end of the file. A server that
+  /// ignores the Range header answers 200 with the whole file — callers
+  /// must treat anything other than 206 as "range unsupported".
+  Future<MovieRangeResponse> getRange(
+    String url, {
+    Map<String, String> headers = const <String, String>{},
+    required int start,
+    int? end,
   });
 
   Dio get streamDio;
@@ -168,6 +213,37 @@ class DioMovieHttpTransport implements MovieHttpTransport {
       }
       rethrow;
     }
+  }
+
+  @override
+  Future<MovieRangeResponse> getRange(
+    String url, {
+    Map<String, String> headers = const <String, String>{},
+    required int start,
+    int? end,
+  }) async {
+    final Response<List<int>> res = await _dio.get<List<int>>(
+      url,
+      options: Options(
+        headers: <String, String>{
+          ...headers,
+          'Range': end == null ? 'bytes=$start-' : 'bytes=$start-$end',
+          // Range offsets are only meaningful on the identity encoding.
+          'Accept-Encoding': 'identity',
+        },
+        followRedirects: true,
+        maxRedirects: 5,
+        responseType: ResponseType.bytes,
+        receiveTimeout: const Duration(seconds: 60),
+        validateStatus: (int? s) => s != null && s < 500,
+      ),
+    );
+    return MovieRangeResponse(
+      statusCode: res.statusCode ?? 0,
+      bytes: Uint8List.fromList(res.data ?? const <int>[]),
+      headers: _flattenHeaders(res.headers),
+      effectiveUrl: res.realUri.toString(),
+    );
   }
 
   bool _isDnsOrConnectionFailure(DioException e) {
