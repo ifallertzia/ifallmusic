@@ -31,6 +31,8 @@ import 'core/services/update_service.dart';
 import 'core/services/update_reminders.dart';
 import 'ui/settings/update_dialog.dart';
 import 'core/theme/sidify_theme.dart';
+import 'movies/services/eon_movies_service.dart';
+import 'movies/services/movie_download_service.dart';
 import 'services/lyrics_service.dart';
 import 'ui/onboarding/welcome_page.dart';
 import 'ui/boot/boot_screen.dart';
@@ -135,6 +137,12 @@ Future<AppBoot> _initializeApp() async {
   final MusicDownloadService musicDownloads = MusicDownloadService(
     prefs: prefs,
   );
+  final EonMoviesService moviesService = EonMoviesService();
+  final MovieDownloadService movieDownloads =
+      await MovieDownloadService.create(
+    prefs,
+    moviesService: moviesService,
+  );
   await playback.restorePersistedQueue();
   NotificationBootstrap.handler?.attach(
     playback,
@@ -186,6 +194,8 @@ Future<AppBoot> _initializeApp() async {
     recommendations: recommendations,
     artists: artists,
     musicDownloads: musicDownloads,
+    moviesService: moviesService,
+    movieDownloads: movieDownloads,
     safeMode: native.safeMode,
   );
 }
@@ -230,6 +240,8 @@ class AppBoot {
     required this.recommendations,
     required this.artists,
     required this.musicDownloads,
+    required this.moviesService,
+    required this.movieDownloads,
     required this.safeMode,
   });
 
@@ -241,6 +253,8 @@ class AppBoot {
   final RecommendationService recommendations;
   final ArtistService artists;
   final MusicDownloadService musicDownloads;
+  final EonMoviesService moviesService;
+  final MovieDownloadService movieDownloads;
   final bool safeMode;
 }
 
@@ -386,6 +400,12 @@ class _SidifyAppState extends State<SidifyApp> with WidgetsBindingObserver {
         ),
         ChangeNotifierProvider<MusicDownloadService>.value(
           value: boot.musicDownloads,
+        ),
+        ChangeNotifierProvider<MovieDownloadService>.value(
+          value: boot.movieDownloads,
+        ),
+        Provider<EonMoviesService>.value(
+          value: boot.moviesService,
         ),
         ChangeNotifierProvider<HomeCatalog>(
           create: (_) => HomeCatalog(
