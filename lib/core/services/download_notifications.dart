@@ -366,7 +366,7 @@ class DownloadNotifications {
           silent: !terminal,
           showWhen: terminal,
           showProgress: !terminal,
-          progressMax: 100,
+          maxProgress: 100,
           progress: percent,
           visibility: NotificationVisibility.public,
           ticker: terminal
