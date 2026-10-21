@@ -101,15 +101,10 @@ class EonMoviesService {
     MovieCategory category = MovieCategory.recommended,
     int page = 1,
   }) async {
-    final String query = Uri(
-      queryParameters: <String, String>{
-        'action': '',
-        'page': '$page',
-        'name': '',
-        'category': category.slug,
-      },
-    ).query;
-    final MovieHttpResponse res = await _getFromCatalog('/?$query');
+    final String encodedCat = Uri.encodeQueryComponent(category.slug);
+    final MovieHttpResponse res = await _getFromCatalog(
+      '/?action=&page=$page&name=&category=$encodedCat',
+    );
     return EonHtmlParser.parsePostList(res.body, _baseUrl);
   }
 
@@ -122,14 +117,10 @@ class EonMoviesService {
     if (trimmed.isEmpty) {
       return fetchPosts(page: page);
     }
-    final String qs = Uri(
-      queryParameters: <String, String>{
-        'action': 'search',
-        'page': '$page',
-        'name': trimmed,
-      },
-    ).query;
-    final MovieHttpResponse res = await _getFromCatalog('/?$qs');
+    final String encodedQuery = Uri.encodeQueryComponent(trimmed);
+    final MovieHttpResponse res = await _getFromCatalog(
+      '/?action=search&page=$page&name=$encodedQuery',
+    );
     return EonHtmlParser.parsePostList(res.body, _baseUrl);
   }
 

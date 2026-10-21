@@ -461,6 +461,10 @@ void main() {
     testWidgets(
         'SearchHubPage shows Music vs Movies chooser, browse/search, series seasons & episodes, languages, and downloads page',
         (WidgetTester tester) async {
+      tester.view.physicalSize = const Size(1170, 2532);
+      tester.view.devicePixelRatio = 3.0;
+      addTearDown(tester.view.reset);
+
       SharedPreferences.setMockInitialValues(<String, Object>{});
       final SharedPreferences prefs = await SharedPreferences.getInstance();
       final Directory tempDir = await tester.runAsync(
