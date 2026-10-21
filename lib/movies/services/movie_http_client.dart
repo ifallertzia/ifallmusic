@@ -230,8 +230,6 @@ class DioMovieHttpTransport implements MovieHttpTransport {
     if (addr == null) return null;
 
     final SecurityContext ctx = SecurityContext.defaultContext;
-    Socket? tcp;
-    SecureSocket? tls;
     HttpClient? customClient;
     try {
       final int port = uri.hasPort ? uri.port : (uri.scheme == 'https' ? 443 : 80);
@@ -283,8 +281,6 @@ class DioMovieHttpTransport implements MovieHttpTransport {
         effectiveUrl: url,
       );
     } catch (_) {
-      tls?.destroy();
-      tcp?.destroy();
       return null;
     } finally {
       customClient?.close(force: false);
