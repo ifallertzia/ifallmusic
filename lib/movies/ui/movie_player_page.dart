@@ -908,7 +908,7 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
         DeviceOrientation.portraitUp,
         DeviceOrientation.portraitDown,
       ]);
-      await SystemChrome.setSystemUIOverlayStyle(
+      SystemChrome.setSystemUIOverlayStyle(
         const SystemUiOverlayStyle(
           statusBarColor: Colors.transparent,
           statusBarIconBrightness: Brightness.light,

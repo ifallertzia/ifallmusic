@@ -3,7 +3,7 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:media_kit/media_kit.dart';
+import 'package:media_kit/media_kit.dart' show MediaKit;
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
