@@ -199,7 +199,14 @@ class _SearchPageState extends State<SearchPage> {
       bottom: false,
       child: Column(
         children: <Widget>[
-          const PageTitle('Search'),
+          PageTitle(
+            'Search',
+            trailing: IconButton(
+              tooltip: 'Switch to movies',
+              onPressed: () => context.read<SidifyShellController>().switchMode(),
+              icon: Icon(Icons.movie_creation_outlined, color: t.text),
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
             child: Container(

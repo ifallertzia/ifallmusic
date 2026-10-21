@@ -135,13 +135,6 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
   String _audioSelectionId = 'auto';
   String _subtitleSelectionId = 'auto';
 
-  MovieStreamCandidate? get _currentCandidate {
-    if (_candidateIndex < 0 || _candidateIndex >= _candidates.length) {
-      return null;
-    }
-    return _candidates[_candidateIndex];
-  }
-
   String get _displayTitle {
     final MovieDownloadItem? item = widget.localItem;
     if (item != null) return item.movieTitle;
@@ -183,7 +176,7 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
     _controlsTheme = _buildControlsTheme();
     _listenToPlayer();
     _setStatus(
-      widget.isLocal ? 'Opening downloaded video…' : 'Finding stream mirrors…',
+      widget.isLocal ? 'Opening video…' : 'Finding streams…',
     );
   }
 
@@ -252,7 +245,7 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
       seekOnDoubleTapBackwardDuration: const Duration(seconds: 10),
       seekOnDoubleTapForwardDuration: const Duration(seconds: 10),
       visibleOnMount: true,
-      controlsHoverDuration: const Duration(seconds: 4),
+      controlsHoverDuration: const Duration(seconds: 3),
       backdropColor: Colors.black.withValues(alpha: 0.45),
       primaryButtonBar: <Widget>[
         const Spacer(flex: 2),
@@ -310,6 +303,11 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
             },
           ),
         ),
+        if (!widget.isLocal)
+          MaterialCustomButton(
+            icon: const Icon(Icons.download_rounded),
+            onPressed: () => unawaited(_downloadCurrentQuality()),
+          ),
       ],
       bottomButtonBar: <Widget>[
         const MaterialPositionIndicator(
@@ -469,7 +467,7 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
     final bool shouldPlay = !_ready || _desiredPlaying;
     _startupTimer?.cancel();
     _isResolving = true;
-    _setStatus('Finding stream mirrors for ${quality.displayQuality}…');
+    _setStatus('Finding streams for ${quality.displayQuality}…');
     if (mounted) {
       setState(() {
         _loading = true;
@@ -566,7 +564,7 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
     _failedCandidates.remove(index);
     _desiredPlaying = play;
     _prepareForOpen(start);
-    _setStatus('Connecting to ${candidate.server}…');
+    _setStatus('Connecting to Ifallertzia…');
     if (mounted) {
       setState(() {
         _loading = true;
@@ -679,14 +677,7 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
           ? 'Local playback • $_displaySubtitle'
           : 'Local playback';
     }
-    final MovieStreamCandidate? candidate = _currentCandidate;
-    final MovieQualityLink? quality = _currentQuality;
-    final List<String> parts = <String>[
-      'Streaming',
-      if (candidate != null && candidate.server.isNotEmpty) candidate.server,
-      if (quality != null) quality.displayQuality,
-    ];
-    return parts.join(' • ');
+    return 'Playing';
   }
 
   void _armStartupTimer(int generation) {
@@ -744,7 +735,7 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
     _candidateHealthy = false;
     final Duration resumePosition = _lastKnownPosition;
     final bool shouldPlay = _desiredPlaying || !_ready;
-    final String failedServer = _candidates[failedIndex].server;
+    const String failedServer = 'Ifallertzia';
 
     if (mounted) {
       setState(() {
@@ -1090,9 +1081,7 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
                         for (int i = 0; i < _candidates.length; i++)
                           _settingsOptionTile(
                             t,
-                            title: _candidates[i].server.isNotEmpty
-                                ? _candidates[i].server
-                                : 'Mirror ${i + 1}',
+                            title: 'Ifallertzia ${i + 1}',
                             subtitle: i == _candidateIndex
                                 ? 'Current mirror'
                                 : _failedCandidates.contains(i)

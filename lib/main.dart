@@ -34,6 +34,7 @@ import 'ui/settings/update_dialog.dart';
 import 'core/theme/sidify_theme.dart';
 import 'movies/services/eon_movies_service.dart';
 import 'movies/services/movie_download_service.dart';
+import 'movies/services/movie_library_service.dart';
 import 'services/lyrics_service.dart';
 import 'ui/onboarding/welcome_page.dart';
 import 'ui/boot/boot_screen.dart';
@@ -149,6 +150,7 @@ Future<AppBoot> _initializeApp() async {
     prefs,
     moviesService: moviesService,
   );
+  final MovieLibraryService movieLibrary = MovieLibraryService(prefs);
   await playback.restorePersistedQueue();
   NotificationBootstrap.handler?.attach(
     playback,
@@ -202,7 +204,9 @@ Future<AppBoot> _initializeApp() async {
     musicDownloads: musicDownloads,
     moviesService: moviesService,
     movieDownloads: movieDownloads,
+    movieLibrary: movieLibrary,
     safeMode: native.safeMode,
+    prefs: prefs,
   );
 }
 
@@ -248,7 +252,9 @@ class AppBoot {
     required this.musicDownloads,
     required this.moviesService,
     required this.movieDownloads,
+    required this.movieLibrary,
     required this.safeMode,
+    required this.prefs,
   });
 
   final SettingsService settings;
@@ -261,7 +267,9 @@ class AppBoot {
   final MusicDownloadService musicDownloads;
   final EonMoviesService moviesService;
   final MovieDownloadService movieDownloads;
+  final MovieLibraryService movieLibrary;
   final bool safeMode;
+  final SharedPreferences prefs;
 }
 
 class SidifyApp extends StatefulWidget {
@@ -381,6 +389,9 @@ class _SidifyAppState extends State<SidifyApp> with WidgetsBindingObserver {
         state == AppLifecycleState.detached) {
       unawaited(widget.boot.playback.persistQueueNow());
     }
+    if (state == AppLifecycleState.detached) {
+      unawaited(widget.boot.prefs.remove('ifall.start_mode').then<void>((_) {}));
+    }
   }
 
   @override
@@ -410,6 +421,9 @@ class _SidifyAppState extends State<SidifyApp> with WidgetsBindingObserver {
         ChangeNotifierProvider<MovieDownloadService>.value(
           value: boot.movieDownloads,
         ),
+        ChangeNotifierProvider<MovieLibraryService>.value(
+          value: boot.movieLibrary,
+        ),
         Provider<EonMoviesService>.value(
           value: boot.moviesService,
         ),
@@ -421,7 +435,7 @@ class _SidifyAppState extends State<SidifyApp> with WidgetsBindingObserver {
           ),
         ),
         ChangeNotifierProvider<SidifyShellController>(
-          create: (_) => SidifyShellController(),
+          create: (_) => SidifyShellController(boot.prefs),
         ),
         ChangeNotifierProvider<JamService>(
           create: (_) => JamService(settings: boot.settings),

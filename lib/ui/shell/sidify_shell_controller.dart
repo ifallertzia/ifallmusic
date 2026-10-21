@@ -1,34 +1,59 @@
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// The five destinations of the floating tab bar, in order.
 enum SidifyTab { home, explore, search, library, together }
 
-/// Sub-view inside the Search tab:
-/// - [chooser]: asks between Music and Movies & Series
-/// - [music]: existing untouched Music search experience
-/// - [movies]: Movies & Series search, recommended catalog, and downloads
 enum SearchMode { chooser, music, movies }
 
-/// Owns which tab is showing, a small back-history of tab visits, and the
-/// query handed to the Search tab from elsewhere (Home chips, artist pages…).
-///
-/// Back behaviour mirrors the site: back replays tab visits and only leaves
-/// the app at Home. [back] returns true when it consumed the press.
 class SidifyShellController extends ChangeNotifier {
+  SidifyShellController([this._prefs]) {
+    final String? saved = _prefs?.getString(_modeKey);
+    _ready = true;
+    if (saved == 'music' || saved == 'movies') {
+      _hasChoice = true;
+      _moviesMode = saved == 'movies';
+      _searchMode = _moviesMode ? SearchMode.movies : SearchMode.music;
+    }
+    notifyListeners();
+  }
+
+  static const String _modeKey = 'ifall.start_mode';
+  final SharedPreferences? _prefs;
+
   SidifyTab _tab = SidifyTab.home;
   SearchMode _searchMode = SearchMode.chooser;
   final List<SidifyTab> _history = <SidifyTab>[];
   String _searchQuery = '';
   int _searchNonce = 0;
+  bool _ready = false;
+  bool _hasChoice = false;
+  bool _moviesMode = false;
 
   SidifyTab get tab => _tab;
   int get index => _tab.index;
   SearchMode get searchMode => _searchMode;
-
-  /// The query the Search tab should adopt, and a nonce that changes even
-  /// when the same query is handed over twice.
   String get searchQuery => _searchQuery;
   int get searchNonce => _searchNonce;
+  bool get ready => _ready;
+  bool get hasModeChoice => _hasChoice;
+  bool get isMoviesMode => _moviesMode;
+
+  Future<void> chooseMode({required bool movies}) async {
+    _moviesMode = movies;
+    _hasChoice = true;
+    _searchMode = movies ? SearchMode.movies : SearchMode.music;
+    _tab = SidifyTab.home;
+    _history.clear();
+    notifyListeners();
+    await _prefs?.setString(_modeKey, movies ? 'movies' : 'music');
+  }
+
+  Future<void> switchMode() => chooseMode(movies: !_moviesMode);
+
+  Future<void> requireModeChoiceNextLaunch() async {
+    await _prefs?.remove(_modeKey);
+  }
 
   void setSearchMode(SearchMode mode) {
     if (_searchMode == mode) return;
@@ -52,14 +77,11 @@ class SidifyShellController extends ChangeNotifier {
   void goSearch([String query = '']) {
     _searchQuery = query;
     _searchNonce++;
-    _searchMode =
-        query.trim().isNotEmpty ? SearchMode.music : SearchMode.chooser;
+    _searchMode = _moviesMode ? SearchMode.movies : SearchMode.music;
     select(SidifyTab.search);
     notifyListeners();
   }
 
-  /// Consumes a back press by returning to the previous tab. False at Home,
-  /// where the press should leave the app.
   bool back() {
     if (_tab == SidifyTab.home) return false;
     if (_history.isEmpty) {

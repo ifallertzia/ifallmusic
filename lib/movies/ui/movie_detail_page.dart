@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/theme/sidify_theme.dart';
 import '../models/movie_models.dart';
 import '../services/eon_movies_service.dart';
+import '../services/movie_library_service.dart';
 import 'movie_ui_widgets.dart';
 
 void openMovieDetailPage(BuildContext context, MoviePost post) {
@@ -38,7 +41,22 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
     _load();
   }
 
+  MoviePost get _currentPost {
+    final MovieDetail? detail = _detail;
+    if (detail == null) return widget.initialPost;
+    return MoviePost(
+      title: detail.title,
+      link: detail.webUrl,
+      imageUrl: detail.posterUrl.isNotEmpty ? detail.posterUrl : widget.initialPost.imageUrl,
+      fallbackImageUrl: detail.fallbackPosterUrl,
+      badge: detail.isSeries ? 'Series' : 'Movie',
+      subtitle: detail.year,
+    );
+  }
+
   Future<void> _load() async {
+    final MovieLibraryService? library = context.read<MovieLibraryService?>();
+    if (library != null) unawaited(library.recordOpened(widget.initialPost));
     setState(() {
       _loading = true;
       _error = null;
@@ -54,7 +72,7 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = 'Sorry yr, phir se try kr (ya internet connection check kr)';
         _loading = false;
       });
     }
@@ -147,8 +165,20 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
                 ),
               ),
             ),
-            actions: const <Widget>[
-              Padding(
+            actions: <Widget>[
+              Builder(
+                builder: (BuildContext context) {
+                  final MovieLibraryService? library = context.watch<MovieLibraryService?>();
+                  if (library == null) return const SizedBox.shrink();
+                  final bool saved = library.contains(_currentPost);
+                  return IconButton(
+                    tooltip: saved ? 'Remove from watchlist' : 'Add to watchlist',
+                    onPressed: () => library.toggleWatchlist(_currentPost),
+                    icon: Icon(saved ? Icons.bookmark_rounded : Icons.bookmark_border_rounded, color: Colors.white),
+                  );
+                },
+              ),
+              const Padding(
                 padding: EdgeInsets.only(right: 12),
                 child: MovieDownloadsActionButton(),
               ),
