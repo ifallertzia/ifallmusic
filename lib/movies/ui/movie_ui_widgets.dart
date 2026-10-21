@@ -5,8 +5,10 @@ import 'package:provider/provider.dart';
 import '../../core/services/app_feedback.dart';
 import '../../core/theme/sidify_theme.dart';
 import '../models/movie_models.dart';
+import '../services/eon_movies_service.dart';
 import '../services/movie_download_service.dart';
 import 'movie_downloads_page.dart';
+import 'movie_player_page.dart';
 
 /// Resilient network poster/backdrop widget with automatic secondary URL
 /// failover and zero-network placeholder when [imageUrl] is empty.
@@ -174,10 +176,34 @@ class MovieQualityDownloadTile extends StatelessWidget {
     super.key,
     required this.detail,
     required this.quality,
+    this.allQualities = const <MovieQualityLink>[],
   });
 
   final MovieDetail detail;
   final MovieQualityLink quality;
+
+  /// Sibling qualities for the same movie/episode. The online player uses
+  /// these for its in-player quality switcher; unrelated episode qualities
+  /// should not be passed here.
+  final List<MovieQualityLink> allQualities;
+
+  bool get _canWatch => EonMoviesService.canAttemptOnlinePlayback(quality);
+
+  List<MovieQualityLink> get _watchQualities {
+    final List<MovieQualityLink> source = allQualities.isNotEmpty
+        ? allQualities
+        : <MovieQualityLink>[quality];
+    final Map<String, MovieQualityLink> byId = <String, MovieQualityLink>{};
+    for (final MovieQualityLink item in source) {
+      if (EonMoviesService.canAttemptOnlinePlayback(item)) {
+        byId.putIfAbsent(item.id, () => item);
+      }
+    }
+    if (_canWatch) {
+      byId.putIfAbsent(quality.id, () => quality);
+    }
+    return List<MovieQualityLink>.unmodifiable(byId.values);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -268,6 +294,27 @@ class MovieQualityDownloadTile extends StatelessWidget {
                         ],
                       ),
                     ],
+                    if (quality.isZipPack) ...<Widget>[
+                      const SizedBox(height: 5),
+                      Row(
+                        children: <Widget>[
+                          Icon(
+                            Icons.playlist_play_rounded,
+                            size: 14,
+                            color: t.brand,
+                          ),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              'Episode-wise available — tap Download',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: SidifyText.caption(t.brand),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -326,6 +373,69 @@ class MovieQualityDownloadTile extends StatelessWidget {
     MovieDownloadService dlService,
     MovieDownloadItem? existing,
   ) {
+    final Widget downloadAction =
+        _buildDownloadAction(context, t, dlService, existing);
+    if (!_canWatch ||
+        existing?.status == MovieDownloadStatus.completed) {
+      return downloadAction;
+    }
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: <Widget>[
+        _buildWatchAction(context, t),
+        const SizedBox(height: 7),
+        downloadAction,
+      ],
+    );
+  }
+
+  Widget _buildWatchAction(BuildContext context, SidifyTokens t) {
+    return Material(
+      color: t.brand,
+      borderRadius: BorderRadius.circular(999),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: () => openOnlineMoviePlayer(
+          context,
+          detail: detail,
+          quality: quality,
+          allQualities: _watchQualities,
+        ),
+        child: const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Icon(
+                Icons.play_arrow_rounded,
+                size: 16,
+                color: Colors.white,
+              ),
+              SizedBox(width: 5),
+              Text(
+                'Watch',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  height: 1.3,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDownloadAction(
+    BuildContext context,
+    SidifyTokens t,
+    MovieDownloadService dlService,
+    MovieDownloadItem? existing,
+  ) {
     if (existing == null ||
         existing.status == MovieDownloadStatus.canceled ||
         existing.status == MovieDownloadStatus.failed) {
@@ -336,6 +446,14 @@ class MovieQualityDownloadTile extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(999),
           onTap: () async {
+            if (quality.isZipPack) {
+              await showMovieZipPackOptions(
+                context,
+                detail: detail,
+                quality: quality,
+              );
+              return;
+            }
             await dlService.enqueueDownload(detail: detail, quality: quality);
             showAppNotice(
               'Download started: ${detail.cleanTitle} (${quality.displayQuality})',
@@ -369,7 +487,13 @@ class MovieQualityDownloadTile extends StatelessWidget {
         borderRadius: BorderRadius.circular(999),
         child: InkWell(
           borderRadius: BorderRadius.circular(999),
-          onTap: () => dlService.openFile(existing),
+          onTap: () async {
+            if (existing.isZip) {
+              await dlService.openFile(existing);
+            } else {
+              await openLocalMoviePlayer(context, item: existing);
+            }
+          },
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
             child: Row(
@@ -404,6 +528,408 @@ class MovieQualityDownloadTile extends StatelessWidget {
       tooltip: 'Pause download',
       onPressed: () => dlService.pause(existing.id),
       icon: Icon(Icons.pause_circle_filled_rounded, color: t.brand),
+    );
+  }
+}
+
+/// Download choice for a season ZIP pack: episode-wise (only the selected
+/// episode's bytes are fetched out of the remote ZIP) or the complete ZIP.
+Future<void> showMovieZipPackOptions(
+  BuildContext context, {
+  required MovieDetail detail,
+  required MovieQualityLink quality,
+}) {
+  return showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (_) => _ZipPackOptionsSheet(detail: detail, quality: quality),
+  );
+}
+
+class _ZipPackOptionsSheet extends StatefulWidget {
+  const _ZipPackOptionsSheet({required this.detail, required this.quality});
+
+  final MovieDetail detail;
+  final MovieQualityLink quality;
+
+  @override
+  State<_ZipPackOptionsSheet> createState() => _ZipPackOptionsSheetState();
+}
+
+class _ZipPackOptionsSheetState extends State<_ZipPackOptionsSheet> {
+  bool _loadingEpisodes = false;
+  String? _error;
+  MovieZipPackListing? _listing;
+
+  Future<void> _loadEpisodes() async {
+    setState(() {
+      _loadingEpisodes = true;
+      _error = null;
+    });
+    try {
+      final EonMoviesService svc = context.read<EonMoviesService>();
+      final MovieZipPackListing listing = await svc.listZipPackEpisodes(
+        widget.quality,
+        fallbackTitle: widget.detail.cleanTitle,
+      );
+      if (!mounted) return;
+      setState(() {
+        _listing = listing;
+        _loadingEpisodes = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString().replaceFirst('Bad state: ', '');
+        _loadingEpisodes = false;
+      });
+    }
+  }
+
+  Future<void> _downloadWholeZip() async {
+    final MovieDownloadService dlService =
+        context.read<MovieDownloadService>();
+    await dlService.enqueueDownload(
+      detail: widget.detail,
+      quality: widget.quality,
+    );
+    showAppNotice(
+      'Download started: ${widget.detail.cleanTitle} '
+      '(${widget.quality.displayQuality} ZIP)',
+    );
+    if (!mounted) return;
+    Navigator.of(context).pop();
+  }
+
+  Future<void> _downloadEpisode(MovieZipEpisode episode) async {
+    final MovieDownloadService dlService =
+        context.read<MovieDownloadService>();
+    final MovieQualityLink epQuality =
+        EonMoviesService.qualityForZipEpisode(widget.quality, episode);
+    await dlService.enqueueDownload(
+      detail: widget.detail,
+      quality: epQuality,
+    );
+    showAppNotice(
+      'Download started: ${episode.episodeLabel.isNotEmpty ? episode.episodeLabel : episode.fileName} '
+      '(${widget.quality.displayQuality}) — this episode only',
+    );
+    if (!mounted) return;
+    Navigator.of(context).pop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final SidifyTokens t = context.sidify;
+    // Watch here (in build) so episode rows update with download progress;
+    // rows themselves are built lazily by the ListView.
+    final MovieDownloadService dlService =
+        context.watch<MovieDownloadService>();
+    final MovieZipPackListing? listing = _listing;
+    final double maxHeight = MediaQuery.of(context).size.height * 0.78;
+
+    return SafeArea(
+      child: Container(
+        constraints: BoxConstraints(maxHeight: maxHeight),
+        margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        padding: const EdgeInsets.fromLTRB(18, 12, 18, 18),
+        decoration: BoxDecoration(
+          color: t.bg,
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: t.edge),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Center(
+              child: Container(
+                width: 42,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: t.fill3,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: <Widget>[
+                Icon(Icons.folder_zip_rounded, size: 20, color: t.brand),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '${widget.quality.displayQuality} • Season Pack (ZIP)',
+                    style: SidifyText.titleM(t.text),
+                  ),
+                ),
+                if (widget.quality.sizeLabel.isNotEmpty)
+                  Text(
+                    widget.quality.sizeLabel,
+                    style: SidifyText.label(t.text2),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              listing != null
+                  ? listing.zipFileName
+                  : 'The source hosts this season as one ZIP — but you can '
+                      'still download just a single episode from it.',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: SidifyText.caption(t.text2),
+            ),
+            const SizedBox(height: 14),
+            if (_loadingEpisodes)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 26),
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      CircularProgressIndicator(color: t.brand),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Finding episodes inside the ZIP…',
+                        style: SidifyText.bodyS(t.text2),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        'The full ZIP is not downloaded — just a few KB',
+                        style: SidifyText.caption(t.text2),
+                      ),
+                    ],
+                  ),
+                ),
+              )
+            else if (_error != null)
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: t.raised,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: t.edge),
+                    ),
+                    child: Text(
+                      _error!,
+                      style: SidifyText.bodyS(t.text2),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  _zipOptionTile(
+                    t,
+                    icon: Icons.folder_zip_rounded,
+                    title:
+                        'Complete Season ZIP${widget.quality.sizeLabel.isNotEmpty ? ' (${widget.quality.sizeLabel})' : ''}',
+                    subtitle: 'All episodes in one ZIP file',
+                    onTap: _downloadWholeZip,
+                  ),
+                ],
+              )
+            else if (listing == null)
+              Column(
+                children: <Widget>[
+                  _zipOptionTile(
+                    t,
+                    icon: Icons.playlist_play_rounded,
+                    title: 'Episode-wise Download',
+                    subtitle:
+                        'Shows the episodes inside — only the selected one '
+                        'downloads, not the whole season',
+                    onTap: _loadEpisodes,
+                  ),
+                  const SizedBox(height: 10),
+                  _zipOptionTile(
+                    t,
+                    icon: Icons.folder_zip_rounded,
+                    title:
+                        'Complete Season ZIP${widget.quality.sizeLabel.isNotEmpty ? ' (${widget.quality.sizeLabel})' : ''}',
+                    subtitle: 'All episodes in one ZIP file',
+                    onTap: _downloadWholeZip,
+                  ),
+                ],
+              )
+            else ...<Widget>[
+              Text(
+                '${listing.episodes.length} episodes found — only the one '
+                'you pick will download',
+                style: SidifyText.bodyS(t.text2),
+              ),
+              const SizedBox(height: 10),
+              Flexible(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: listing.episodes.length,
+                  itemBuilder: (BuildContext context, int i) {
+                    return _buildEpisodeRow(t, listing.episodes[i], dlService);
+                  },
+                ),
+              ),
+              const SizedBox(height: 10),
+              _zipOptionTile(
+                t,
+                icon: Icons.folder_zip_rounded,
+                title:
+                    'Complete Season ZIP (${MovieByteFmt.bytes(listing.totalBytes)})',
+                subtitle: 'All episodes in one ZIP file',
+                onTap: _downloadWholeZip,
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEpisodeRow(
+    SidifyTokens t,
+    MovieZipEpisode episode,
+    MovieDownloadService dlService,
+  ) {
+    final MovieQualityLink epQuality =
+        EonMoviesService.qualityForZipEpisode(widget.quality, episode);
+    final MovieDownloadItem? existing =
+        dlService.itemById('mdl_${epQuality.id}');
+
+    Widget trailing;
+    if (!episode.isSupported) {
+      trailing = Text(
+        'ZIP only',
+        style: SidifyText.caption(t.text2),
+      );
+    } else if (existing?.status == MovieDownloadStatus.completed) {
+      trailing = IconButton(
+        tooltip: 'Play',
+        onPressed: () => openLocalMoviePlayer(context, item: existing!),
+        icon: const Icon(
+          Icons.play_circle_fill_rounded,
+          color: Color(0xFF1DB954),
+        ),
+      );
+    } else if (existing != null && existing.isActive) {
+      trailing = Text(
+        '${(existing.progress * 100).toStringAsFixed(0)}%',
+        style: SidifyText.label(t.brand),
+      );
+    } else if (existing?.status == MovieDownloadStatus.paused) {
+      trailing = IconButton(
+        tooltip: 'Resume',
+        onPressed: () => dlService.resume(existing!.id),
+        icon: Icon(Icons.play_arrow_rounded, color: t.brand),
+      );
+    } else {
+      trailing = IconButton(
+        tooltip: 'Download episode',
+        onPressed: () => _downloadEpisode(episode),
+        icon: Icon(Icons.download_rounded, color: t.brand),
+      );
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: t.raised,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: t.edge),
+      ),
+      child: Row(
+        children: <Widget>[
+          Container(
+            width: 34,
+            height: 34,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: t.brand.withValues(alpha: 0.16),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              episode.episodeNumber > 0
+                  ? '${episode.episodeNumber}'
+                  : '${episode.index + 1}',
+              style: SidifyText.label(t.brand),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  episode.episodeLabel.isNotEmpty
+                      ? (episode.seasonLabel.isNotEmpty
+                          ? '${episode.seasonLabel} • ${episode.episodeLabel}'
+                          : episode.episodeLabel)
+                      : 'Episode ${episode.index + 1}',
+                  style: SidifyText.label(t.text),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '${episode.sizeLabel} • ${episode.fileName}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: SidifyText.caption(t.text2),
+                ),
+              ],
+            ),
+          ),
+          trailing,
+        ],
+      ),
+    );
+  }
+
+  Widget _zipOptionTile(
+    SidifyTokens t, {
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: t.raised,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: t.edge),
+          ),
+          child: Row(
+            children: <Widget>[
+              Container(
+                padding: const EdgeInsets.all(9),
+                decoration: BoxDecoration(
+                  color: t.brand.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(11),
+                ),
+                child: Icon(icon, size: 19, color: t.brand),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(title, style: SidifyText.titleM(t.text)),
+                    const SizedBox(height: 2),
+                    Text(subtitle, style: SidifyText.caption(t.text2)),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right_rounded, color: t.text2),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

@@ -7,6 +7,7 @@ import '../../core/services/native_bridge.dart';
 import '../../core/theme/sidify_theme.dart';
 import '../models/movie_models.dart';
 import '../services/movie_download_service.dart';
+import 'movie_player_page.dart';
 import 'movie_ui_widgets.dart';
 
 enum _DownloadFilter { all, active, completed }
@@ -358,6 +359,10 @@ class _DownloadCard extends StatelessWidget {
           label: item.isZip ? 'Open ZIP' : 'Play Video',
           primary: true,
           onTap: () async {
+            if (!item.isZip) {
+              await openLocalMoviePlayer(context, item: item);
+              return;
+            }
             final OpenResult res = await service.openFile(item);
             if (res.type != ResultType.done) {
               showAppNotice(res.message);

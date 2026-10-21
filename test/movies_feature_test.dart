@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
@@ -25,6 +26,7 @@ class _FakeMovieTransport implements MovieHttpTransport {
   final Map<String, MovieHttpResponse Function(String body, Map<String, String> headers)>
       postRoutes =
       <String, MovieHttpResponse Function(String body, Map<String, String> headers)>{};
+  final Map<String, List<int>> rangeRoutes = <String, List<int>>{};
   final List<String> requestedUrls = <String>[];
 
   @override
@@ -62,6 +64,42 @@ class _FakeMovieTransport implements MovieHttpTransport {
       statusCode: 404,
       body: '',
       headers: const <String, String>{},
+      effectiveUrl: url,
+    );
+  }
+
+  @override
+  Future<MovieRangeResponse> getRange(
+    String url, {
+    Map<String, String> headers = const <String, String>{},
+    required int start,
+    int? end,
+  }) async {
+    requestedUrls.add(url);
+    final List<int>? data = rangeRoutes[url];
+    if (data == null) {
+      return MovieRangeResponse(
+        statusCode: 404,
+        bytes: Uint8List(0),
+        headers: const <String, String>{},
+        effectiveUrl: url,
+      );
+    }
+    if (start >= data.length) {
+      return MovieRangeResponse(
+        statusCode: 416,
+        bytes: Uint8List(0),
+        headers: <String, String>{'content-range': 'bytes */${data.length}'},
+        effectiveUrl: url,
+      );
+    }
+    final int last = end == null || end >= data.length ? data.length - 1 : end;
+    return MovieRangeResponse(
+      statusCode: 206,
+      bytes: Uint8List.fromList(data.sublist(start, last + 1)),
+      headers: <String, String>{
+        'content-range': 'bytes $start-$last/${data.length}',
+      },
       effectiveUrl: url,
     );
   }
@@ -358,6 +396,114 @@ void main() {
           'https://pixeldrain.com/api/file/XYZ123?download',
         ]),
       );
+
+      // Online playback reuses this resolver, but must only hand direct,
+      // non-ZIP HTTP(S) video mirrors to the player.
+      expect(
+        EonMoviesService.canAttemptOnlinePlayback(
+          series.episodeGroups.first.qualities.first,
+        ),
+        isTrue,
+      );
+      final ResolvedMovieStream playback = await svc.resolvePlaybackStream(
+        series.episodeGroups.first.qualities.first,
+        fallbackTitle: series.cleanTitle,
+      );
+      expect(playback.filename, 'VisionQuest.S01E01.480p.mkv');
+      expect(
+        playback.candidates.map((MovieStreamCandidate c) => c.url),
+        containsAll(<String>[
+          'https://pub-cdn.r2.dev/VisionQuest.S01E01.480p.mkv',
+          'https://pixeldrain.com/api/file/XYZ123?download',
+        ]),
+      );
+      expect(
+        playback.candidates.every(
+          (MovieStreamCandidate c) =>
+              !c.isZip &&
+              (c.url.startsWith('https://') || c.url.startsWith('http://')),
+        ),
+        isTrue,
+      );
+
+      final List<MovieStreamCandidate> filtered =
+          EonMoviesService.streamableCandidates(
+        const ResolvedMovieStream(
+          filename: 'movie.mkv',
+          mimeType: 'video/x-matroska',
+          candidates: <MovieStreamCandidate>[
+            MovieStreamCandidate(
+              server: 'Good mirror',
+              url: 'https://cdn.example.com/movie.mkv',
+              headers: <String, String>{
+                'Referer': 'https://example.com/watch',
+              },
+            ),
+            MovieStreamCandidate(
+              server: 'Flagged ZIP',
+              url: 'https://cdn.example.com/season.zip',
+              isZip: true,
+            ),
+            MovieStreamCandidate(
+              server: 'Non HTTP',
+              url: 'ftp://cdn.example.com/movie.mkv',
+            ),
+            MovieStreamCandidate(
+              server: 'ZIP path',
+              url: 'https://cdn.example.com/season.zip?download=1',
+            ),
+          ],
+        ),
+      );
+      expect(filtered, hasLength(1));
+      expect(filtered.single.server, 'Good mirror');
+      expect(
+        filtered.single.headers['Referer'],
+        'https://example.com/watch',
+      );
+
+      expect(
+        EonMoviesService.streamableCandidates(
+          const ResolvedMovieStream(
+            filename: 'season.zip',
+            mimeType: 'application/zip',
+            candidates: <MovieStreamCandidate>[
+              MovieStreamCandidate(
+                server: 'ZIP mirror',
+                url: 'https://cdn.example.com/season.zip',
+              ),
+            ],
+          ),
+        ),
+        isEmpty,
+      );
+
+      final MovieQualityLink zipEntryQuality =
+          series.episodeGroups.first.qualities.first.copyWith(
+        id: 'zip-entry-quality',
+        zipEntryName: 'Season 1/VisionQuest.S01E01.480p.mkv',
+      );
+      expect(
+        EonMoviesService.canAttemptOnlinePlayback(zipEntryQuality),
+        isFalse,
+      );
+      await expectLater(
+        svc.resolvePlaybackStream(
+          zipEntryQuality,
+          fallbackTitle: series.cleanTitle,
+        ),
+        throwsStateError,
+      );
+
+      final MovieQualityLink zipPackQuality =
+          series.episodeGroups.first.qualities.first.copyWith(
+        id: 'zip-pack-quality',
+        isZipPack: true,
+      );
+      expect(
+        EonMoviesService.canAttemptOnlinePlayback(zipPackQuality),
+        isFalse,
+      );
     });
   });
 
@@ -620,6 +766,9 @@ void main() {
       expect(find.text('Hindi, English'), findsWidgets);
       expect(find.text('Season 1 • Episode 1'), findsOneWidget);
       expect(find.text('480p HEVC'), findsOneWidget);
+      // Watch is available for normal episode links. Do not tap it here:
+      // the native media_kit player is intentionally not mounted in tests.
+      expect(find.text('Watch'), findsWidgets);
 
       // 5. Start quality download & open Movie Downloads page
       await tester.ensureVisible(find.text('Download').first);

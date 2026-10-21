@@ -52,6 +52,7 @@ class MovieQualityLink {
     this.isZipPack = false,
     this.seasonLabel = '',
     this.episodeLabel = '',
+    this.zipEntryName = '',
   });
 
   final String id;
@@ -64,6 +65,14 @@ class MovieQualityLink {
   final bool isZipPack;
   final String seasonLabel;
   final String episodeLabel;
+
+  /// When non-empty, this link does not download [dlUrl]'s whole file.
+  /// Instead it downloads only this single episode entry from inside the
+  /// season ZIP pack that [dlUrl] resolves to (HTTP Range + local extract),
+  /// so one episode can be fetched without pulling the complete season ZIP.
+  final String zipEntryName;
+
+  bool get isZipEntryEpisode => zipEntryName.isNotEmpty;
 
   String get displayQuality {
     if (codec.isNotEmpty &&
@@ -84,6 +93,7 @@ class MovieQualityLink {
     bool? isZipPack,
     String? seasonLabel,
     String? episodeLabel,
+    String? zipEntryName,
   }) {
     return MovieQualityLink(
       id: id ?? this.id,
@@ -96,8 +106,97 @@ class MovieQualityLink {
       isZipPack: isZipPack ?? this.isZipPack,
       seasonLabel: seasonLabel ?? this.seasonLabel,
       episodeLabel: episodeLabel ?? this.episodeLabel,
+      zipEntryName: zipEntryName ?? this.zipEntryName,
     );
   }
+}
+
+/// One episode video file found inside a season ZIP pack by reading only the
+/// ZIP central directory over HTTP Range requests — the ZIP itself has not
+/// been downloaded at this point.
+@immutable
+class MovieZipEpisode {
+  const MovieZipEpisode({
+    required this.index,
+    required this.entryName,
+    required this.compressedSize,
+    required this.uncompressedSize,
+    required this.compressionMethod,
+    required this.localHeaderOffset,
+    this.dataOffset = -1,
+    this.seasonNumber = 0,
+    this.episodeNumber = 0,
+    this.isEncrypted = false,
+  });
+
+  /// Position of this entry in the pack's episode listing (stable per file).
+  final int index;
+
+  /// Full path of the file inside the ZIP, exactly as stored in the archive.
+  final String entryName;
+  final int compressedSize;
+  final int uncompressedSize;
+
+  /// ZIP compression method: 0 = stored, 8 = deflate.
+  final int compressionMethod;
+  final int localHeaderOffset;
+
+  /// Absolute byte offset where this entry's (compressed) data starts in the
+  /// remote ZIP file. -1 until resolved for a concrete download.
+  final int dataOffset;
+  final int seasonNumber;
+  final int episodeNumber;
+  final bool isEncrypted;
+
+  String get fileName {
+    final String flat = entryName.replaceAll('\\', '/');
+    final int slash = flat.lastIndexOf('/');
+    return slash >= 0 ? flat.substring(slash + 1) : flat;
+  }
+
+  String get seasonLabel => seasonNumber > 0 ? 'Season $seasonNumber' : '';
+
+  String get episodeLabel =>
+      episodeNumber > 0 ? 'Episode $episodeNumber' : '';
+
+  String get sizeLabel => MovieByteFmt.bytes(uncompressedSize);
+
+  bool get isSupported =>
+      !isEncrypted && (compressionMethod == 0 || compressionMethod == 8);
+
+  MovieZipEpisode copyWith({int? dataOffset}) {
+    return MovieZipEpisode(
+      index: index,
+      entryName: entryName,
+      compressedSize: compressedSize,
+      uncompressedSize: uncompressedSize,
+      compressionMethod: compressionMethod,
+      localHeaderOffset: localHeaderOffset,
+      dataOffset: dataOffset ?? this.dataOffset,
+      seasonNumber: seasonNumber,
+      episodeNumber: episodeNumber,
+      isEncrypted: isEncrypted,
+    );
+  }
+}
+
+/// Episode listing of one season ZIP pack, probed on a concrete mirror.
+@immutable
+class MovieZipPackListing {
+  const MovieZipPackListing({
+    required this.zipFileName,
+    required this.totalBytes,
+    required this.candidate,
+    required this.episodes,
+  });
+
+  final String zipFileName;
+  final int totalBytes;
+
+  /// Mirror on which the ZIP layout was probed. Entry offsets are only
+  /// guaranteed to be valid for this mirror's copy of the file.
+  final MovieStreamCandidate candidate;
+  final List<MovieZipEpisode> episodes;
 }
 
 @immutable
@@ -275,6 +374,7 @@ class MovieDownloadItem {
     this.mimeType = 'video/x-matroska',
     this.activeServer = '',
     this.sharePageUrl = '',
+    this.zipEntryName = '',
     this.downloadedBytes = 0,
     this.totalBytes = 0,
     this.speedBytesPerSec = 0,
@@ -298,6 +398,11 @@ class MovieDownloadItem {
   final String mimeType;
   final String activeServer;
   final String sharePageUrl;
+
+  /// For episode-wise downloads from a season ZIP pack: the single episode
+  /// file to extract out of the pack [sourceDlUrl] resolves to. Empty for
+  /// normal whole-file downloads (movies, per-episode files, full ZIPs).
+  final String zipEntryName;
   final MovieDownloadStatus status;
   final int downloadedBytes;
   final int totalBytes;
@@ -313,6 +418,8 @@ class MovieDownloadItem {
 
   bool get isZip =>
       fileName.toLowerCase().endsWith('.zip') || mimeType.contains('zip');
+
+  bool get isZipEntryEpisode => zipEntryName.isNotEmpty;
 
   double get progress {
     if (status == MovieDownloadStatus.completed) return 1.0;
@@ -346,6 +453,7 @@ class MovieDownloadItem {
     String? mimeType,
     String? activeServer,
     String? sharePageUrl,
+    String? zipEntryName,
     MovieDownloadStatus? status,
     int? downloadedBytes,
     int? totalBytes,
@@ -371,6 +479,7 @@ class MovieDownloadItem {
       mimeType: mimeType ?? this.mimeType,
       activeServer: activeServer ?? this.activeServer,
       sharePageUrl: sharePageUrl ?? this.sharePageUrl,
+      zipEntryName: zipEntryName ?? this.zipEntryName,
       status: status ?? this.status,
       downloadedBytes: downloadedBytes ?? this.downloadedBytes,
       totalBytes: totalBytes ?? this.totalBytes,
@@ -398,6 +507,7 @@ class MovieDownloadItem {
         'mimeType': mimeType,
         'activeServer': activeServer,
         'sharePageUrl': sharePageUrl,
+        'zipEntryName': zipEntryName,
         'status': status.name,
         'downloadedBytes': downloadedBytes,
         'totalBytes': totalBytes,
@@ -435,6 +545,7 @@ class MovieDownloadItem {
       mimeType: json['mimeType']?.toString() ?? 'video/x-matroska',
       activeServer: json['activeServer']?.toString() ?? '',
       sharePageUrl: json['sharePageUrl']?.toString() ?? '',
+      zipEntryName: json['zipEntryName']?.toString() ?? '',
       status: parsedStatus,
       downloadedBytes: (json['downloadedBytes'] as num?)?.toInt() ?? 0,
       totalBytes: (json['totalBytes'] as num?)?.toInt() ?? 0,

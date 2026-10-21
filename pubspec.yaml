@@ -16,6 +16,11 @@ dependencies:
   audio_session: ^0.1.25
   youtube_explode_dart: ^3.1.0
 
+  # --- In-app movie/series video player (media_kit / libmpv) ---
+  media_kit: ^1.2.6
+  media_kit_video: ^2.0.1
+  media_kit_libs_video: ^1.0.7
+
   # --- Frontend only ---
   provider: ^6.1.2
   shared_preferences: ^2.3.2

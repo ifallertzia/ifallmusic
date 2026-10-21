@@ -3,6 +3,7 @@ import 'dart:convert';
 import '../models/movie_models.dart';
 import 'eon_html_parser.dart';
 import 'movie_http_client.dart';
+import 'remote_zip.dart';
 
 /// Full client for EonMovies catalog/search/details + Dotflix multi-mirror
 /// direct download URL extraction.
@@ -30,6 +31,8 @@ class EonMoviesService {
   String _cachedDriveAction = '40e5348909ff78510ee46337a237c1352fcc630ad2';
   final Map<String, MovieEpisodeGroup> _subPageCache =
       <String, MovieEpisodeGroup>{};
+  final Map<String, MovieZipPackListing> _zipListingCache =
+      <String, MovieZipPackListing>{};
 
   MovieHttpTransport get transport => _transport;
   String get baseUrl => _baseUrl;
@@ -447,6 +450,12 @@ class EonMoviesService {
       }
     }
 
+    // The "is this a ZIP?" answer must come from the real server-side
+    // filename whenever we have one — never from the parser's early guess.
+    // Season pages are pre-labelled ZIP packs by the HTML parser, but some
+    // of those links resolve to a single .mkv episode instead; believing the
+    // guess would save a playable video with a .zip name/mime.
+    final bool filenameFromServer = filename.isNotEmpty;
     if (filename.isEmpty) {
       filename = _buildCleanFilename(
         title: fallbackTitle,
@@ -455,19 +464,321 @@ class EonMoviesService {
             candidates.any((MovieStreamCandidate c) => c.isZip),
       );
     }
-    if (filename.toLowerCase().endsWith('.zip')) {
-      mimeType = 'application/zip';
-    } else if (filename.toLowerCase().endsWith('.mp4')) {
-      mimeType = 'video/mp4';
+    final String lowerName = filename.toLowerCase();
+    bool resolvedIsZip = mimeType.contains('zip');
+    if (filenameFromServer) {
+      if (lowerName.endsWith('.zip')) {
+        resolvedIsZip = true;
+      } else if (RegExp(r'\.(mkv|mp4|avi|webm|mov|m4v|ts)$')
+          .hasMatch(lowerName)) {
+        resolvedIsZip = false;
+      }
+    } else if (lowerName.endsWith('.zip')) {
+      resolvedIsZip = true;
     }
+    if (resolvedIsZip) {
+      mimeType = 'application/zip';
+    } else if (lowerName.endsWith('.mp4') || lowerName.endsWith('.m4v')) {
+      mimeType = 'video/mp4';
+    } else if (mimeType.contains('zip')) {
+      mimeType = 'video/x-matroska';
+    }
+    final List<MovieStreamCandidate> finalCandidates = candidates
+        .map(
+          (MovieStreamCandidate c) => MovieStreamCandidate(
+            server: c.server,
+            url: c.url,
+            headers: c.headers,
+            isZip: resolvedIsZip,
+          ),
+        )
+        .toList();
 
     return ResolvedMovieStream(
-      candidates: candidates,
+      candidates: finalCandidates,
       filename: filename,
       sizeLabel: sizeLabel,
       mimeType: mimeType,
       sharePageUrl: shareUrl.isNotEmpty ? shareUrl : step1.url,
     );
+  }
+
+  /// Whether this quality can be attempted in the online player.
+  ///
+  /// Season ZIP packs and episode entries contained inside a ZIP stay
+  /// download-first in this version: libmpv cannot seek directly into one
+  /// compressed entry of a remote archive without a local extraction/proxy
+  /// layer. Ordinary movie and per-episode links resolve to direct video
+  /// files and can be streamed.
+  static bool canAttemptOnlinePlayback(MovieQualityLink quality) {
+    return !quality.isZipPack && !quality.isZipEntryEpisode;
+  }
+
+  /// Filters a download resolution down to candidates that are safe to hand
+  /// to the streaming player, preserving mirror order and request headers.
+  static List<MovieStreamCandidate> streamableCandidates(
+    ResolvedMovieStream resolved,
+  ) {
+    final String filename = resolved.filename.trim().toLowerCase();
+    final String mimeType = resolved.mimeType.trim().toLowerCase();
+    if (filename.endsWith('.zip') || mimeType.contains('zip')) {
+      return const <MovieStreamCandidate>[];
+    }
+
+    return List<MovieStreamCandidate>.unmodifiable(
+      resolved.candidates.where((MovieStreamCandidate candidate) {
+        if (candidate.isZip) return false;
+        final Uri? uri = Uri.tryParse(candidate.url.trim());
+        if (uri == null || uri.host.isEmpty) return false;
+        if (uri.scheme != 'http' && uri.scheme != 'https') return false;
+        if (uri.path.toLowerCase().endsWith('.zip')) return false;
+        return true;
+      }),
+    );
+  }
+
+  /// Resolves a quality for online playback using the same mirror chain as
+  /// downloads, but rejects ZIP results and non-direct/non-HTTP candidates.
+  Future<ResolvedMovieStream> resolvePlaybackStream(
+    MovieQualityLink quality, {
+    required String fallbackTitle,
+  }) async {
+    if (!canAttemptOnlinePlayback(quality)) {
+      throw StateError(
+        quality.isZipEntryEpisode
+            ? 'Episodes inside ZIP packs need to be downloaded before playback.'
+            : 'ZIP season packs need to be downloaded before playback.',
+      );
+    }
+
+    final ResolvedMovieStream resolved = await resolveDownloadStream(
+      quality,
+      fallbackTitle: fallbackTitle,
+    );
+    return ResolvedMovieStream(
+      candidates: streamableCandidates(resolved),
+      filename: resolved.filename,
+      sizeLabel: resolved.sizeLabel,
+      mimeType: resolved.mimeType,
+      sharePageUrl: resolved.sharePageUrl,
+    );
+  }
+
+  /// Lists the individual episodes inside a season ZIP pack **without
+  /// downloading the pack**: the ZIP central directory at the end of the
+  /// remote file is read with a few small HTTP Range requests.
+  ///
+  /// Completed seasons on EonMovies are hosted as one `.zip` per quality
+  /// (there are no per-episode host links for them), so this listing is what
+  /// makes episode-wise download possible at all for those titles. Throws a
+  /// [StateError] with a user-readable message when the link is not actually
+  /// a ZIP or no mirror supports Range requests.
+  Future<MovieZipPackListing> listZipPackEpisodes(
+    MovieQualityLink quality, {
+    required String fallbackTitle,
+  }) async {
+    final MovieZipPackListing? cached = _zipListingCache[quality.id];
+    if (cached != null) return cached;
+
+    final ResolvedMovieStream resolved = await resolveDownloadStream(
+      quality,
+      fallbackTitle: fallbackTitle,
+    );
+    final String lowerName = resolved.filename.toLowerCase();
+    final bool looksZip =
+        resolved.mimeType.contains('zip') || lowerName.endsWith('.zip');
+    if (!looksZip) {
+      throw StateError(
+        'This link is not a ZIP pack (${resolved.filename}) — '
+        'download it directly.',
+      );
+    }
+    if (resolved.candidates.isEmpty) {
+      throw StateError('No mirror is reachable for this ZIP pack right now.');
+    }
+
+    Object? lastError;
+    for (final MovieStreamCandidate candidate in resolved.candidates) {
+      try {
+        final RemoteZipReader reader =
+            RemoteZipReader(_rangeFetchFor(candidate));
+        final int total = await reader.probeTotalSize();
+        final List<RemoteZipEntry> entries = await reader.readEntries();
+        final List<RemoteZipEntry> videos = entries
+            .where(
+              (RemoteZipEntry e) =>
+                  !e.isDirectory && isZipVideoEntryName(e.name),
+            )
+            .toList();
+        if (videos.isEmpty) {
+          throw StateError('No episode videos found inside this ZIP.');
+        }
+
+        final List<MovieZipEpisode> episodes = <MovieZipEpisode>[];
+        for (int i = 0; i < videos.length; i++) {
+          final RemoteZipEntry e = videos[i];
+          final ({int episode, int season}) se =
+              seasonEpisodeNumbersFromName(e.name);
+          episodes.add(
+            MovieZipEpisode(
+              index: i,
+              entryName: e.name,
+              compressedSize: e.compressedSize,
+              uncompressedSize: e.uncompressedSize,
+              compressionMethod: e.compressionMethod,
+              localHeaderOffset: e.localHeaderOffset,
+              seasonNumber: se.season,
+              episodeNumber: se.episode,
+              isEncrypted: e.isEncrypted,
+            ),
+          );
+        }
+        episodes.sort((MovieZipEpisode a, MovieZipEpisode b) {
+          if (a.seasonNumber > 0 &&
+              b.seasonNumber > 0 &&
+              a.seasonNumber != b.seasonNumber) {
+            return a.seasonNumber.compareTo(b.seasonNumber);
+          }
+          if (a.episodeNumber > 0 && b.episodeNumber > 0) {
+            return a.episodeNumber.compareTo(b.episodeNumber);
+          }
+          return a.localHeaderOffset.compareTo(b.localHeaderOffset);
+        });
+        // Re-index after sorting so episode N always maps to the same
+        // synthetic quality / download id.
+        final List<MovieZipEpisode> indexed = <MovieZipEpisode>[
+          for (int i = 0; i < episodes.length; i++)
+            MovieZipEpisode(
+              index: i,
+              entryName: episodes[i].entryName,
+              compressedSize: episodes[i].compressedSize,
+              uncompressedSize: episodes[i].uncompressedSize,
+              compressionMethod: episodes[i].compressionMethod,
+              localHeaderOffset: episodes[i].localHeaderOffset,
+              seasonNumber: episodes[i].seasonNumber,
+              episodeNumber: episodes[i].episodeNumber,
+              isEncrypted: episodes[i].isEncrypted,
+            ),
+        ];
+
+        final MovieZipPackListing listing = MovieZipPackListing(
+          zipFileName: resolved.filename,
+          totalBytes: total,
+          candidate: candidate,
+          episodes: indexed,
+        );
+        _zipListingCache[quality.id] = listing;
+        return listing;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    throw StateError(
+      'Could not list episodes inside the ZIP on any mirror'
+      '${lastError != null ? ' (${lastError.toString().replaceFirst('Bad state: ', '')})' : ''} '
+      '— try downloading the Complete ZIP instead.',
+    );
+  }
+
+  /// Resolves everything the download service needs to fetch one episode
+  /// out of a season ZIP: the probed mirror candidate plus the episode with
+  /// its absolute data offset inside the remote ZIP file.
+  ///
+  /// [packQuality] must have [MovieQualityLink.zipEntryName] set (see
+  /// [qualityForZipEpisode]). The cache key is the *pack* id, so strip the
+  /// synthetic `__zep<n>` suffix the episode quality carries.
+  Future<({MovieStreamCandidate candidate, MovieZipEpisode episode})>
+      prepareZipEpisodeDownload(
+    MovieQualityLink packQuality, {
+    required String fallbackTitle,
+  }) async {
+    final String packId = packQuality.id.split('__zep').first;
+    final MovieQualityLink pack = packQuality.copyWith(
+      id: packId,
+      isZipPack: true,
+      zipEntryName: '',
+    );
+    final MovieZipPackListing listing = await listZipPackEpisodes(
+      pack,
+      fallbackTitle: fallbackTitle,
+    );
+
+    MovieZipEpisode? match;
+    for (final MovieZipEpisode ep in listing.episodes) {
+      if (ep.entryName == packQuality.zipEntryName) {
+        match = ep;
+        break;
+      }
+    }
+    if (match == null) {
+      throw StateError(
+        'Episode "${packQuality.zipEntryName}" not found inside the ZIP.',
+      );
+    }
+    if (!match.isSupported) {
+      throw StateError(
+        match.isEncrypted
+            ? 'This episode is encrypted inside the ZIP — download the full ZIP.'
+            : 'Episode compression (method ${match.compressionMethod}) is not '
+                'supported — download the full ZIP.',
+      );
+    }
+
+    final RemoteZipReader reader =
+        RemoteZipReader(_rangeFetchFor(listing.candidate));
+    final int dataOffset = await reader.dataOffsetFor(
+      RemoteZipEntry(
+        name: match.entryName,
+        compressionMethod: match.compressionMethod,
+        compressedSize: match.compressedSize,
+        uncompressedSize: match.uncompressedSize,
+        localHeaderOffset: match.localHeaderOffset,
+        isDirectory: false,
+        isEncrypted: match.isEncrypted,
+      ),
+    );
+    return (
+      candidate: listing.candidate,
+      episode: match.copyWith(dataOffset: dataOffset),
+    );
+  }
+
+  /// Builds the synthetic per-episode quality link for one episode inside a
+  /// season ZIP pack. The download id stays stable across app restarts
+  /// because it is derived from the pack id + sorted episode index.
+  static MovieQualityLink qualityForZipEpisode(
+    MovieQualityLink pack,
+    MovieZipEpisode episode,
+  ) {
+    return pack.copyWith(
+      id: '${pack.id}__zep${episode.index}',
+      isZipPack: false,
+      sizeLabel: episode.sizeLabel,
+      seasonLabel: episode.seasonLabel.isNotEmpty
+          ? episode.seasonLabel
+          : pack.seasonLabel,
+      episodeLabel: episode.episodeLabel.isNotEmpty
+          ? episode.episodeLabel
+          : episode.fileName,
+      zipEntryName: episode.entryName,
+    );
+  }
+
+  ZipRangeFetch _rangeFetchFor(MovieStreamCandidate candidate) {
+    return (int start, int? end) async {
+      final MovieRangeResponse res = await _transport.getRange(
+        candidate.url,
+        headers: candidate.headers,
+        start: start,
+        end: end,
+      );
+      return ZipRangeResult(
+        statusCode: res.statusCode,
+        bytes: res.bytes,
+        totalSize: res.totalSize,
+      );
+    };
   }
 
   Future<
