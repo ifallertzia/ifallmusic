@@ -312,10 +312,12 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
                       ),
                     ],
                     const SizedBox(height: 16),
+                    Text('From Sidify', style: SidifyText.caption(t.text2)),
+                    const SizedBox(height: 4),
                     Text(
                       _activeQuery.isNotEmpty
-                          ? 'From Sidify • Search Results for "$_activeQuery"'
-                          : 'From Sidify • ${_category.label} Movies & Series',
+                          ? 'Search Results for "$_activeQuery"'
+                          : '${_category.label} Movies & Series',
                       style: SidifyText.title(t.text),
                     ),
                     const SizedBox(height: 12),
