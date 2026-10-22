@@ -629,7 +629,7 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
               _primaryButton(
                 t,
                 icon: Icons.play_arrow_rounded,
-                label: 'Play',
+                label: 'Try beta',
                 filled: true,
                 onTap: () => _playQualities(detail, detail.directQualities),
               ),
@@ -803,7 +803,7 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
                     _groupActionButton(
                       t,
                       icon: Icons.play_arrow_rounded,
-                      label: 'Play',
+                      label: 'Try beta',
                       filled: true,
                       onTap: () => _playQualities(detail, group.qualities),
                     ),
