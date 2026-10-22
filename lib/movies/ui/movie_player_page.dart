@@ -15,6 +15,7 @@ import '../models/movie_models.dart';
 import '../services/eon_movies_service.dart';
 import '../services/movie_download_service.dart';
 import '../services/movie_quality_order.dart';
+import '../services/movie_seek_runner.dart';
 
 /// Opens the in-app streaming player for a movie or per-episode quality.
 ///
@@ -146,13 +147,11 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
   Duration _lastPositionValue = Duration.zero;
   DateTime _lastPositionAt = DateTime.now();
 
-  /// Seek bookkeeping: the target still being waited on, where the picture was
-  /// when the seek was asked for, which step of the recovery ladder is next,
-  /// which mirrors have already refused to seek, and whether the "this stream
-  /// cannot seek" note has been shown.
+  /// Seek bookkeeping: the target still being waited on, which step of the
+  /// recovery ladder is next, which mirrors have already refused to seek, and
+  /// whether the "this stream cannot seek" note has been shown.
   Timer? _seekWatchdog;
   Duration? _pendingSeekTarget;
-  Duration _seekFromPosition = Duration.zero;
   int _seekRecoveryStep = 0;
   final Set<int> _seekFailedCandidates = <int>{};
   bool _seekLimitNoticed = false;
@@ -1221,10 +1220,10 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
   }
 
   /// One way into a seek, whichever control asked for it. The target is
-  /// clamped to the media, handed to mpv, and then watched: a mirror that
-  /// silently refuses to move (no HTTP Range support) is re-opened at that
-  /// timestamp, then replaced by another one — instead of leaving the bar
-  /// stuck where it was.
+  /// clamped to the media and handed to mpv under an already-running watchdog:
+  /// a mirror that silently refuses to move (or never answers the native seek)
+  /// is re-opened at that timestamp, then replaced by another one — instead of
+  /// leaving the bar stuck where it was.
   ///
   /// The bar itself is told about the target right away ([_pendingSeek]), so
   /// the thumb stays where the finger put it while the stream catches up.
@@ -1234,18 +1233,20 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
     if (duration > Duration.zero && wanted > duration) wanted = duration;
 
     _seekWatchdog?.cancel();
-    _seekFromPosition = _player.state.position;
     _seekRecoveryStep = 0;
     _pendingSeekTarget = wanted;
     _pendingSeek.value = wanted;
-    try {
-      await _player.seek(wanted);
-    } catch (_) {
-      _clearPendingSeek();
-      return;
-    }
-    if (_disposed) return;
-    _armSeekWatchdog(wanted);
+    await runMovieSeekWithWatchdog(
+      target: wanted,
+      seek: _player.seek,
+      armWatchdog: _armSeekWatchdog,
+      onError: (Duration failedTarget) {
+        // A late error from an older request must not clear a newer seek.
+        if (!_disposed && _pendingSeekTarget == failedTarget) {
+          _clearPendingSeek();
+        }
+      },
+    );
   }
 
   /// How long each look at a pending seek waits before deciding it failed.
@@ -1270,12 +1271,10 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
         _clearPendingSeek();
         return;
       }
-      // Either mpv is still pulling data for the new timestamp (a slow mirror,
-      // not a dead one) or the picture is visibly travelling there. Both get
-      // another look before anything is torn down.
-      final bool stillWorking = _player.state.buffering ||
-          (position - _seekFromPosition).abs() > const Duration(seconds: 1);
-      if (stillWorking && attempt < _seekCheckDelays.length) {
+      // Only buffering is evidence that the seek still needs time. Ordinary
+      // playback also moves the position, so movement from the old timestamp
+      // must not delay recovery while the movie continues at the wrong place.
+      if (_player.state.buffering && attempt < _seekCheckDelays.length) {
         _armSeekWatchdog(wanted, attempt: attempt + 1);
         return;
       }
