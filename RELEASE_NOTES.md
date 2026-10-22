@@ -21,7 +21,9 @@
   reopen the same mirror starting *at* the new position, then the other mirrors,
   then a fresh quality resolve — before Sidify says once, plainly, that this
   particular stream cannot jump around and suggests downloading it to watch
-  offline with full seeking.
+  offline with full seeking. The watchdog starts before the native seek call,
+  so an unanswered seek still recovers, and only actual buffering — not ordinary
+  playback — extends the checks.
 - **Track names are readable.** Audio and subtitle labels that used to render as
   `-eonmovies.com.hin.aac.2 ch` now read `Ifallertzia Hindi AAC Stereo`. The
   source domain is shown as **Ifallertzia** everywhere it appears (including
