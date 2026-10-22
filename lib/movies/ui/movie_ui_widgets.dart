@@ -763,7 +763,14 @@ class _DownloadQualityDialog extends StatelessWidget {
                   shrinkWrap: true,
                   children: <Widget>[
                     for (final MovieQualityLink quality in qualities)
-                      _qualityRow(context, t, dlService, quality),
+                      if (detail.webUrl.contains('/api/media/title/'))
+                        MovieQualityDownloadTile(
+                          detail: detail,
+                          quality: quality,
+                          allQualities: qualities,
+                        )
+                      else
+                        _qualityRow(context, t, dlService, quality),
                   ],
                 ),
               ),
