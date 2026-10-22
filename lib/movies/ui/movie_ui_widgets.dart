@@ -1,9 +1,13 @@
+import 'dart:io';
+
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/services/app_feedback.dart';
+import '../../core/services/native_bridge.dart';
 import '../../core/theme/sidify_theme.dart';
 import '../models/movie_models.dart';
 import '../services/eon_movies_service.dart';
@@ -13,6 +17,45 @@ import 'movie_downloads_page.dart';
 import 'movie_player_page.dart';
 
 export '../services/movie_quality_order.dart';
+
+/// Android VLC package. Present in the manifest `<queries>` so the package can
+/// be resolved on Android 11+.
+const String kVlcAndroidPackage = 'org.videolan.vlc';
+
+/// Play Store page for VLC — the fallback when no player is installed.
+final Uri kVlcPlayStoreUri = Uri.parse(
+  'https://play.google.com/store/apps/details?id=$kVlcAndroidPackage',
+);
+
+/// Launches an already-resolved HTTPS [url] in VLC.
+///
+/// On Android this is a real native intent (VLC first, then any video player) —
+/// `launchUrl` on an `intent:` URI can never work: url_launcher hands the raw
+/// URI to ACTION_VIEW and no activity answers it. Returns a status word the UI
+/// turns into notices:
+/// `launched`, `chooser`, `no_handler`, `bad_url`, `opened`, `failed`.
+Future<String> launchStreamInVlc(String url, {String? title}) async {
+  if (!kIsWeb && Platform.isAndroid) {
+    final String? status = await NativeBridge.openInVideoPlayer(
+      url,
+      package: kVlcAndroidPackage,
+      title: title,
+    );
+    if (status != null) return status;
+    // Bridge missing/broken: fall through to a plain external open.
+  }
+  final String trimmed = url.trim();
+  if (!trimmed.startsWith('http')) return 'bad_url';
+  try {
+    final bool opened = await launchUrl(
+      Uri.parse(trimmed),
+      mode: LaunchMode.externalApplication,
+    );
+    return opened ? 'opened' : 'failed';
+  } catch (_) {
+    return 'failed';
+  }
+}
 
 /// Resilient network poster/backdrop widget with automatic secondary URL
 /// failover and zero-network placeholder when [imageUrl] is empty.
@@ -496,21 +539,38 @@ class MovieQualityDownloadTile extends StatelessWidget {
   }
 
   Future<void> _playInVlc(BuildContext context) async {
-    final service = context.read<EonMoviesService>();
+    final EonMoviesService service = context.read<EonMoviesService>();
+    final String title =
+        detail.cleanTitle.isNotEmpty ? detail.cleanTitle : detail.title;
     try {
-      final resolved = await service.resolvePlaybackStream(
-        quality, fallbackTitle: detail.cleanTitle,
+      final ResolvedMovieStream resolved = await service.resolvePlaybackStream(
+        quality,
+        fallbackTitle: title,
       );
-      if (resolved.candidates.isEmpty) throw StateError('No playable mirror');
-      final url = resolved.candidates.first.url;
-      final source = Uri.parse(url);
-      final intent = Uri.parse(
-        'intent://${source.authority}${source.path}${source.hasQuery ? '?${source.query}' : ''}'
-        '#Intent;scheme=${source.scheme};package=org.videolan.vlc;type=video/*;end',
-      );
-      if (!await launchUrl(intent, mode: LaunchMode.externalApplication)) {
-        showAppNotice('Install VLC to use this option.');
+      if (resolved.candidates.isEmpty) {
+        throw StateError(
+          resolved.sharePageUrl.isNotEmpty
+              ? 'No direct mirror right now — try Download or the Browser icon.'
+              : 'No playable mirror.',
+        );
       }
+      final String status = await launchStreamInVlc(
+        resolved.candidates.first.url,
+        title: '$title (${quality.displayQuality})',
+      );
+      if (status == 'launched' || status == 'opened' || status == 'chooser') {
+        if (status == 'chooser') {
+          showAppNotice('VLC not found — choose a video player to continue.');
+        }
+        return;
+      }
+      if (status == 'bad_url') {
+        showAppNotice('This mirror link is not a playable stream.');
+        return;
+      }
+      // Nothing on this device can play the URL: send the user to VLC.
+      showAppNotice('Install VLC to use this option.');
+      await launchUrl(kVlcPlayStoreUri, mode: LaunchMode.externalApplication);
     } catch (error) {
       showAppNotice('Could not open VLC: $error');
     }

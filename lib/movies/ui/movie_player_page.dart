@@ -1529,7 +1529,10 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
     final MovieDownloadService? service = _downloadService;
     final MovieDetail? detail = widget.detail;
     final MovieQualityLink? target = quality ?? _downloadQuality;
-    if (service == null || detail == null || target == null) return;
+    if (service == null || detail == null || target == null) {
+      showAppNotice('No downloadable quality is ready yet — try again shortly.');
+      return;
+    }
 
     try {
       final MovieDownloadItem item = await service.enqueueDownload(
@@ -1543,8 +1546,9 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
       );
     } catch (error) {
       showAppNotice(
-        'Could not start download. Please try again.',
-        duration: const Duration(seconds: 2),
+        'Could not start download: '
+        '${MovieDownloadService.friendlyDownloadError(error)}',
+        duration: const Duration(seconds: 3),
       );
     }
   }

@@ -53,6 +53,7 @@ class MovieQualityLink {
     this.seasonLabel = '',
     this.episodeLabel = '',
     this.zipEntryName = '',
+    this.fileName = '',
   });
 
   final String id;
@@ -65,6 +66,11 @@ class MovieQualityLink {
   final bool isZipPack;
   final String seasonLabel;
   final String episodeLabel;
+
+  /// The real file name of the release behind this link, when the source
+  /// reports one. Used for the saved file name and by the Sidify mirror
+  /// resolver's container/codec classification.
+  final String fileName;
 
   /// When non-empty, this link does not download [dlUrl]'s whole file.
   /// Instead it downloads only this single episode entry from inside the
@@ -94,6 +100,7 @@ class MovieQualityLink {
     String? seasonLabel,
     String? episodeLabel,
     String? zipEntryName,
+    String? fileName,
   }) {
     return MovieQualityLink(
       id: id ?? this.id,
@@ -107,6 +114,7 @@ class MovieQualityLink {
       seasonLabel: seasonLabel ?? this.seasonLabel,
       episodeLabel: episodeLabel ?? this.episodeLabel,
       zipEntryName: zipEntryName ?? this.zipEntryName,
+      fileName: fileName ?? this.fileName,
     );
   }
 }

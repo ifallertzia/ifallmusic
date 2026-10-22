@@ -1,6 +1,7 @@
 package com.ifallmusic.app
 
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ContentValues
 import android.content.Context
@@ -82,6 +83,18 @@ class SaxifyBridge(private val activity: Activity) {
                     )
                     result.success(null)
                 }
+                // "Play in VLC": a real ACTION_VIEW intent. url_launcher cannot
+                // do this — it hands the raw `intent:` URI to ACTION_VIEW and no
+                // activity answers, so the launch always looked broken even with
+                // VLC installed. Here the intent is built natively and aimed at
+                // the requested package first, then any video player.
+                "openInVideoPlayer" -> result.success(
+                    openInVideoPlayer(
+                        call.argument<String>("url") ?: "",
+                        call.argument<String>("package"),
+                        call.argument<String>("title"),
+                    )
+                )
                 "eqInit" -> result.success(eqInit(call.argument<Int>("sessionId") ?: 0))
                 "eqSetEnabled" -> {
                     equalizer?.enabled = call.argument<Boolean>("enabled") == true
@@ -406,6 +419,47 @@ class SaxifyBridge(private val activity: Activity) {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         activity.startActivity(intent)
+    }
+
+    /**
+     * Hands an HTTPS media URL to a video player — VLC first, then any other
+     * app that accepts a video MIME type. Returns a status map the Dart layer
+     * turns into honest notices:
+     *   "launched"    – the requested package (VLC) took the intent
+     *   "chooser"     – no VLC, so the system "Open with" chooser was shown
+     *   "no_handler"  – nothing on this device can play the URL
+     *   "bad_url"     – the URL was empty or not http(s)
+     */
+    private fun openInVideoPlayer(rawUrl: String, pkg: String?, title: String?): Map<String, Any?> {
+        val uri = Uri.parse(rawUrl)
+        if (rawUrl.isBlank() || (uri.scheme != "http" && uri.scheme != "https")) {
+            return mapOf("status" to "bad_url")
+        }
+        if (!pkg.isNullOrEmpty()) {
+            val explicit = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "video/*")
+                setPackage(pkg)
+                if (!title.isNullOrEmpty()) putExtra(Intent.EXTRA_TITLE, title)
+            }
+            try {
+                activity.startActivity(explicit)
+                return mapOf("status" to "launched", "package" to pkg)
+            } catch (e: ActivityNotFoundException) {
+                // VLC is not installed — fall through to the generic player.
+            }
+        }
+        val generic = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "video/*")
+            if (!title.isNullOrEmpty()) putExtra(Intent.EXTRA_TITLE, title)
+        }
+        return try {
+            activity.startActivity(
+                Intent.createChooser(generic, title ?: "Open in video player"),
+            )
+            mapOf("status" to "chooser")
+        } catch (e: ActivityNotFoundException) {
+            mapOf("status" to "no_handler")
+        }
     }
 
     private fun contentUri(path: String?, uri: String?): Uri {

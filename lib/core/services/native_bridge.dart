@@ -194,6 +194,32 @@ class NativeBridge {
     });
   }
 
+  /// Opens [url] in the requested video player — VLC on Android. url_launcher
+  /// cannot do this: it fires ACTION_VIEW on the raw `intent:` URI and nothing
+  /// answers, so the launch always failed even with VLC installed. The native
+  /// side builds a real intent (VLC first, then any video player).
+  ///
+  /// Returns 'launched' (the package opened), 'chooser' (system picker shown
+  /// because the package is missing), 'no_handler', 'bad_url', or null when the
+  /// bridge is unavailable (iOS / desktop / tests).
+  static Future<String?> openInVideoPlayer(
+    String url, {
+    String? package,
+    String? title,
+  }) async {
+    if (kIsWeb || !Platform.isAndroid) return null;
+    try {
+      final Object? raw = await _channel.invokeMethod<Object>(
+        'openInVideoPlayer',
+        <String, Object?>{'url': url, 'package': package, 'title': title},
+      );
+      return raw is String ? raw : null;
+    } catch (e) {
+      debugPrint('[IfallMusic][VideoLaunch] openInVideoPlayer failed: $e');
+      return null;
+    }
+  }
+
   static Future<EqualizerInfo?> eqInit(int sessionId) async {
     if (kIsWeb || !Platform.isAndroid) return null;
     try {
