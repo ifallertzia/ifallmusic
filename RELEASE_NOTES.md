@@ -1,5 +1,31 @@
 # Sidify 2.10.0
 
+## Unreleased — downloads and VLC that actually start
+
+### Movies & Series
+
+- **"Play in VLC" now opens VLC.** The button used to hand Android a raw
+  `intent:` link through url_launcher — which nothing on the system answers —
+  so it always claimed VLC was missing, even with VLC installed. Sidify now
+  builds a real Android intent on the native side: VLC first, then the system
+  "Open with" picker when VLC is absent, and the Play Store when no player at
+  all can take the stream. The mirror link is resolved exactly like the web
+  app before the launch, and a dead mirror says so instead of blaming VLC.
+- **Downloads resolve like the web app does.** The mirror resolver is now
+  called with the release's real file name and label, and when its cached
+  direct links have expired the download gets one fresh resolution
+  (`refresh`) instead of failing outright. Candidates carry the mirror page as
+  their `Referer`, the same header the in-app player sends, so hotlink-locked
+  CDNs serve the file instead of an HTML error page.
+- **Saved files are named after the movie again.** A title with no reported
+  file name used to land on disk as `movie_download.mkv` — so a second
+  download quietly overwrote the first. Names now fall back to
+  `Title (Quality).mkv`, and releases that publish a file name keep it.
+- **Failed downloads say why.** "Download failed — please try again." is gone;
+  the notice and the Downloads row carry the resolver's own explanation (or a
+  plain connection problem line), and the external/Browser fallback URL from
+  the resolver is kept for the in-app browser button.
+
 ## Unreleased — the player talks, downloads post, Movies folds into Search
 
 ### Player

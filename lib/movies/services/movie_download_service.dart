@@ -282,6 +282,9 @@ class MovieDownloadService extends ChangeNotifier {
           quality.languages.isNotEmpty ? quality.languages : detail.languages,
       sizeLabel: quality.sizeLabel,
       sourceDlUrl: quality.dlUrl,
+      // The real release file name, when the source reports one. Zip-entry
+      // episodes name themselves after the entry inside the pack instead.
+      fileName: quality.isZipEntryEpisode ? '' : quality.fileName,
       mimeType: quality.isZipEntryEpisode
           ? _videoMimeForName(quality.zipEntryName)
           : quality.isZipPack
@@ -464,6 +467,7 @@ class MovieDownloadService extends ChangeNotifier {
         seasonLabel: current.seasonLabel,
         episodeLabel: current.episodeLabel,
         zipEntryName: current.zipEntryName,
+        fileName: current.fileName,
       );
 
       // Episode-wise download out of a season ZIP pack: fetch only this
@@ -495,7 +499,11 @@ class MovieDownloadService extends ChangeNotifier {
       final Directory dir = await _resolveMoviesDir();
       current = itemById(id)!;
       final String finalName = _sanitizeFileName(
-        current.fileName.isNotEmpty ? current.fileName : resolved.filename,
+        current.fileName.isNotEmpty
+            ? current.fileName
+            : resolved.filename.isNotEmpty
+                ? resolved.filename
+                : '${current.movieTitle} (${current.qualityLabel}).mkv',
       );
       final String targetPath = '${dir.path}/$finalName';
       final File partFile = File('$targetPath.part');
@@ -541,21 +549,22 @@ class MovieDownloadService extends ChangeNotifier {
         throw lastServerError ??
             StateError('All download mirrors returned an error');
       }
-    } catch (_) {
+    } catch (error) {
       if (!_pausedExplicitly.contains(id) && !_canceledExplicitly.contains(id)) {
         final MovieDownloadItem? latest = itemById(id);
         if (latest != null) {
+          final String reason = friendlyDownloadError(error);
           _upsertItem(
             latest.copyWith(
               status: MovieDownloadStatus.failed,
               speedBytesPerSec: 0,
-              errorMessage: 'Download failed. Please try again.',
+              errorMessage: reason,
             ),
             persistImmediate: true,
           );
           showAppNotice(
-            'Download failed: ${latest.movieTitle} — please try again.',
-            duration: const Duration(seconds: 2),
+            'Download failed: ${latest.movieTitle} — $reason',
+            duration: const Duration(seconds: 4),
           );
         }
       }
@@ -564,6 +573,21 @@ class MovieDownloadService extends ChangeNotifier {
       _runningIds.remove(id);
       _pumpQueue();
     }
+  }
+
+  /// One honest line about why a download died, shown on the notice and kept
+  /// on the item. Server-side StateErrors already speak plain language.
+  static String friendlyDownloadError(Object error) {
+    if (error is StateError && error.message.isNotEmpty) return error.message;
+    final String raw = error.toString().toLowerCase();
+    if (raw.contains('socket') ||
+        raw.contains('timeout') ||
+        raw.contains('connection') ||
+        raw.contains('host lookup') ||
+        raw.contains('network')) {
+      return 'Connection problem — check your internet and try again.';
+    }
+    return 'Please try again.';
   }
 
   /// Episode-wise download from a season ZIP pack.

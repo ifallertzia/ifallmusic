@@ -80,6 +80,7 @@ class SidifyMoviesService extends EonMoviesService {
           isZipPack: release['isPack'] == true,
           seasonLabel: release['seasonNumber'] == null ? '' : 'Season ${release['seasonNumber']}',
           episodeLabel: release['episodeNumber'] == null ? '' : 'Episode ${release['episodeNumber']}',
+          fileName: _s(release['fileName']),
         ));
       }
     }
@@ -116,17 +117,106 @@ class SidifyMoviesService extends EonMoviesService {
     return uri != null && (uri.scheme == 'https' || uri.scheme == 'http') && uri.host.isNotEmpty;
   }
 
+  /// POSTs `/api/media/resolve` exactly like the Sidify-V2 web app:
+  /// `{url, fileName?, label?, refresh?}`. Non-200 answers (403 / 422 / 502)
+  /// still carry the same result shape — read the body instead of flattening
+  /// every failure into "HTTP 422".
+  Future<Map<String, dynamic>> _postResolve(
+    MovieQualityLink quality, {
+    required String label,
+    bool refresh = false,
+  }) async {
+    final MovieHttpResponse response = await transport.post(
+      _url('resolve'),
+      body: jsonEncode(<String, Object?>{
+        'url': quality.dlUrl,
+        if (quality.fileName.isNotEmpty) 'fileName': quality.fileName,
+        'label': label,
+        if (refresh) 'refresh': true,
+      }),
+      headers: const <String, String>{'Content-Type': 'application/json'},
+    );
+    Object? decoded;
+    try {
+      decoded = jsonDecode(response.body);
+    } catch (_) {
+      decoded = null;
+    }
+    if (decoded is Map<String, dynamic> &&
+        (decoded.containsKey('links') || decoded.containsKey('status'))) {
+      return decoded;
+    }
+    throw StateError('Sidify HTTP ${response.statusCode}. Please retry later.');
+  }
+
+  List<MovieStreamCandidate> _mirrorCandidates(
+    Map<String, dynamic> data,
+    MovieQualityLink quality,
+  ) {
+    final String shareUrl = _s(data['externalFallbackUrl']).isNotEmpty
+        ? _s(data['externalFallbackUrl'])
+        : quality.dlUrl;
+    final Map<String, String> headers = shareUrl.isEmpty
+        ? const <String, String>{}
+        : <String, String>{'Referer': shareUrl};
+    return _rows(data['links'])
+        .where((link) => link['delivery'] != 'external' && _http(_s(link['url'])))
+        .map((link) => MovieStreamCandidate(
+              server: _s(link['server']),
+              url: _s(link['url']),
+              headers: headers,
+              isZip: quality.isZipPack,
+            ))
+        .toList();
+  }
+
   @override
-  Future<ResolvedMovieStream> resolveDownloadStream(MovieQualityLink quality, {required String fallbackTitle}) async {
+  Future<ResolvedMovieStream> resolveDownloadStream(
+    MovieQualityLink quality, {
+    required String fallbackTitle,
+  }) async {
     // Retain the old resolver for downloads saved before switching providers.
     if (quality.dlUrl.contains('eonmovies') || quality.dlUrl.contains('dotflix')) {
       return super.resolveDownloadStream(quality, fallbackTitle: fallbackTitle);
     }
-    final data = _decode(await transport.post(_url('resolve'), body: jsonEncode({'url': quality.dlUrl, 'label': quality.rawLabel}), headers: {'Content-Type': 'application/json'}));
-    final candidates = _rows(data['links']).where((link) => link['delivery'] != 'external' && _http(_s(link['url']))).map((link) => MovieStreamCandidate(server: _s(link['server']), url: _s(link['url']), isZip: quality.isZipPack)).toList();
-    if (candidates.isEmpty) {
-      throw StateError(_s(data['message']).isNotEmpty ? _s(data['message']) : 'Sidify could not resolve this mirror (${data['status']}). Try another mirror.');
+    final String label =
+        quality.rawLabel.isNotEmpty ? quality.rawLabel : fallbackTitle;
+
+    Map<String, dynamic> data = const <String, dynamic>{};
+    List<MovieStreamCandidate> candidates = const <MovieStreamCandidate>[];
+    Object? lastError;
+    // The mirror resolver caches direct links; when they expire a second call
+    // with `refresh: true` yields fresh ones instead of failing the download.
+    for (final bool refresh in const <bool>[false, true]) {
+      try {
+        data = await _postResolve(quality, label: label, refresh: refresh);
+        candidates = _mirrorCandidates(data, quality);
+        if (candidates.isNotEmpty) break;
+      } catch (error) {
+        lastError = error;
+      }
     }
-    return ResolvedMovieStream(candidates: candidates, sizeLabel: quality.sizeLabel, sharePageUrl: quality.dlUrl, mimeType: quality.isZipPack ? 'application/zip' : 'video/x-matroska');
+
+    final String external = _s(data['externalFallbackUrl']).isNotEmpty
+        ? _s(data['externalFallbackUrl'])
+        : quality.dlUrl;
+
+    if (candidates.isEmpty) {
+      final String message = _s(data['message']);
+      if (message.isNotEmpty) throw StateError(message);
+      if (lastError != null) throw lastError;
+      throw StateError(
+        'Sidify could not resolve this mirror (${_s(data['status'])}). '
+        'Try another mirror or the Browser icon.',
+      );
+    }
+
+    return ResolvedMovieStream(
+      candidates: candidates,
+      filename: quality.fileName,
+      sizeLabel: quality.sizeLabel,
+      sharePageUrl: external,
+      mimeType: quality.isZipPack ? 'application/zip' : 'video/x-matroska',
+    );
   }
 }
