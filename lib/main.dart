@@ -35,6 +35,7 @@ import 'core/services/update_reminders.dart';
 import 'ui/settings/update_dialog.dart';
 import 'core/theme/sidify_theme.dart';
 import 'movies/services/eon_movies_service.dart';
+import 'movies/services/sidify_movies_service.dart';
 import 'movies/services/movie_download_service.dart';
 import 'movies/services/movie_library_service.dart';
 import 'services/lyrics_service.dart';
@@ -150,7 +151,7 @@ Future<AppBoot> _initializeApp() async {
   final MusicDownloadService musicDownloads = MusicDownloadService(
     prefs: prefs,
   );
-  final EonMoviesService moviesService = EonMoviesService();
+  final EonMoviesService moviesService = SidifyMoviesService();
   final MovieDownloadService movieDownloads =
       await MovieDownloadService.create(
     prefs,

@@ -1,6 +1,7 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/services/app_feedback.dart';
 import '../../core/theme/sidify_theme.dart';
@@ -483,10 +484,36 @@ class MovieQualityDownloadTile extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.end,
       children: <Widget>[
         _buildWatchAction(context, t),
+        TextButton.icon(
+          onPressed: () => _playInVlc(context),
+          icon: const Icon(Icons.open_in_new_rounded, size: 16),
+          label: const Text('Play in VLC'),
+        ),
         const SizedBox(height: 7),
         downloadAction,
       ],
     );
+  }
+
+  Future<void> _playInVlc(BuildContext context) async {
+    final service = context.read<EonMoviesService>();
+    try {
+      final resolved = await service.resolvePlaybackStream(
+        quality, fallbackTitle: detail.cleanTitle,
+      );
+      if (resolved.candidates.isEmpty) throw StateError('No playable mirror');
+      final url = resolved.candidates.first.url;
+      final source = Uri.parse(url);
+      final intent = Uri.parse(
+        'intent://${source.authority}${source.path}${source.hasQuery ? '?${source.query}' : ''}'
+        '#Intent;scheme=${source.scheme};package=org.videolan.vlc;type=video/*;end',
+      );
+      if (!await launchUrl(intent, mode: LaunchMode.externalApplication)) {
+        showAppNotice('Install VLC to use this option.');
+      }
+    } catch (error) {
+      showAppNotice('Could not open VLC: $error');
+    }
   }
 
   Widget _buildWatchAction(BuildContext context, SidifyTokens t) {
@@ -513,7 +540,7 @@ class MovieQualityDownloadTile extends StatelessWidget {
               ),
               SizedBox(width: 5),
               Text(
-                'Watch',
+                'Play beta',
                 style: TextStyle(
                   color: Colors.white,
                   fontSize: 12,
@@ -736,7 +763,14 @@ class _DownloadQualityDialog extends StatelessWidget {
                   shrinkWrap: true,
                   children: <Widget>[
                     for (final MovieQualityLink quality in qualities)
-                      _qualityRow(context, t, dlService, quality),
+                      if (detail.webUrl.contains('/api/media/title/'))
+                        MovieQualityDownloadTile(
+                          detail: detail,
+                          quality: quality,
+                          allQualities: qualities,
+                        )
+                      else
+                        _qualityRow(context, t, dlService, quality),
                   ],
                 ),
               ),
