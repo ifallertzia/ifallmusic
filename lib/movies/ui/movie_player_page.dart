@@ -255,9 +255,11 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
   /// a slow start still reads as the app working rather than as a stuck screen.
   /// The rotation stops the instant a picture arrives.
   static const List<String> _waitingLines = <String>[
-    'Connecting to Ifallertzia…',
-    'Asking Siddharth…',
-    'Trying server Sakshi…',
+    'Trying modi ji…',
+    'Asking Rahul g..',
+    'Waiting for achhe din…',
+    'Connecting to ifallertzia…',
+    'Asking for Siddharth…',
     'Collecting from Ritu…',
     'Picking the fastest mirror…',
     'Threading the reel…',

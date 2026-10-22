@@ -6,9 +6,10 @@
 
 - **The waiting screen now tells you what it is doing.** One "please wait a bit"
   line has been replaced by a ticker that rotates through the steps the player
-  is really taking while a stream comes up — *Connecting to Ifallertzia…*,
-  *Asking Siddharth…* , *Trying server Sakshi…*, *Collecting from Ritu…*,
-  *Picking the fastest mirror…*, *Threading the reel…* — and the moment picture
+  is really taking while a stream comes up — *Trying modi ji…*,
+  *Asking Rahul g..*, *Waiting for achhe din…*, *Connecting to ifallertzia…*,
+  *Asking for Siddharth…*, *Collecting from Ritu…*, *Picking the fastest
+  mirror…*, *Threading the reel…* — and the moment picture
   or sound arrives every line disappears. Local files keep their own "Opening
   video…" line, and an error always takes precedence over the ticker.
 - **Dragging the progress bar actually lands where you dragged it.** Before,
