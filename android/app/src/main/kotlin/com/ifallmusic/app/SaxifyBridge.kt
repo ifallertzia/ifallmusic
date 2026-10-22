@@ -423,8 +423,8 @@ class SaxifyBridge(private val activity: Activity) {
 
     /**
      * Hands an HTTPS media URL to a video player — VLC first, then any other
-     * app that can play `video/*`. Returns a status map the Dart layer turns
-     * into honest notices:
+     * app that accepts a video MIME type. Returns a status map the Dart layer
+     * turns into honest notices:
      *   "launched"    – the requested package (VLC) took the intent
      *   "chooser"     – no VLC, so the system "Open with" chooser was shown
      *   "no_handler"  – nothing on this device can play the URL
