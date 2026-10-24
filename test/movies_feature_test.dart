@@ -769,7 +769,7 @@ void main() {
       expect(find.text('480p HEVC'), findsNothing);
       // Play is available for normal episode links. Do not tap it here:
       // the native media_kit player is intentionally not mounted in tests.
-      expect(find.text('Try beta'), findsWidgets);
+      expect(find.text('Play'), findsWidgets);
 
       // 5. Download opens the compact quality popup (no Play inside);
       // picking a quality closes it and starts the download immediately.

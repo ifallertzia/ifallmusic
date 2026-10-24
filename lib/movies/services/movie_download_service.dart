@@ -662,8 +662,7 @@ class MovieDownloadService extends ChangeNotifier {
       if (opened.statusCode != 206) {
         throw StateError('${candidate.server} HTTP ${opened.statusCode}');
       }
-      if (opened.contentType.toLowerCase().contains('text/html') ||
-        opened.contentType.toLowerCase().contains('application/json')) {
+      if (opened.contentType.toLowerCase().contains('text/html')) {
         throw StateError(
           '${candidate.server} returned an HTML page instead of media',
         );
@@ -834,8 +833,7 @@ class MovieDownloadService extends ChangeNotifier {
     if (opened.statusCode != 200 && opened.statusCode != 206) {
       throw StateError('${candidate.server} HTTP ${opened.statusCode}');
     }
-    if (opened.contentType.toLowerCase().contains('text/html') ||
-        opened.contentType.toLowerCase().contains('application/json')) {
+    if (opened.contentType.toLowerCase().contains('text/html')) {
       throw StateError('${candidate.server} returned an HTML page instead of media');
     }
 
@@ -909,10 +907,6 @@ class MovieDownloadService extends ChangeNotifier {
 
     if (_pausedExplicitly.contains(id) || _canceledExplicitly.contains(id)) {
       return;
-    }
-
-    if (totalBytes > 0 && received != totalBytes) {
-      throw StateError('Incomplete download: $received of $totalBytes bytes. Retry to resume.');
     }
 
     if (received < 1024 && totalBytes <= 0) {

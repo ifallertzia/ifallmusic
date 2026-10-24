@@ -603,10 +603,6 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
         play: true,
       );
       if (!_isCurrentGeneration(generation)) return;
-      // mpv can retain a disabled audio track across mirror/quality opens.
-      // Start each new source with audio enabled; language remains selectable.
-      await _player.setAudioTrack(AudioTrack.auto());
-      if (!_isCurrentGeneration(generation)) return;
       unawaited(_safeSetRate(_rate));
       _tuneForSeekingOnce();
       _armStartupTimer(generation);
@@ -812,10 +808,6 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
         ),
         play: play,
       );
-      if (!_isCurrentGeneration(generation)) return;
-      // mpv can retain a disabled audio track across mirror/quality opens.
-      // Start each new source with audio enabled; language remains selectable.
-      await _player.setAudioTrack(AudioTrack.auto());
       if (!_isCurrentGeneration(generation)) return;
       unawaited(_safeSetRate(_rate));
       _tuneForSeekingOnce();

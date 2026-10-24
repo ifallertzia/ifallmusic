@@ -629,7 +629,7 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
               _primaryButton(
                 t,
                 icon: Icons.play_arrow_rounded,
-                label: 'Try beta',
+                label: 'Play',
                 filled: true,
                 onTap: () => _playQualities(detail, detail.directQualities),
               ),
@@ -798,21 +798,17 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
                       color: t.text2,
                     ),
                   )
-                else
-                  Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: <Widget>[
+                else ...<Widget>[
                   if (best != null)
                     _groupActionButton(
                       t,
                       icon: Icons.play_arrow_rounded,
-                      label: 'Try beta',
+                      label: 'Play',
                       filled: true,
                       onTap: () => _playQualities(detail, group.qualities),
                     ),
                   if (group.qualities.isNotEmpty) ...<Widget>[
-                    const SizedBox(height: 8),
+                    const SizedBox(width: 8),
                     _groupActionButton(
                       t,
                       icon: Icons.download_rounded,
@@ -825,8 +821,7 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
                       ),
                     ),
                   ],
-                    ],
-                  ),
+                ],
               ],
             ),
           ),
