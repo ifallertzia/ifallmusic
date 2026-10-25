@@ -186,6 +186,45 @@ class NativeBridge {
     });
   }
 
+  /// Shares plain text (a room invitation link) through the system sheet.
+  /// Returns false when there is no native side to do it, so the caller can
+  /// fall back to the clipboard.
+  static Future<bool> shareText({
+    required String text,
+    String title = 'Share',
+  }) async {
+    if (kIsWeb || !Platform.isAndroid) return false;
+    try {
+      await _channel.invokeMethod<void>('shareText', <String, Object?>{
+        'text': text,
+        'title': title,
+      });
+      return true;
+    } catch (e) {
+      debugPrint('[IfallMusic][Bridge] shareText failed: $e');
+      return false;
+    }
+  }
+
+  /// The deep link the app was opened with, read once.
+  static Future<String?> takeDeepLink() async {
+    if (kIsWeb || !Platform.isAndroid) return null;
+    try {
+      return await _channel.invokeMethod<String>('takeDeepLink');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Registers a handler for deep links arriving while the app runs.
+  static void onDeepLink(void Function(String link) handler) {
+    _channel.setMethodCallHandler((MethodCall call) async {
+      if (call.method == 'onDeepLink' && call.arguments is String) {
+        handler(call.arguments as String);
+      }
+    });
+  }
+
   static Future<void> openContent(String uri, String mime) async {
     if (kIsWeb || !Platform.isAndroid) return;
     await _channel.invokeMethod<void>('openContent', <String, Object>{

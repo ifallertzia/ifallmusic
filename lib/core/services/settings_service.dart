@@ -5,6 +5,7 @@ import 'package:flutter/material.dart' show ThemeMode;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../theme/saxify_accents.dart';
+import '../utils/ids.dart';
 
 
 /// Everything the Settings screen owns, persisted with shared_preferences.
@@ -59,9 +60,24 @@ class LyricsProviders {
 }
 
 class SettingsService extends ChangeNotifier {
-  SettingsService(this._prefs);
+  SettingsService(this._prefs) {
+    // Mint the install id on first run and hold it in memory until the
+    // write lands, so identity is readable synchronously from the start.
+    _installId = _prefs.getString(kInstallId);
+    if (_installId == null || _installId!.isEmpty) {
+      _installId = newUuid();
+      _prefs.setString(kInstallId, _installId!).ignore();
+    }
+  }
 
   final SharedPreferences _prefs;
+  String? _installId;
+
+  /// This install's stable anonymous identity (a UUID minted on first run,
+  /// never shown to the listener). It is the `userId` Listen Together
+  /// friends and invites are keyed by: two phones only learn each other's
+  /// id by having been in a room together.
+  String get installId => _installId ??= newUuid();
 
   // ---------------------------------------------------------------- keys
   static const String kDisplayName = 'saxify.display_name';
@@ -106,6 +122,7 @@ class SettingsService extends ChangeNotifier {
   static const String kSilenceSkipping = 'ifall.silence_skipping.v1';
   static const String kSleepEndOfTrack = 'ifall.sleep_end_of_track.v1';
   static const String kSleepMinutes = 'ifall.sleep_minutes.v1';
+  static const String kInstallId = 'ifall.install_id.v1';
   static const String kJamServer = 'ifall.jam_server.v1';
   static const String kJamDisplayName = 'ifall.jam_display_name.v1';
   static const String kJamLastCode = 'ifall.jam_last_code.v1';

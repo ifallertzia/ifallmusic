@@ -339,11 +339,13 @@ class SettingsPage extends StatelessWidget {
             children: <Widget>[
               SidifyGroupRow(
                 icon: Icons.people_rounded,
-                title: jam.isConnected
+                title: jam.inRoom
                     ? 'In room ${jam.code ?? ''}'
                     : 'Not in a room',
-                subtitle: jam.isConnected
-                    ? '${jam.members.length} listening'
+                subtitle: jam.inRoom
+                    ? (jam.isReconnecting
+                        ? 'Reconnecting…'
+                        : '${jam.members.length} listening')
                     : 'Start one or join with a code',
                 chevron: true,
                 onTap: () {
@@ -351,7 +353,7 @@ class SettingsPage extends StatelessWidget {
                   context.read<SidifyShellController>().goTogether();
                 },
               ),
-              if (jam.isConnected)
+              if (jam.inRoom)
                 SidifyGroupRow(
                   icon: Icons.logout_rounded,
                   title: 'Leave the room',

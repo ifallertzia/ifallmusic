@@ -280,11 +280,11 @@ class _HomePageState extends State<HomePage> {
                   child: Container(
                     height: 36,
                     padding: EdgeInsets.symmetric(
-                      horizontal: jam.isConnected ? 12 : 0,
+                      horizontal: jam.inRoom ? 12 : 0,
                     ),
-                    width: jam.isConnected ? null : 36,
+                    width: jam.inRoom ? null : 36,
                     decoration: BoxDecoration(
-                      color: jam.isConnected ? t.brand : t.fill,
+                      color: jam.inRoom ? t.brand : t.fill,
                       borderRadius: BorderRadius.circular(999),
                     ),
                     child: Row(
@@ -294,9 +294,9 @@ class _HomePageState extends State<HomePage> {
                         Icon(
                           Icons.people_rounded,
                           size: 18,
-                          color: jam.isConnected ? Colors.white : t.text,
+                          color: jam.inRoom ? Colors.white : t.text,
                         ),
-                        if (jam.isConnected) ...<Widget>[
+                        if (jam.inRoom) ...<Widget>[
                           const SizedBox(width: 4),
                           Text(
                             '${jam.members.length}',
@@ -467,7 +467,7 @@ class _HomePageState extends State<HomePage> {
 
   Widget _roomInvite(BuildContext context) {
     final JamService jam = context.watch<JamService>();
-    if (jam.isConnected) return const SizedBox.shrink();
+    if (jam.inRoom) return const SizedBox.shrink();
     final SidifyTokens t = context.sidify;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 36),

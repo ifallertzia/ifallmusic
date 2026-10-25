@@ -13,8 +13,9 @@ const (
 	FrameMembers = "members"
 	FramePong    = "pong"
 	FrameError   = "error"
-	FrameBye     = "bye"
+	FrameBye      = "bye"
 	FrameActivity = "activity"
+	FrameChat     = "chat"
 )
 
 // Client -> Server frame types
@@ -23,6 +24,7 @@ const (
 	FrameControl   = "control"
 	FrameSync      = "sync"
 	FrameSyncQueue = "syncQueue"
+	FrameSyncChat  = "syncChat"
 	FrameReport    = "report"
 )
 
@@ -43,6 +45,14 @@ const (
 	ActionSetMaxMembers = "setMaxMembers"
 	ActionSetAutoplay = "setAutoplay"
 	ActionSetHostOnlyControl = "setHostOnlyControl"
+	// The sender's player reached the end of `trackId`. Deliberately *not* a
+	// host-only control: a listener who may not drive the music still has to
+	// be able to tell the room the song finished on their device. The server
+	// only honours it when it agrees the track is essentially over, and only
+	// the first such report advances the room (see PlaybackState.Ended).
+	ActionEnded = "ended"
+	// Host only: close the party for everyone, not just leave it.
+	ActionEnd = "end"
 )
 
 // ControlActions are the actions a party's HostOnlyControl setting restricts to

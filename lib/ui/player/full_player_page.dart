@@ -11,6 +11,7 @@ import '../../core/services/playback_service.dart';
 import '../../core/services/settings_service.dart';
 import '../../core/utils/format.dart';
 import '../artist/artist_page.dart';
+import '../rooms/room_transport.dart';
 import '../shell/sidify_routes.dart';
 import '../widgets/sidify_widgets.dart';
 import '../widgets/song_menu.dart';
@@ -150,7 +151,7 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
 
   Widget _playingFrom(BuildContext context) {
     final JamService jam = context.watch<JamService>();
-    final bool inRoom = jam.isConnected;
+    final bool inRoom = jam.inRoom;
     return Column(
       children: <Widget>[
         Text(
@@ -392,13 +393,19 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
             Icons.shuffle_rounded,
             'Shuffle',
             playback.shuffleEnabled,
-            () => playback.toggleShuffle(),
+            () {
+              if (!roomModeNotice(context)) playback.toggleShuffle();
+            },
           ),
           _transportBtn(
             Icons.skip_previous_rounded,
             34,
             56,
-            () => playback.previous(),
+            () {
+              if (!roomTransport(context, playback, 'previous')) {
+                playback.previous();
+              }
+            },
           ),
           _transportBtn(
             playback.isPlaying
@@ -406,18 +413,31 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
                 : Icons.play_arrow_rounded,
             52,
             72,
-            () => playback.togglePlayPause(),
+            () {
+              if (!roomTransport(context, playback, 'toggle')) {
+                playback.togglePlayPause();
+              }
+            },
             loading: playback.isLoading,
             primary: true,
           ),
-          _transportBtn(Icons.skip_next_rounded, 34, 56, () => playback.next()),
+          _transportBtn(
+            Icons.skip_next_rounded,
+            34,
+            56,
+            () {
+              if (!roomTransport(context, playback, 'next')) playback.next();
+            },
+          ),
           _modeBtn(
             playback.loopMode == LoopMode.one
                 ? Icons.repeat_one_rounded
                 : Icons.repeat_rounded,
             'Repeat',
             playback.loopMode != LoopMode.off,
-            () => playback.cycleLoopMode(),
+            () {
+              if (!roomModeNotice(context)) playback.cycleLoopMode();
+            },
           ),
         ],
       ),
@@ -578,7 +598,11 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
                         Icons.shuffle_rounded,
                         'Shuffle',
                         playback.shuffleEnabled,
-                        () => playback.toggleShuffle(),
+                        () {
+                          if (!roomModeNotice(context)) {
+                            playback.toggleShuffle();
+                          }
+                        },
                       ),
                       _capsuleDivider(),
                       _capsuleBtn(
@@ -587,7 +611,11 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
                             : Icons.repeat_rounded,
                         'Repeat',
                         playback.loopMode != LoopMode.off,
-                        () => playback.cycleLoopMode(),
+                        () {
+                          if (!roomModeNotice(context)) {
+                            playback.cycleLoopMode();
+                          }
+                        },
                       ),
                       _capsuleDivider(),
                       _capsuleBtn(
@@ -830,7 +858,8 @@ class _TimelineState extends State<_Timeline> {
     setState(() => _drag = null);
     if (!commit) return;
     final int ms = (_duration.inMilliseconds * f).round();
-    widget.playback.seekTo(Duration(milliseconds: ms));
+    final Duration to = Duration(milliseconds: ms);
+    if (!roomSeek(context, widget.playback, to)) widget.playback.seekTo(to);
   }
 
   @override

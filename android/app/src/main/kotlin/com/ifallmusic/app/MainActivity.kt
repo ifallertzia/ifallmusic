@@ -1,17 +1,54 @@
 package com.ifallmusic.app
 
 import android.content.Context
+import android.content.Intent
 import android.os.Build
 import android.view.WindowManager
 import com.ryanheise.audioservice.AudioServiceActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
+/**
+ * Holds the most recent deep link (an `ifallmusic://party/…` or an
+ * `https://party.ifallmusic.app/invite/…` tap) until the Dart side is
+ * ready to read it. On a warm start the link is also pushed straight to
+ * Dart as an `onDeepLink` call.
+ */
+object DeepLinkInbox {
+    @Volatile
+    var pending: String? = null
+
+    @Volatile
+    var channel: MethodChannel? = null
+
+    fun offer(link: String) {
+        pending = link
+        try {
+            channel?.invokeMethod("onDeepLink", link)
+        } catch (_: Exception) {
+            // The engine may still be starting; Dart pulls via takeDeepLink.
+        }
+    }
+
+    fun take(): String? {
+        val value = pending
+        pending = null
+        return value
+    }
+}
+
 class MainActivity : AudioServiceActivity() {
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         SaxifyBoot.noteLaunch(this)
         super.onCreate(savedInstanceState)
         applyHighestRefreshRate()
+        intent?.dataString?.let { DeepLinkInbox.pending = it }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        intent.dataString?.let { DeepLinkInbox.offer(it) }
     }
 
     // Flutter renders at whatever the panel offers. Phones that ship with a
@@ -32,7 +69,11 @@ class MainActivity : AudioServiceActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         val bridge = SaxifyBridge(this)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.ifallmusic.app/bridge")
-            .setMethodCallHandler { call, result -> bridge.handle(call, result) }
+        val channel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "com.ifallmusic.app/bridge",
+        )
+        channel.setMethodCallHandler { call, result -> bridge.handle(call, result) }
+        DeepLinkInbox.channel = channel
     }
 }

@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../models/song.dart';
+import '../utils/ids.dart';
 import 'settings_service.dart';
 
 /// What the socket is doing right now.
@@ -20,12 +21,39 @@ enum JamConnectionState {
   /// The WebSocket is up and the room is live.
   connected,
 
+  /// The socket dropped but the seat is being held open on the server;
+  /// the client is trying to get back in by itself.
+  reconnecting,
+
   /// The socket dropped (or never came up). [JamService.error] explains why.
   error,
 }
 
 /// Why the server sent us away.
-enum JamByeReason { left, kicked, unknown }
+enum JamByeReason { left, kicked, ended, unknown }
+
+/// The characters a room code may use: digits and capitals without I, L or
+/// O, so a code read aloud can't be misheard as 1 or 0. Mirrors the server.
+const String jamCodeAlphabet = '0123456789ABCDEFGHJKMNPQRSTUVWXYZ';
+const int jamCodeLength = 6;
+
+/// Reads a code the way the server does: uppercases, drops anything that
+/// isn't a letter or digit, and reads I/L as 1 and O as 0 — so a mistyped
+/// or spacey code from a chat message still lands in the right room.
+String normalizeJamCode(String input) {
+  final String cleaned = input
+      .toUpperCase()
+      .replaceAll(RegExp(r'[^A-Z0-9]'), '')
+      .replaceAll(RegExp(r'[IL]'), '1')
+      .replaceAll('O', '0');
+  return cleaned.length > jamCodeLength
+      ? cleaned.substring(0, jamCodeLength)
+      : cleaned;
+}
+
+bool isValidJamCode(String code) =>
+    code.length == jamCodeLength &&
+    code.split('').every(jamCodeAlphabet.contains);
 
 /// One song in the shared queue.
 ///
@@ -68,12 +96,14 @@ class JamTrack {
         'fromAutoplay': fromAutoplay,
       };
 
-  factory JamTrack.fromSong(Song song) => JamTrack(
+  factory JamTrack.fromSong(Song song, {bool fromAutoplay = false}) =>
+      JamTrack(
         videoId: song.id,
         title: song.title,
         artist: song.artist,
         thumbnailUrl: song.thumbnailUrl,
         durationMs: song.duration?.inMilliseconds ?? 0,
+        fromAutoplay: fromAutoplay,
       );
 
   Song toSong() => Song(
@@ -98,28 +128,42 @@ class JamTrack {
 /// Someone in the room.
 class JamMember {
   const JamMember({
+    required this.memberId,
     required this.userId,
-    required this.deviceId,
     required this.displayName,
+    this.deviceId = '',
     this.avatarUrl,
     this.isHost = false,
     this.connected = true,
+    this.joinedAtMs = 0,
+    this.lastSeenMs = 0,
   });
 
+  /// The server's per-room seat id (what `kick` names).
+  final String memberId;
+
+  /// The install's stable anonymous id — what friends and invites key on.
   final String userId;
+
+  /// Kept for older call sites; the server never sends it back.
   final String deviceId;
   final String displayName;
   final String? avatarUrl;
   final bool isHost;
   final bool connected;
+  final int joinedAtMs;
+  final int lastSeenMs;
 
   factory JamMember.fromJson(Map<String, dynamic> json) => JamMember(
+        memberId: json['memberId']?.toString() ?? '',
         userId: json['userId']?.toString() ?? '',
         deviceId: json['deviceId']?.toString() ?? '',
         displayName: json['displayName']?.toString() ?? 'Listener',
         avatarUrl: json['avatarUrl']?.toString(),
         isHost: json['isHost'] == true,
         connected: json['connected'] != false,
+        joinedAtMs: (json['joinedAtMs'] as num?)?.round() ?? 0,
+        lastSeenMs: (json['lastSeenMs'] as num?)?.round() ?? 0,
       );
 
   /// Two letters for the avatar bubble when there is no picture.
@@ -146,6 +190,10 @@ class JamPlayback {
     this.anchorMs = 0,
     this.isPlaying = false,
     this.seq = 0,
+    this.queueSeq = 0,
+    this.queueIndex = -1,
+    this.queueLength = 0,
+    this.autoplayEnabled = false,
     this.startedBy,
     this.startedByName,
     this.updatedBy,
@@ -161,6 +209,13 @@ class JamPlayback {
   /// the same moment settle instead of oscillate.
   final int seq;
 
+  /// Version of the queue contents at the time of this state; the queue
+  /// itself travels in its own frame, and a mismatch here is how a missed
+  /// queue broadcast gets noticed and healed.
+  final int queueSeq;
+  final int queueIndex;
+  final int queueLength;
+  final bool autoplayEnabled;
   final String? startedBy;
   final String? startedByName;
   final String? updatedBy;
@@ -173,6 +228,10 @@ class JamPlayback {
         anchorMs: (json['anchorMs'] as num?)?.round() ?? 0,
         isPlaying: json['isPlaying'] == true,
         seq: (json['seq'] as num?)?.round() ?? 0,
+        queueSeq: (json['queueSeq'] as num?)?.round() ?? 0,
+        queueIndex: (json['queueIndex'] as num?)?.round() ?? -1,
+        queueLength: (json['queueLength'] as num?)?.round() ?? 0,
+        autoplayEnabled: json['autoplayEnabled'] == true,
         startedBy: json['startedBy']?.toString(),
         startedByName: json['startedByName']?.toString(),
         updatedBy: json['updatedBy']?.toString(),
@@ -220,6 +279,104 @@ class JamQueue {
       );
 }
 
+/// One line of room chat. [pending] / [failed] are local-only delivery
+/// states for the optimistic bubble; the server's copy never carries them.
+class JamChatMessage {
+  const JamChatMessage({
+    required this.id,
+    required this.memberId,
+    required this.userId,
+    required this.by,
+    required this.text,
+    required this.atMs,
+    this.pending = false,
+    this.failed = false,
+  });
+
+  final String id;
+  final String memberId;
+  final String userId;
+  final String by;
+  final String text;
+  final int atMs;
+  final bool pending;
+  final bool failed;
+
+  factory JamChatMessage.fromJson(Map<String, dynamic> json) =>
+      JamChatMessage(
+        id: json['id']?.toString() ?? '',
+        memberId: json['memberId']?.toString() ?? '',
+        userId: json['userId']?.toString() ?? '',
+        by: json['by']?.toString() ?? 'Listener',
+        text: json['text']?.toString() ?? '',
+        atMs: (json['atMs'] as num?)?.round() ?? 0,
+      );
+
+  JamChatMessage copyWith({bool? pending, bool? failed}) => JamChatMessage(
+        id: id,
+        memberId: memberId,
+        userId: userId,
+        by: by,
+        text: text,
+        atMs: atMs,
+        pending: pending ?? this.pending,
+        failed: failed ?? this.failed,
+      );
+}
+
+/// One "Alice skipped to the next song" line, shown interleaved with chat.
+class JamActivity {
+  const JamActivity({
+    required this.action,
+    required this.by,
+    required this.detail,
+    required this.atMs,
+  });
+
+  final String action;
+  final String by;
+  final String detail;
+  final int atMs;
+
+  factory JamActivity.fromJson(Map<String, dynamic> json) => JamActivity(
+        action: json['action']?.toString() ?? '',
+        by: json['by']?.toString() ?? '',
+        detail: json['detail']?.toString() ?? '',
+        atMs: (json['atMs'] as num?)?.round() ?? 0,
+      );
+}
+
+/// Who is in a room, without joining it — the join screen's preview.
+class JamPreview {
+  const JamPreview({
+    required this.code,
+    required this.hostName,
+    required this.memberCount,
+    required this.maxMembers,
+    required this.isFull,
+    required this.memberNames,
+  });
+
+  final String code;
+  final String hostName;
+  final int memberCount;
+  final int maxMembers;
+  final bool isFull;
+  final List<String> memberNames;
+
+  factory JamPreview.fromJson(Map<String, dynamic> json) => JamPreview(
+        code: json['code']?.toString() ?? '',
+        hostName: json['hostName']?.toString() ?? '',
+        memberCount: (json['memberCount'] as num?)?.round() ?? 0,
+        maxMembers: (json['maxMembers'] as num?)?.round() ?? 5,
+        isFull: json['isFull'] == true,
+        memberNames: (json['members'] as List<dynamic>? ?? const <dynamic>[])
+            .whereType<Map>()
+            .map((Map m) => m['displayName']?.toString() ?? 'Listener')
+            .toList(),
+      );
+}
+
 /// The **Listen Together** client.
 ///
 /// Create a room, share its six-character code, and everybody in it hears the
@@ -263,6 +420,7 @@ class JamService extends ChangeNotifier {
   WebSocket? _socket;
   StreamSubscription<dynamic>? _sub;
   Timer? _pingTimer;
+  Timer? _reconnectTimer;
 
   JamConnectionState _state = JamConnectionState.idle;
   String? _error;
@@ -274,6 +432,9 @@ class JamService extends ChangeNotifier {
   JamQueue _queue = const JamQueue();
   int _appliedSeq = -1;
   int _appliedQueueSeq = -1;
+  List<JamChatMessage> _chatMessages = const <JamChatMessage>[];
+  int _chatSeq = 0;
+  List<JamActivity> _activities = const <JamActivity>[];
 
   /// Server clock minus device clock, in milliseconds.
   ///
@@ -288,10 +449,28 @@ class JamService extends ChangeNotifier {
   String _displayName = '';
   String? _avatarUrl;
 
+  bool _intentionalClose = false;
+  bool _everConnected = false;
+  int _reconnectAttempt = 0;
+  int _connectionGeneration = 0;
+
+  static const int maxChatMessages = 80;
+  static const int maxActivities = 30;
+  static const int maxChatRunes = 300;
+
   // ------------------------------------------------------------------ getters
   JamConnectionState get state => _state;
   String? get error => _error;
   bool get isConnected => _state == JamConnectionState.connected;
+  bool get isReconnecting => _state == JamConnectionState.reconnecting;
+
+  /// True from the moment a room opens until it is left for good, including
+  /// while a dropped socket is being re-established.
+  bool get inRoom =>
+      _party != null &&
+      (_state == JamConnectionState.connected ||
+          _state == JamConnectionState.reconnecting ||
+          _state == JamConnectionState.joining);
   JamParty? get party => _party;
   JamMember? get you => _you;
   List<JamMember> get members => _members;
@@ -304,6 +483,19 @@ class JamService extends ChangeNotifier {
   bool get isHost => _you?.isHost ?? false;
   bool get hostOnlyControl => _party?.hostOnlyControl ?? false;
   bool get isPaused => !(_playback?.isPlaying ?? false);
+  bool get autoplayEnabled => _playback?.autoplayEnabled ?? false;
+  List<JamChatMessage> get chatMessages =>
+      List<JamChatMessage>.unmodifiable(_chatMessages);
+  List<JamActivity> get activities =>
+      List<JamActivity>.unmodifiable(_activities);
+
+  /// The host's name for "Alice's room" headings; '' when unknown.
+  String get hostName {
+    for (final JamMember m in _members) {
+      if (m.isHost) return m.displayName;
+    }
+    return '';
+  }
 
   /// True when this device is allowed to drive playback.
   bool get canControl => isConnected && (!hostOnlyControl || isHost);
@@ -311,27 +503,56 @@ class JamService extends ChangeNotifier {
   /// How far the device clock is from the server's, once measured.
   int? get clockOffsetMs => _clockOffsetMs;
 
+  /// Best (smallest) measured socket round trip — the "· 84 ms" in the UI.
+  int? get roundTripMs => _bestRoundTripMs;
+
   /// The room's playhead *right now*, derived locally from the last anchor.
   Duration get positionNow => positionAt(DateTime.now());
 
   Duration positionAt(DateTime deviceNow) {
     final JamPlayback? p = _playback;
     if (p == null) return Duration.zero;
-    if (!p.isPlaying) return Duration(milliseconds: p.positionMs);
-    final int serverNow =
-        deviceNow.millisecondsSinceEpoch + (_clockOffsetMs ?? 0);
-    final int elapsed = math.max(0, serverNow - p.anchorMs);
-    return Duration(milliseconds: p.positionMs + elapsed);
+    int pos = p.positionMs;
+    if (p.isPlaying) {
+      final int serverNow =
+          deviceNow.millisecondsSinceEpoch + (_clockOffsetMs ?? 0);
+      pos += math.max(0, serverNow - p.anchorMs);
+    }
+    final int durationMs = p.track?.durationMs ?? 0;
+    if (durationMs > 0 && pos > durationMs) pos = durationMs;
+    if (pos < 0) pos = 0;
+    return Duration(milliseconds: pos);
   }
 
-  /// The base address with any trailing slash removed.
-  String get serverBase =>
-      _settings.jamServer.trim().replaceAll(RegExp(r'/+$'), '');
+  /// This device's server time right now (for "away since" maths in the UI).
+  int get serverNowMs =>
+      DateTime.now().millisecondsSinceEpoch + (_clockOffsetMs ?? 0);
 
+  /// The production party server, used unless the listener named their own
+  /// in Settings. Self-hosting the Go server in `backend/` is a first-class
+  /// option, never a build-time change.
+  static const String defaultServer = 'https://party.ifallmusic.app';
+
+  /// Kept under its old name for call sites that show it as a placeholder.
+  static const String placeholderServer = defaultServer;
+
+  /// The base address with any trailing slash removed.
+  String get serverBase {
+    final String custom =
+        _settings.jamServer.trim().replaceAll(RegExp(r'/+$'), '');
+    return custom.isNotEmpty ? custom : defaultServer;
+  }
+
+  bool get hasCustomServer => _settings.jamServer.trim().isNotEmpty;
   bool get hasServer => serverBase.isNotEmpty;
 
-  /// The address shown in the UI while no server is configured.
-  static const String placeholderServer = 'https://party.example.com';
+  /// The shareable web link for the current room (the server's invite page,
+  /// which hands Android straight to the app).
+  String get inviteUrl {
+    final String? c = code;
+    if (c == null || c.isEmpty) return '';
+    return '$serverBase/invite/${Uri.encodeComponent(c)}';
+  }
 
   // ------------------------------------------------------------------- setup
 
@@ -348,12 +569,20 @@ class JamService extends ChangeNotifier {
     _avatarUrl = avatarUrl;
   }
 
+  /// The name others see, in the order the app already resolves names:
+  /// a room-specific name from Settings, then the profile name, then
+  /// whatever [identify] was given.
+  String get effectiveDisplayName {
+    if (_settings.jamDisplayName.isNotEmpty) return _settings.jamDisplayName;
+    if (_settings.displayName.isNotEmpty) return _settings.displayName;
+    if (_displayName.isNotEmpty) return _displayName;
+    return 'Listener';
+  }
+
   Map<String, dynamic> get _identity => <String, dynamic>{
         'userId': _userId,
         'deviceId': _deviceId,
-        'displayName': _settings.jamDisplayName.isNotEmpty
-            ? _settings.jamDisplayName
-            : _displayName,
+        'displayName': effectiveDisplayName,
         if (_avatarUrl != null && _avatarUrl!.isNotEmpty) 'avatarUrl': _avatarUrl,
       };
 
@@ -365,17 +594,79 @@ class JamService extends ChangeNotifier {
   // ------------------------------------------------------------- create / join
 
   /// Opens a new room and joins it as the host.
-  Future<bool> create() => _open(create: true);
+  Future<bool> create({int? maxMembers, bool autoplay = true}) => _open(
+        create: true,
+        extra: <String, dynamic>{
+          if (maxMembers != null) 'maxMembers': maxMembers,
+          'autoplayEnabled': autoplay,
+        },
+      );
 
   /// Joins an existing room from its six-character code.
-  Future<bool> join(String code) => _open(create: false, code: code);
+  Future<bool> join(String code) {
+    final String normalised = normalizeJamCode(code);
+    if (!isValidJamCode(normalised)) {
+      _fail('Room codes are six letters or digits — check the code and try again.');
+      return Future<bool>.value(false);
+    }
+    return _open(create: false, code: normalised);
+  }
 
-  Future<bool> _open({required bool create, String? code}) async {
+  /// Who is in a room, without taking a seat in it — for the join screen.
+  /// Returns the preview, or an error message to show.
+  Future<(JamPreview?, String?)> preview(String rawCode) async {
+    final String code = normalizeJamCode(rawCode);
+    if (!isValidJamCode(code)) {
+      return (null, 'Room codes are six letters or digits.');
+    }
+    try {
+      final http.Response response = await _client
+          .get(
+            Uri.parse(
+                '$serverBase/api/parties/${Uri.encodeComponent(code)}/preview'),
+            headers: const <String, String>{'Accept': 'application/json'},
+          )
+          .timeout(const Duration(seconds: 10));
+      if (response.statusCode != 200) {
+        return (null, _explainStatus(response.statusCode, response.body));
+      }
+      final Object? decoded = jsonDecode(response.body);
+      if (decoded is! Map) {
+        return (null, 'The server sent something we could not read.');
+      }
+      return (
+        JamPreview.fromJson(decoded.cast<String, dynamic>()),
+        null,
+      );
+    } on TimeoutException {
+      return (null, 'The Listen Together server did not answer in time.');
+    } catch (e) {
+      return (null, 'Could not reach the Listen Together server.');
+    }
+  }
+
+  Future<bool> _open({
+    required bool create,
+    String? code,
+    Map<String, dynamic> extra = const <String, dynamic>{},
+  }) async {
     if (!hasServer) {
       _fail('No Listen Together server is set. Add one in Settings.');
       return false;
     }
+    if (_userId.isEmpty || _deviceId.isEmpty) {
+      _fail('This device has no room identity yet — restart the app and try again.');
+      return false;
+    }
     final String normalised = (code ?? '').trim().toUpperCase();
+    if (inRoom && _party != null) {
+      if (!create && _party!.code == normalised && isConnected) return true;
+      await leave();
+    }
+    _intentionalClose = false;
+    _cancelReconnect();
+    _reconnectAttempt = 0;
+    _everConnected = false;
     _setState(JamConnectionState.joining);
     _error = null;
     try {
@@ -388,7 +679,7 @@ class JamService extends ChangeNotifier {
           .post(
             uri,
             headers: const <String, String>{'Content-Type': 'application/json'},
-            body: jsonEncode(_identity),
+            body: jsonEncode(<String, dynamic>{..._identity, ...extra}),
           )
           .timeout(const Duration(seconds: 15));
 
@@ -413,36 +704,60 @@ class JamService extends ChangeNotifier {
       _fail('The Listen Together server did not answer in time.');
       return false;
     } catch (e) {
-      _fail('Could not reach the Listen Together server: $e');
+      _fail('Could not reach the Listen Together server. Check your connection.');
       return false;
     }
   }
 
-  /// Reads the fields that both the REST snapshot and `welcome` carry.
+  /// Reads the fields that both the REST snapshot and `welcome` carry. The
+  /// create/join answers nest everything under `party`; the bare party
+  /// snapshot (GET) carries the same fields at the top level.
   void _absorbSnapshot(Map<String, dynamic> payload) {
     _token = payload['token']?.toString() ?? _token;
     if (payload['you'] is Map) {
       _you = JamMember.fromJson((payload['you'] as Map).cast<String, dynamic>());
     }
-    if (payload['party'] is Map) {
-      _party = JamParty.fromJson((payload['party'] as Map).cast<String, dynamic>());
+    final Map<String, dynamic> partyMap = payload['party'] is Map
+        ? (payload['party'] as Map).cast<String, dynamic>()
+        : payload;
+    if (partyMap['code'] != null) {
+      _party = JamParty.fromJson(partyMap);
     }
-    if (payload['queue'] is Map) {
-      _applyQueue((payload['queue'] as Map).cast<String, dynamic>());
+    if (partyMap['queue'] is Map) {
+      _applyQueue((partyMap['queue'] as Map).cast<String, dynamic>());
     }
-    if (payload['playback'] is Map) {
-      _applyPlayback((payload['playback'] as Map).cast<String, dynamic>());
+    if (partyMap['playback'] is Map) {
+      _applyPlayback((partyMap['playback'] as Map).cast<String, dynamic>());
     }
-    if (payload['members'] is List) {
-      _members = (payload['members'] as List)
+    if (partyMap['members'] is List) {
+      _members = (partyMap['members'] as List)
           .whereType<Map>()
           .map((Map m) => JamMember.fromJson(m.cast<String, dynamic>()))
           .toList();
+      _refreshYouFromMembers();
     }
-    final Object? serverMs = payload['serverMs'];
+    if (partyMap['chat'] is List) {
+      _chatMessages = (partyMap['chat'] as List)
+          .whereType<Map>()
+          .map((Map m) => JamChatMessage.fromJson(m.cast<String, dynamic>()))
+          .toList();
+      _chatSeq = (partyMap['chatSeq'] as num?)?.round() ?? _chatMessages.length;
+    }
+    final Object? serverMs = payload['serverMs'] ?? partyMap['serverMs'];
     if (serverMs is num && _clockOffsetMs == null) {
       _clockOffsetMs =
           serverMs.round() - DateTime.now().millisecondsSinceEpoch;
+    }
+  }
+
+  void _refreshYouFromMembers() {
+    final JamMember? me = _you;
+    if (me == null || me.memberId.isEmpty) return;
+    for (final JamMember m in _members) {
+      if (m.memberId == me.memberId) {
+        _you = m;
+        return;
+      }
     }
   }
 
@@ -451,16 +766,17 @@ class JamService extends ChangeNotifier {
     try {
       final Object? decoded = jsonDecode(body);
       if (decoded is Map) {
-        server = (decoded['error'] ?? decoded['message'])?.toString() ?? '';
+        server = (decoded['message'] ?? decoded['error'])?.toString() ?? '';
       }
     } catch (_) {
       // A plain-text body is fine; fall through to the generic message.
     }
     return switch (status) {
-      404 => 'No room with that code.',
+      404 => 'No room with that code — check it and try again.',
       409 => server.isNotEmpty ? server : 'That room is full.',
       422 => 'The server needs a name before you can join.',
       429 => 'Too many rooms too quickly. Try again in a minute.',
+      503 => 'The room server is busy right now. Try again in a few minutes.',
       _ => server.isNotEmpty
           ? server
           : 'The server refused the request ($status).',
@@ -470,6 +786,7 @@ class JamService extends ChangeNotifier {
   Future<void> _connectSocket() async {
     final String? code = _party?.code;
     if (code == null || !hasServer) return;
+    final int generation = ++_connectionGeneration;
     final Uri ws = Uri.parse(serverBase.replaceFirst(RegExp(r'^http'), 'ws'))
         .replace(path: '/ws/parties/${Uri.encodeComponent(code)}');
     try {
@@ -480,31 +797,139 @@ class JamService extends ChangeNotifier {
         headers: <String, String>{'Authorization': 'Bearer ${_token ?? ''}'},
       ).timeout(const Duration(seconds: 15));
     } on TimeoutException {
-      _fail('The room did not answer in time.');
+      _socketFailed('The room did not answer in time.');
       return;
     } catch (e) {
-      _fail('Could not open the room connection: $e');
+      _socketFailed('Could not open the room connection.');
+      return;
+    }
+    if (generation != _connectionGeneration || _intentionalClose) {
+      try {
+        await _socket?.close();
+      } catch (_) {}
+      _socket = null;
       return;
     }
     await _sub?.cancel();
     _sub = _socket!.listen(
       _onFrame,
-      onError: (Object error) => _fail('The room connection dropped: $error'),
+      onError: (Object error) {
+        if (generation == _connectionGeneration) _onSocketDropped();
+      },
       onDone: () {
-        if (_state == JamConnectionState.connected) {
-          _state = JamConnectionState.error;
-          _error = 'The room connection closed.';
-          notifyListeners();
-        }
+        if (generation == _connectionGeneration) _onSocketDropped();
       },
       cancelOnError: false,
     );
+    _everConnected = true;
+    _reconnectAttempt = 0;
     _setState(JamConnectionState.connected);
     _pingTimer?.cancel();
     _pingTimer = Timer.periodic(const Duration(seconds: 5), (_) => _ping());
     _ping();
     _send(<String, dynamic>{'type': 'sync'});
+    _send(<String, dynamic>{'type': 'syncQueue'});
+    _send(<String, dynamic>{'type': 'syncChat'});
   }
+
+  void _socketFailed(String message) {
+    if (_everConnected && _party != null && !_intentionalClose) {
+      _onSocketDropped();
+    } else {
+      _fail(message);
+    }
+  }
+
+  void _onSocketDropped() {
+    if (_intentionalClose) return;
+    _pingTimer?.cancel();
+    _pingTimer = null;
+    _sub?.cancel();
+    _sub = null;
+    try {
+      _socket?.close();
+    } catch (_) {}
+    _socket = null;
+    if (_party == null) {
+      _fail('The room connection closed.');
+      return;
+    }
+    // The server holds this seat for a grace window, host crown included.
+    // Mark the room reconnecting and quietly earn it back.
+    _state = JamConnectionState.reconnecting;
+    _error = null;
+    notifyListeners();
+    _scheduleReconnect();
+  }
+
+  void _scheduleReconnect() {
+    if (_intentionalClose || _party == null) return;
+    _cancelReconnect();
+    const List<int> backoffSeconds = <int>[1, 2, 4, 8, 15, 20];
+    final int delay =
+        backoffSeconds[math.min(_reconnectAttempt, backoffSeconds.length - 1)];
+    _reconnectTimer = Timer(Duration(seconds: delay), _attemptReconnect);
+  }
+
+  void _cancelReconnect() {
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+  }
+
+  Future<void> _attemptReconnect() async {
+    if (_intentionalClose || _party == null) return;
+    if (_state == JamConnectionState.connected) return;
+    _reconnectAttempt++;
+    final String code = _party!.code;
+    try {
+      final http.Response response = await _client
+          .post(
+            Uri.parse(
+                '$serverBase/api/parties/${Uri.encodeComponent(code)}/join'),
+            headers: const <String, String>{'Content-Type': 'application/json'},
+            body: jsonEncode(_identity),
+          )
+          .timeout(const Duration(seconds: 12));
+      if (_intentionalClose || _party?.code != code) return;
+      if (response.statusCode == 404) {
+        _fail('This room has ended.');
+        return;
+      }
+      if (response.statusCode != 200 && response.statusCode != 201) {
+        _scheduleReconnect();
+        return;
+      }
+      final Object? decoded = jsonDecode(response.body);
+      if (decoded is Map) {
+        _absorbSnapshot(decoded.cast<String, dynamic>());
+        notifyListeners();
+      }
+      await _connectSocket();
+    } catch (_) {
+      _scheduleReconnect();
+    }
+  }
+
+  /// Called when the app comes back to the front: re-earn a dropped socket
+  /// now instead of at the next backoff tick, or re-ask for the truth.
+  void onAppResumed() {
+    if (_state == JamConnectionState.reconnecting) {
+      _cancelReconnect();
+      unawaited(_attemptReconnect());
+    } else if (isConnected) {
+      resync();
+    }
+  }
+
+  /// Asks for the truth again — after the app comes back to the front.
+  void resync() {
+    _send(<String, dynamic>{'type': 'sync'});
+    _send(<String, dynamic>{'type': 'syncQueue'});
+    _send(<String, dynamic>{'type': 'syncChat'});
+    _ping();
+  }
+
+  // --------------------------------------------------------------- transport
 
   /// Sends a frame. Silently drops it when nothing is connected.
   void _send(Map<String, dynamic> frame) {
@@ -558,13 +983,15 @@ class JamService extends ChangeNotifier {
         }
       case 'state':
         if (frame['playback'] is Map) {
-          _applyPlayback((frame['playback'] as Map).cast<String, dynamic>());
-        }
-        final int? queueSeq = (frame['queueSeq'] as num?)?.round();
-        if (queueSeq != null && queueSeq != _appliedQueueSeq) {
-          // Self-healing half: a missed queue broadcast is noticed on the very
-          // next heartbeat rather than lived with.
-          _send(<String, dynamic>{'type': 'syncQueue'});
+          final Map<String, dynamic> pb =
+              (frame['playback'] as Map).cast<String, dynamic>();
+          _applyPlayback(pb);
+          final int? queueSeq = (pb['queueSeq'] as num?)?.round();
+          if (queueSeq != null && queueSeq != _appliedQueueSeq) {
+            // Self-healing half: a missed queue broadcast is noticed on the
+            // very next state frame rather than lived with.
+            _send(<String, dynamic>{'type': 'syncQueue'});
+          }
         }
         notifyListeners();
       case 'queue':
@@ -578,23 +1005,36 @@ class JamService extends ChangeNotifier {
               .whereType<Map>()
               .map((Map m) => JamMember.fromJson(m.cast<String, dynamic>()))
               .toList();
+          _refreshYouFromMembers();
         }
-        if (frame['maxMembers'] is num) {
+        if (_party != null) {
           _party = JamParty(
-            code: _party?.code ?? '',
-            maxMembers: (frame['maxMembers'] as num).round(),
-            hostOnlyControl: _party?.hostOnlyControl ?? false,
-          );
-        }
-        if (frame['hostOnlyControl'] != null) {
-          _party = JamParty(
-            code: _party?.code ?? '',
-            maxMembers: _party?.maxMembers ?? 5,
-            hostOnlyControl: frame['hostOnlyControl'] == true,
+            code: _party!.code,
+            maxMembers: (frame['maxMembers'] as num?)?.round() ??
+                _party!.maxMembers,
+            hostOnlyControl: frame['hostOnlyControl'] is bool
+                ? frame['hostOnlyControl'] == true
+                : _party!.hostOnlyControl,
           );
         }
         notifyListeners();
+      case 'chat':
+        _applyChatFrame(frame);
+        notifyListeners();
+      case 'activity':
+        final JamActivity activity = JamActivity.fromJson(frame);
+        if (activity.detail.isNotEmpty) {
+          final List<JamActivity> next = <JamActivity>[..._activities, activity];
+          _activities = next.length > maxActivities
+              ? next.sublist(next.length - maxActivities)
+              : next;
+        }
+        notifyListeners();
       case 'error':
+        final String code = frame['error']?.toString() ?? '';
+        if (code == 'chat_rate_limited' || code == 'invalid_message') {
+          _markLastPendingChatFailed();
+        }
         _error = (frame['message'] ?? frame['error'])?.toString() ??
             'The room refused that.';
         notifyListeners();
@@ -602,14 +1042,75 @@ class JamService extends ChangeNotifier {
         final JamByeReason reason = switch (frame['reason']) {
           'left' => JamByeReason.left,
           'kicked' => JamByeReason.kicked,
+          'ended' => JamByeReason.ended,
           _ => JamByeReason.unknown,
         };
+        _intentionalClose = true;
         _teardown();
         _state = JamConnectionState.idle;
-        _error = reason == JamByeReason.kicked
-            ? 'The host removed you from the room.'
-            : null;
+        _error = switch (reason) {
+          JamByeReason.kicked => 'The host removed you from the room.',
+          JamByeReason.ended => 'The host ended the room.',
+          _ => null,
+        };
         notifyListeners();
+    }
+  }
+
+  void _applyChatFrame(Map<String, dynamic> frame) {
+    final int seq = (frame['chatSeq'] as num?)?.round() ?? _chatSeq;
+    if (frame['snapshot'] == true && frame['messages'] is List) {
+      final List<JamChatMessage> fresh = (frame['messages'] as List)
+          .whereType<Map>()
+          .map((Map m) => JamChatMessage.fromJson(m.cast<String, dynamic>()))
+          .toList();
+      final Set<String> landed = fresh.map((JamChatMessage m) => m.id).toSet();
+      // Keep any optimistic bubbles the snapshot predates; they either land
+      // next (and dedupe by id) or were refused and already marked failed.
+      final List<JamChatMessage> pending = _chatMessages
+          .where((JamChatMessage m) => m.pending && !landed.contains(m.id))
+          .toList();
+      _chatMessages = <JamChatMessage>[...fresh, ...pending];
+      _chatSeq = seq;
+      return;
+    }
+    if (frame['message'] is! Map) return;
+    final JamChatMessage message =
+        JamChatMessage.fromJson((frame['message'] as Map).cast<String, dynamic>());
+    final int existing =
+        _chatMessages.indexWhere((JamChatMessage m) => m.id == message.id);
+    if (existing >= 0) {
+      final List<JamChatMessage> next =
+          List<JamChatMessage>.of(_chatMessages);
+      next[existing] = message;
+      _chatMessages = next;
+      _chatSeq = math.max(_chatSeq, seq);
+      return;
+    }
+    if (seq <= _chatSeq) return;
+    if (seq > _chatSeq + 1) {
+      // A message was missed: keep this one and ask for the whole window.
+      _send(<String, dynamic>{'type': 'syncChat'});
+    }
+    final List<JamChatMessage> next = <JamChatMessage>[
+      ..._chatMessages,
+      message,
+    ];
+    _chatMessages = next.length > maxChatMessages
+        ? next.sublist(next.length - maxChatMessages)
+        : next;
+    _chatSeq = seq;
+  }
+
+  void _markLastPendingChatFailed() {
+    for (int i = _chatMessages.length - 1; i >= 0; i--) {
+      if (_chatMessages[i].pending) {
+        final List<JamChatMessage> next =
+            List<JamChatMessage>.of(_chatMessages);
+        next[i] = next[i].copyWith(pending: false, failed: true);
+        _chatMessages = next;
+        return;
+      }
     }
   }
 
@@ -640,6 +1141,19 @@ class JamService extends ChangeNotifier {
         if (positionMs != null) 'positionMs': positionMs,
       });
 
+  /// Play or pause, whichever the room is not doing — from the room's own
+  /// clock, so a drifting local player never anchors the room to itself.
+  void togglePlayPause() {
+    final JamPlayback? p = _playback;
+    if (p == null || p.track == null) return;
+    final int at = positionNow.inMilliseconds;
+    if (p.isPlaying) {
+      pause(positionMs: at);
+    } else {
+      play(positionMs: at);
+    }
+  }
+
   void seek(Duration position) => _control(
         'seek',
         <String, dynamic>{'positionMs': position.inMilliseconds},
@@ -654,19 +1168,35 @@ class JamService extends ChangeNotifier {
     JamTrack track, {
     int positionMs = 0,
     bool isPlaying = true,
+    int? queueIndex,
   }) =>
       _control('setTrack', <String, dynamic>{
         'track': track.toJson(),
         'positionMs': positionMs,
         'isPlaying': isPlaying,
+        if (queueIndex != null) 'queueIndex': queueIndex,
       });
 
-  /// Replaces the whole shared queue.
-  void setQueue(List<JamTrack> tracks, {int index = 0}) =>
-      _control('setQueue', <String, dynamic>{
-        'queue': tracks.map((JamTrack t) => t.toJson()).toList(),
-        'queueIndex': index,
-      });
+  /// Replaces the whole shared queue. Only a window around [index] is
+  /// sent: a listener's local queue can run to hundreds of songs, and the
+  /// server (rightly) refuses oversized frames by closing the socket —
+  /// which would drop the very room the queue was meant for.
+  void setQueue(List<JamTrack> tracks, {int index = 0}) {
+    const int window = 30;
+    List<JamTrack> list = tracks;
+    int idx = index;
+    if (list.length > window) {
+      final int start =
+          math.max(0, math.min(idx - 5, list.length - window));
+      list = list.sublist(start, start + window);
+      idx -= start;
+    }
+    idx = list.isEmpty ? 0 : idx.clamp(0, list.length - 1).toInt();
+    _control('setQueue', <String, dynamic>{
+      'queue': list.map((JamTrack t) => t.toJson()).toList(),
+      'queueIndex': idx,
+    });
+  }
 
   /// Adds tracks at the end, or straight after the current one.
   void addToQueue(List<JamTrack> tracks, {bool playNext = false}) =>
@@ -687,6 +1217,9 @@ class JamService extends ChangeNotifier {
         if (videoId != null) 'videoId': videoId,
       });
 
+  void setAutoplay(bool enabled) =>
+      _control('setAutoplay', <String, dynamic>{'enabled': enabled});
+
   /// Host only: lock or unlock control.
   void setHostOnlyControl(bool enabled) =>
       _control('setHostOnlyControl', <String, dynamic>{'enabled': enabled});
@@ -695,13 +1228,71 @@ class JamService extends ChangeNotifier {
   void setMaxMembers(int count) =>
       _control('setMaxMembers', <String, dynamic>{'maxMembers': count});
 
-  /// Host only: remove somebody.
-  void kick(String deviceId) =>
-      _control('kick', <String, dynamic>{'deviceId': deviceId});
+  /// Host only: remove somebody (by their room seat id).
+  void kick(String memberId) =>
+      _control('kick', <String, dynamic>{'memberId': memberId});
+
+  /// Host only: end the room for everyone.
+  void endRoom() => _control('end', const <String, dynamic>{});
+
+  /// Reports that this device's player finished [videoId]. Not gated by
+  /// [canControl]: the server checks for itself that the track really is
+  /// over, and only the first report moves the room on.
+  void reportEnded(String videoId) {
+    if (!isConnected || videoId.isEmpty) return;
+    _send(<String, dynamic>{
+      'type': 'control',
+      'action': 'ended',
+      'trackId': videoId,
+    });
+  }
 
   void _control(String action, Map<String, dynamic> extra) {
     if (!canControl) return;
     _send(<String, dynamic>{'type': 'control', 'action': action, ...extra});
+  }
+
+  // ---------------------------------------------------------------------- chat
+
+  /// Sends a chat message with an optimistic local bubble; the server's
+  /// broadcast of the same id settles it. Returns false when there was
+  /// nothing to send or no live socket to send it on.
+  bool sendChat(String rawText) {
+    if (!isConnected) return false;
+    String text = rawText.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (text.isEmpty) return false;
+    if (text.runes.length > maxChatRunes) {
+      text = String.fromCharCodes(text.runes.take(maxChatRunes));
+    }
+    final String id = newUuid();
+    final JamChatMessage optimistic = JamChatMessage(
+      id: id,
+      memberId: _you?.memberId ?? '',
+      userId: _userId,
+      by: effectiveDisplayName,
+      text: text,
+      atMs: serverNowMs,
+      pending: true,
+    );
+    final List<JamChatMessage> next = <JamChatMessage>[
+      ..._chatMessages,
+      optimistic,
+    ];
+    _chatMessages = next.length > maxChatMessages
+        ? next.sublist(next.length - maxChatMessages)
+        : next;
+    notifyListeners();
+    _send(<String, dynamic>{'type': 'chat', 'id': id, 'text': text});
+    return true;
+  }
+
+  /// Retries a message the server refused earlier.
+  bool resendChat(JamChatMessage message) {
+    _chatMessages = _chatMessages
+        .where((JamChatMessage m) => m.id != message.id)
+        .toList();
+    notifyListeners();
+    return sendChat(message.text);
   }
 
   /// Tells the server where this device really is. It is only logged there —
@@ -714,17 +1305,12 @@ class JamService extends ChangeNotifier {
     });
   }
 
-  /// Asks for the truth again — used after the app comes back to the front.
-  void resync() {
-    _send(<String, dynamic>{'type': 'sync'});
-    _send(<String, dynamic>{'type': 'syncQueue'});
-    _ping();
-  }
-
   // -------------------------------------------------------------------- leave
 
   /// Gives up the slot and closes the socket.
   Future<void> leave() async {
+    _intentionalClose = true;
+    _cancelReconnect();
     final String? code = _party?.code;
     if (code != null && hasServer && _token != null) {
       try {
@@ -747,18 +1333,25 @@ class JamService extends ChangeNotifier {
   }
 
   void _teardown() {
+    _cancelReconnect();
     _pingTimer?.cancel();
     _pingTimer = null;
+    _connectionGeneration++;
     _party = null;
     _you = null;
     _members = const <JamMember>[];
     _playback = null;
     _queue = const JamQueue();
+    _chatMessages = const <JamChatMessage>[];
+    _activities = const <JamActivity>[];
+    _chatSeq = 0;
     _appliedSeq = -1;
     _appliedQueueSeq = -1;
     _clockOffsetMs = null;
     _bestRoundTripMs = null;
     _token = null;
+    _everConnected = false;
+    _reconnectAttempt = 0;
     try {
       _socket?.close();
     } catch (_) {
@@ -775,6 +1368,7 @@ class JamService extends ChangeNotifier {
   }
 
   void _fail(String message) {
+    _intentionalClose = true;
     _teardown();
     _state = JamConnectionState.error;
     _error = message;
@@ -790,6 +1384,7 @@ class JamService extends ChangeNotifier {
 
   @override
   void dispose() {
+    _intentionalClose = true;
     _teardown();
     _client.close();
     super.dispose();

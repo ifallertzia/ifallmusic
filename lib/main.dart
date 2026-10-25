@@ -3,6 +3,7 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:media_kit/media_kit.dart' show MediaKit;
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -17,6 +18,8 @@ import 'core/services/app_notifications.dart';
 import 'core/services/boot_log.dart';
 import 'core/services/download_notifications.dart';
 import 'core/services/home_catalog.dart';
+import 'core/services/jam_friends_service.dart';
+import 'core/services/jam_invite_service.dart';
 import 'core/services/library_service.dart';
 import 'core/services/listen_together_service.dart';
 import 'core/services/local_music_service.dart';
@@ -28,6 +31,7 @@ import 'core/services/playlist_sync_service.dart';
 import 'core/services/presence_service.dart';
 import 'core/services/recommendation_service.dart';
 import 'core/services/recommendation_worker.dart';
+import 'core/services/room_playback_coordinator.dart';
 import 'core/services/settings_service.dart';
 import 'core/services/youtube_service.dart';
 import 'core/services/update_service.dart';
@@ -200,6 +204,31 @@ Future<AppBoot> _initializeApp() async {
     }
   };
 
+  // Listen Together: the room client, the bridge keeping this phone and
+  // the room in step, and the friends + invites layer on top. Identity is
+  // the install id — no account, nothing to sign into.
+  final JamService jam = JamService(settings: settings);
+  jam.identify(
+    userId: settings.installId,
+    deviceId: settings.installId,
+    displayName: settings.displayName,
+  );
+  final JamFriendsService jamFriends =
+      JamFriendsService(prefs, selfUserId: settings.installId);
+  final RoomPlaybackCoordinator roomCoordinator = RoomPlaybackCoordinator(
+    jam: jam,
+    playback: playback,
+    youtube: youtube,
+  );
+  roomCoordinator.onNotice = showAppNotice;
+  roomCoordinator.attach();
+  jam.addListener(() {
+    if (jam.inRoom) jamFriends.recordMembers(jam.members);
+  });
+  final JamInviteService jamInvites =
+      JamInviteService(settings: settings, friends: jamFriends);
+  final SidifyShellController shellController = SidifyShellController(prefs);
+
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
@@ -223,6 +252,11 @@ Future<AppBoot> _initializeApp() async {
     movieDownloads: movieDownloads,
     movieLibrary: movieLibrary,
     downloadNotifications: downloadNotifications,
+    jam: jam,
+    jamFriends: jamFriends,
+    jamInvites: jamInvites,
+    roomCoordinator: roomCoordinator,
+    shellController: shellController,
     safeMode: native.safeMode,
     prefs: prefs,
   );
@@ -272,6 +306,11 @@ class AppBoot {
     required this.movieDownloads,
     required this.movieLibrary,
     required this.downloadNotifications,
+    required this.jam,
+    required this.jamFriends,
+    required this.jamInvites,
+    required this.roomCoordinator,
+    required this.shellController,
     required this.safeMode,
     required this.prefs,
   });
@@ -290,6 +329,14 @@ class AppBoot {
 
   /// Keeps the shade informed while anything is downloading.
   final DownloadNotifications downloadNotifications;
+
+  /// Listen Together: room client, remembered co-listeners, invites, and
+  /// the playback bridge between the room and this phone's player.
+  final JamService jam;
+  final JamFriendsService jamFriends;
+  final JamInviteService jamInvites;
+  final RoomPlaybackCoordinator roomCoordinator;
+  final SidifyShellController shellController;
   final bool safeMode;
   final SharedPreferences prefs;
 }
@@ -308,6 +355,7 @@ class _SidifyAppState extends State<SidifyApp> with WidgetsBindingObserver {
   Timer? _updateTimer;
   Timer? _launchUpdateTimer;
   bool _checkingUpdate = false;
+  bool _inviteDialogOpen = false;
   DateTime? _lastUpdateCheck;
 
   Future<void> _checkUpdate({bool force = false}) async {
@@ -359,6 +407,216 @@ class _SidifyAppState extends State<SidifyApp> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) => _afterFirstFrame());
+    _wireRoomSocial();
+  }
+
+  /// Listen Together glue that needs a UI: arriving invites become a dialog
+  /// (or a notification when the app is in the background), answers become
+  /// a notice, and invitation links open the room they name.
+  void _wireRoomSocial() {
+    final AppBoot boot = widget.boot;
+    boot.jamInvites.onInvite = _onInviteArrived;
+    boot.jamInvites.onResponse = _onInviteAnswered;
+    AppNotifications.route('jam-invite:', _onInviteNotification);
+    boot.jamInvites.start();
+    NativeBridge.onDeepLink(_onDeepLink);
+    unawaited(
+      NativeBridge.takeDeepLink().then((String? link) {
+        if (link != null && link.isNotEmpty) _onDeepLink(link);
+      }),
+    );
+  }
+
+  void _onInviteArrived(JamInvite invite) {
+    final bool resumed =
+        WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
+    if (resumed) {
+      unawaited(_showInviteDialog(invite));
+    } else {
+      unawaited(_postInviteNotification(invite));
+    }
+  }
+
+  void _onInviteAnswered(JamInviteResponse response) {
+    showAppNotice(
+      response.accepted
+          ? '${response.byName} is joining your room 🎉'
+          : "${response.byName} can't join right now.",
+    );
+  }
+
+  Future<void> _showInviteDialog(JamInvite invite) async {
+    if (_inviteDialogOpen) return;
+    final BuildContext? dialogContext =
+        _navigatorKey.currentState?.overlay?.context;
+    if (dialogContext == null || !dialogContext.mounted) return;
+    _inviteDialogOpen = true;
+    try {
+      final SidifyTokens t = dialogContext.sidify;
+      final bool? accept = await showDialog<bool>(
+        context: dialogContext,
+        builder: (BuildContext ctx) => AlertDialog(
+          backgroundColor: t.raised,
+          title: Text(
+            '${invite.fromName} wants to listen with you 🎧',
+            style: TextStyle(color: t.text),
+          ),
+          content: Text(
+            'Join their room (${invite.code})? You will hear exactly '
+            'what they hear, at the same moment.',
+            style: TextStyle(color: t.text2),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: Text('Not now', style: TextStyle(color: t.text2)),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: Text(
+                'Join',
+                style: TextStyle(
+                  color: t.brand,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+      if (accept == null) return; // dismissed: invite stays on the page
+      final AppBoot boot = widget.boot;
+      await boot.jamInvites.respond(invite, accept: accept);
+      if (accept) await _joinRoomFromOutside(invite.code);
+    } finally {
+      _inviteDialogOpen = false;
+    }
+  }
+
+  Future<void> _joinRoomFromOutside(String code) async {
+    _goToRoomTab();
+    final AppBoot boot = widget.boot;
+    if (boot.jam.inRoom && boot.jam.code == code) return;
+    final bool ok = await boot.jam.join(code);
+    if (!ok) {
+      showAppNotice(boot.jam.error ?? 'Could not join that room.');
+    }
+  }
+
+  void _goToRoomTab() {
+    final AppBoot boot = widget.boot;
+    if (boot.settings.displayName.isEmpty) return; // welcome gate first
+    final SidifyShellController shell = boot.shellController;
+    if (shell.hasModeChoice && shell.isMoviesMode) {
+      unawaited(shell.chooseMode(movies: false));
+    }
+    shell.goTogether();
+  }
+
+  Future<void> _postInviteNotification(JamInvite invite) async {
+    await AppNotifications.requestPermission();
+    await AppNotifications.show(
+      7101,
+      'Listen together?',
+      '${invite.fromName} wants to listen with you — room ${invite.code}',
+      const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'sidify_invites',
+          'Listening invites',
+          channelDescription: 'Friends asking you to listen with them',
+          importance: Importance.high,
+          priority: Priority.high,
+          autoCancel: true,
+          actions: <AndroidNotificationAction>[
+            AndroidNotificationAction(
+              'accept',
+              'Join',
+              showsUserInterface: true,
+            ),
+            AndroidNotificationAction(
+              'decline',
+              'Not now',
+              showsUserInterface: true,
+            ),
+          ],
+        ),
+      ),
+      payload: 'jam-invite:${invite.code}:${invite.id}',
+    );
+  }
+
+  void _onInviteNotification(NotificationResponse response) {
+    unawaited(_handleInviteNotification(response));
+  }
+
+  Future<void> _handleInviteNotification(
+    NotificationResponse response,
+  ) async {
+    final List<String> parts = (response.payload ?? '').split(':');
+    if (parts.length < 3) return;
+    final String code = parts[1];
+    final String inviteId = parts[2];
+    final AppBoot boot = widget.boot;
+    JamInvite? invite;
+    for (final JamInvite pending in boot.jamInvites.pending) {
+      if (pending.id == inviteId) invite = pending;
+    }
+    switch (response.actionId) {
+      case 'decline':
+        if (invite != null) {
+          await boot.jamInvites.respond(invite, accept: false);
+        }
+        return;
+      case 'accept':
+        if (invite != null) {
+          await boot.jamInvites.respond(invite, accept: true);
+        }
+        await _joinRoomFromOutside(code);
+        return;
+      default:
+        _goToRoomTab();
+        final JamInvite? pending = invite;
+        if (pending != null) {
+          await _showInviteDialog(pending);
+        } else {
+          showAppNotice('That invite has expired — ask for the code again.');
+        }
+    }
+  }
+
+  /// Handles `ifallmusic://party/{code}` and
+  /// `https://…/invite/{code}` links (optionally carrying `?server=`).
+  void _onDeepLink(String link) {
+    // Consume the stored copy so a warm-start link can't be replayed on
+    // the next cold start.
+    unawaited(NativeBridge.takeDeepLink());
+    try {
+      final Uri uri = Uri.parse(link.trim());
+      final AppBoot boot = widget.boot;
+      final String? server = uri.queryParameters['server'];
+      if (server != null && server.trim().isNotEmpty) {
+        String s = server.trim().replaceAll(RegExp(r'/+$'), '');
+        if (!s.startsWith('http://') && !s.startsWith('https://')) {
+          s = 'https://$s';
+        }
+        unawaited(boot.settings.setJamServer(s));
+      }
+      final String raw = uri.queryParameters['code'] ??
+          (uri.pathSegments.isNotEmpty ? uri.pathSegments.last : '');
+      final String code = normalizeJamCode(raw);
+      if (!isValidJamCode(code)) return;
+      unawaited(boot.settings.setJamLastCode(code));
+      if (boot.settings.displayName.isEmpty) {
+        showAppNotice(
+          'Room code $code saved — set your name, then join from '
+          'Listen Together.',
+        );
+        return;
+      }
+      unawaited(_joinRoomFromOutside(code));
+    } catch (_) {
+      // A malformed link must never take the app down with it.
+    }
   }
 
   Future<void> _afterFirstFrame() async {
@@ -403,6 +661,7 @@ class _SidifyAppState extends State<SidifyApp> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      widget.boot.jam.onAppResumed();
       _launchUpdateTimer?.cancel();
       _launchUpdateTimer = Timer(const Duration(seconds: 1), () => _checkUpdate());
     }
@@ -456,11 +715,15 @@ class _SidifyAppState extends State<SidifyApp> with WidgetsBindingObserver {
             artists: boot.artists,
           ),
         ),
-        ChangeNotifierProvider<SidifyShellController>(
-          create: (_) => SidifyShellController(boot.prefs),
+        ChangeNotifierProvider<SidifyShellController>.value(
+          value: boot.shellController,
         ),
-        ChangeNotifierProvider<JamService>(
-          create: (_) => JamService(settings: boot.settings),
+        ChangeNotifierProvider<JamService>.value(value: boot.jam),
+        ChangeNotifierProvider<JamFriendsService>.value(
+          value: boot.jamFriends,
+        ),
+        ChangeNotifierProvider<JamInviteService>.value(
+          value: boot.jamInvites,
         ),
         ChangeNotifierProvider<PresenceService>(
           create: (_) =>
