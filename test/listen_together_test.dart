@@ -52,6 +52,27 @@ void main() {
       await server.stop();
     });
 
+    /// A service with millisecond patience, so cold-start retry tests
+    /// run in a blink instead of the production ~100s budget.
+    Future<JamService> fastJam({
+      Duration attemptTimeout = const Duration(seconds: 2),
+      Duration budget = const Duration(seconds: 5),
+    }) async {
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      final JamService service = JamService(
+        settings: SettingsService(prefs),
+        openAttemptTimeout: attemptTimeout,
+        openBudget: budget,
+        openRetryDelays: const <Duration>[Duration(milliseconds: 10)],
+      );
+      service.identify(
+        userId: 'u-alice',
+        deviceId: 'd-alice',
+        displayName: 'Alice',
+      );
+      return service;
+    }
+
     test('create parses the nested snapshot and playback extras', () async {
       final bool ok = await jam.create();
       expect(ok, isTrue, reason: jam.error ?? '');
@@ -76,6 +97,76 @@ void main() {
       expect(preview?.hostName, 'Alice');
       expect(preview?.memberNames, <String>['Alice']);
       expect(preview?.isFull, isFalse);
+    });
+
+    test('create rides out a waking server (502s, then success)', () async {
+      final JamService cold = await fastJam();
+      try {
+        server.failNextOpens = 2;
+        final bool ok = await cold.create();
+        expect(ok, isTrue, reason: cold.error ?? '');
+        expect(server.openAttempts, 3, reason: 'two 502s, then the room');
+        expect(cold.state, JamConnectionState.connected);
+        expect(cold.code, 'ABC123');
+        expect(cold.serverWaking, isFalse);
+        await cold.leave();
+      } finally {
+        cold.dispose();
+      }
+    });
+
+    test('create rides out a stalled first answer (timeout, then success)',
+        () async {
+      final JamService cold = await fastJam(
+        attemptTimeout: const Duration(milliseconds: 80),
+      );
+      try {
+        server.stallNextOpens = 1;
+        server.openStall = const Duration(milliseconds: 300);
+        final bool ok = await cold.create();
+        expect(ok, isTrue, reason: cold.error ?? '');
+        expect(server.openAttempts, 2,
+            reason: 'first answer stalled past the attempt timeout');
+        expect(cold.state, JamConnectionState.connected);
+        // Let the stalled first answer land on the still-open client
+        // (a timed-out Future does not cancel the request) instead of
+        // racing teardown.
+        await Future<void>.delayed(const Duration(milliseconds: 350));
+        await cold.leave();
+      } finally {
+        cold.dispose();
+      }
+    });
+
+    test('a server that never wakes gets the patient message, not one-shot',
+        () async {
+      final JamService cold = await fastJam(
+        budget: const Duration(milliseconds: 150),
+      );
+      try {
+        server.failNextOpens = 99;
+        final bool ok = await cold.create();
+        expect(ok, isFalse);
+        expect(server.openAttempts, greaterThan(1),
+            reason: 'it must keep asking until the budget is spent');
+        expect(cold.error, contains('did not wake up'));
+        expect(cold.serverWaking, isFalse);
+      } finally {
+        cold.dispose();
+      }
+    });
+
+    test('testServer reports health and rides out booting answers', () async {
+      final JamService cold = await fastJam();
+      try {
+        server.failNextHealths = 1;
+        final (bool ok, String message) = await cold.testServer();
+        expect(ok, isTrue);
+        expect(message, contains('Server is up'));
+        expect(server.healthAttempts, 2);
+      } finally {
+        cold.dispose();
+      }
     });
 
     test('chat settles the optimistic bubble on the server echo', () async {

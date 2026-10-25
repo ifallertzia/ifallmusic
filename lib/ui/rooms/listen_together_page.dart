@@ -56,6 +56,11 @@ class _ListenTogetherPageState extends State<ListenTogetherPage> {
   @override
   void initState() {
     super.initState();
+    // The free room server sleeps when idle; start waking it the moment
+    // this page exists so Create/Join usually finds it already up.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) context.read<JamService>().warmUp();
+    });
     // The room's clock advances between server frames; one gentle tick a
     // second keeps "elapsed" honest without rebuilding on every frame.
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -306,46 +311,114 @@ class _ListenTogetherPageState extends State<ListenTogetherPage> {
     final SidifyTokens t = context.sidify;
     final TextEditingController controller =
         TextEditingController(text: settings.jamServer);
+    bool testing = false;
+    bool testOk = false;
+    String? testResult;
+
+    // The address as it would be used if saved right now (blank = default).
+    String candidateServer() {
+      String v = controller.text.trim().replaceAll(RegExp(r'/+$'), '');
+      if (v.isEmpty) return JamService.defaultServer;
+      if (!v.startsWith('http://') && !v.startsWith('https://')) {
+        v = 'https://$v';
+      }
+      return v;
+    }
+
     final String? value = await showDialog<String>(
       context: context,
-      builder: (BuildContext ctx) => AlertDialog(
-        backgroundColor: t.raised,
-        title: Text('Room server', style: TextStyle(color: t.text)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Text(
-              'Rooms live on ${JamService.defaultServer} unless you run '
-              'your own (the Go server in the backend/ folder). Leave '
-              'blank for the default.',
-              style: TextStyle(fontSize: 13, height: 1.45, color: t.text2),
+      builder: (BuildContext ctx) => StatefulBuilder(
+        builder: (BuildContext ctx, StateSetter setDialogState) {
+          return AlertDialog(
+            backgroundColor: t.raised,
+            title: Text('Room server', style: TextStyle(color: t.text)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  'Rooms live on ${JamService.defaultServer} unless you run '
+                  'your own (the Go server in the backend/ folder). Leave '
+                  'blank for the default.',
+                  style: TextStyle(fontSize: 13, height: 1.45, color: t.text2),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: controller,
+                  autocorrect: false,
+                  keyboardType: TextInputType.url,
+                  style: TextStyle(color: t.text),
+                  decoration: InputDecoration(
+                    hintText: JamService.defaultServer,
+                    hintStyle: TextStyle(color: t.text3),
+                    border: const OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: testing
+                        ? null
+                        : () async {
+                            setDialogState(() {
+                              testing = true;
+                              testResult = null;
+                            });
+                            final (bool ok, String message) =
+                                await jam.testServer(base: candidateServer());
+                            if (!ctx.mounted) return;
+                            setDialogState(() {
+                              testing = false;
+                              testOk = ok;
+                              testResult = message;
+                            });
+                          },
+                    icon: testing
+                        ? SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: t.brand,
+                            ),
+                          )
+                        : const Icon(Icons.wifi_tethering_rounded, size: 18),
+                    label: Text(testing ? 'Testing…' : 'Test connection'),
+                    style: TextButton.styleFrom(foregroundColor: t.brand),
+                  ),
+                ),
+                if (testing)
+                  Text(
+                    'Asking the server… if it was asleep, this can take '
+                    'a minute.',
+                    style:
+                        TextStyle(fontSize: 12.5, height: 1.4, color: t.text2),
+                  ),
+                if (testResult != null)
+                  Text(
+                    testResult!,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      height: 1.4,
+                      color: testOk ? t.brand : t.danger,
+                    ),
+                  ),
+              ],
             ),
-            const SizedBox(height: 14),
-            TextField(
-              controller: controller,
-              autocorrect: false,
-              keyboardType: TextInputType.url,
-              style: TextStyle(color: t.text),
-              decoration: InputDecoration(
-                hintText: JamService.defaultServer,
-                hintStyle: TextStyle(color: t.text3),
-                border: const OutlineInputBorder(),
-                isDense: true,
+            actions: <Widget>[
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: Text('Cancel', style: TextStyle(color: t.text2)),
               ),
-            ),
-          ],
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: Text('Cancel', style: TextStyle(color: t.text2)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
-            child: Text('Save', style: TextStyle(color: t.brand)),
-          ),
-        ],
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
+                child: Text('Save', style: TextStyle(color: t.brand)),
+              ),
+            ],
+          );
+        },
       ),
     );
     controller.dispose();
@@ -365,6 +438,8 @@ class _ListenTogetherPageState extends State<ListenTogetherPage> {
         v.isEmpty ? 'Using the default room server.' : 'Room server saved.',
       );
     }
+    // A freshly chosen server may be just as asleep; start waking it now.
+    jam.warmUp(force: true);
   }
 
   // --------------------------------------------------------------------- build
@@ -402,6 +477,7 @@ class _ListenTogetherPageState extends State<ListenTogetherPage> {
         const PageTitle('Listen Together'),
         if (jam.state == JamConnectionState.error && jam.error != null)
           _errorBanner(jam.error!, jam.clearError),
+        if (jam.serverWaking) _wakingHint(),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           child: Text(
@@ -1405,6 +1481,35 @@ class _ListenTogetherPageState extends State<ListenTogetherPage> {
               fontSize: 11.5,
               fontWeight: FontWeight.w600,
               color: t.text2,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Shown while the (free, sleepy) room server is being woken up, so a
+  /// long first connect reads as "working on it" instead of a hang.
+  Widget _wakingHint() {
+    final SidifyTokens t = context.sidify;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      child: Row(
+        children: <Widget>[
+          SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: t.brand,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Waking up the room server… the first visit after a '
+              'quiet spell can take a minute.',
+              style: TextStyle(fontSize: 12.5, height: 1.4, color: t.text2),
             ),
           ),
         ],
