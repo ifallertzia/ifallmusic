@@ -10,6 +10,7 @@ import '../../core/services/playback_service.dart';
 import '../../core/services/settings_service.dart';
 import '../../core/theme/sidify_theme.dart';
 import '../player/full_player_page.dart';
+import '../rooms/room_transport.dart';
 import '../widgets/sidify_widgets.dart';
 import 'sidify_routes.dart';
 import 'sidify_shell_controller.dart';
@@ -494,7 +495,7 @@ class _MiniPlayer extends StatelessWidget {
                               SizedBox(height: _lerp(1, 0.5, f)),
                               Row(
                                 children: <Widget>[
-                                  if (jam.isConnected) ...<Widget>[
+                                  if (jam.inRoom) ...<Widget>[
                                     Icon(
                                         Icons.people_rounded,
                                         size: _lerp(12, 10, f),
@@ -539,7 +540,11 @@ class _MiniPlayer extends StatelessWidget {
                         : Icons.play_arrow_rounded,
                     _lerp(24, 19, f),
                     btn,
-                    () => playback.togglePlayPause(),
+                    () {
+                      if (!roomTransport(context, playback, 'toggle')) {
+                        playback.togglePlayPause();
+                      }
+                    },
                     loading: playback.isLoading,
                   ),
                   if (!tight)
@@ -548,7 +553,11 @@ class _MiniPlayer extends StatelessWidget {
                       Icons.skip_next_rounded,
                       _lerp(22, 17, f),
                       btn,
-                      () => playback.next(),
+                      () {
+                        if (!roomTransport(context, playback, 'next')) {
+                          playback.next();
+                        }
+                      },
                     ),
                 ],
               ),

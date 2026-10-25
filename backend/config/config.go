@@ -99,6 +99,22 @@ var (
 	Port                 = getInt("PORT", 8000)
 )
 
+// Room chat and friend invites. Chat is deliberately tiny and ephemeral: a
+// short rolling window per party, nothing persisted. Invites ride on a
+// presence heartbeat the app already knows how to send; both the pending
+// invite and its answer expire in minutes, so the whole feature stays inside
+// the same "no database, one process" envelope as the parties themselves.
+var (
+	ChatRatePerSecond   = float64(getInt("JAM_CHAT_RATE_PER_SECOND", 2))
+	ChatMaxMessages     = getInt("JAM_CHAT_MAX_MESSAGES", 80)
+	ChatMaxRunes        = getInt("JAM_CHAT_MAX_RUNES", 300)
+	InvitePresenceTtlMs = int64(getInt("JAM_INVITE_PRESENCE_TTL_MS", 90000))
+	InviteTtlMs         = int64(getInt("JAM_INVITE_TTL_MS", 120000))
+	InviteMaxPending    = getInt("JAM_INVITE_MAX_PENDING", 5)
+	InviteMaxEntries    = getInt("JAM_INVITE_MAX_ENTRIES", 10000)
+	InviteIntervalSec   = getInt("JAM_INVITE_INTERVAL_SEC", 20)
+)
+
 // Open-app heartbeats. The interval is handed back on every ping, so it can be
 // raised here under load without an app update. An install stays counted for
 // one interval plus the grace period after its last ping.

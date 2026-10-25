@@ -149,6 +149,14 @@ class PlaybackService extends ChangeNotifier {
   /// Tracks that already failed once — never retry them in the same session.
   final Set<String> _failedIds = <String>{};
 
+  /// While true, a finished track does NOT advance the local queue: a Listen
+  /// Together room owns the moment of moving on, and answers with the next
+  /// track for every device at once.
+  bool deferTrackCompletion = false;
+
+  /// Called with the finished track's id when [deferTrackCompletion] is on.
+  void Function(String finishedTrackId)? onTrackCompleted;
+
   // ------------------------------------------------------------------ getters
   AudioPlayer get player => _player;
   List<Song> get queue => List<Song>.unmodifiable(_queue);
@@ -1425,6 +1433,13 @@ class PlaybackService extends ChangeNotifier {
       _sleepRemaining = null;
       await pause();
       notifyListeners();
+      return;
+    }
+    // In a Listen Together room the server decides what "next" is; this
+    // device just reports that its copy of the song ended.
+    if (deferTrackCompletion) {
+      final Song? finished = _current;
+      if (finished != null) onTrackCompleted?.call(finished.id);
       return;
     }
     if (_loopMode == LoopMode.one) {

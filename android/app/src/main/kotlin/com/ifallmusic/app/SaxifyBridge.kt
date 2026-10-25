@@ -75,6 +75,14 @@ class SaxifyBridge(private val activity: Activity) {
                     )
                     result.success(null)
                 }
+                "shareText" -> {
+                    shareText(
+                        call.argument<String>("text") ?: "",
+                        call.argument<String>("title") ?: "Share",
+                    )
+                    result.success(null)
+                }
+                "takeDeepLink" -> result.success(DeepLinkInbox.take())
                 "openContent" -> {
                     openContent(
                         call.argument<String>("uri") ?: "",
@@ -391,6 +399,15 @@ class SaxifyBridge(private val activity: Activity) {
             putExtra(Intent.EXTRA_STREAM, shareUri)
             clipData = ClipData.newRawUri(title, shareUri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        activity.startActivity(Intent.createChooser(intent, title))
+    }
+
+    private fun shareText(text: String, title: String) {
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, text)
+            putExtra(Intent.EXTRA_SUBJECT, title)
         }
         activity.startActivity(Intent.createChooser(intent, title))
     }

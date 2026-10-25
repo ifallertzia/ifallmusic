@@ -62,6 +62,9 @@ func main() {
 
 	// Open-app counter
 	mux.HandleFunc("POST /api/presence", handlePresence)
+	mux.HandleFunc("POST /api/invites/heartbeat", handleInviteHeartbeat)
+	mux.HandleFunc("POST /api/invites/send", handleInviteSend)
+	mux.HandleFunc("POST /api/invites/respond", handleInviteRespond)
 	mux.HandleFunc("GET /api/stats/live", handleLiveStats)
 	mux.HandleFunc("GET /api/stats/live/badge.svg", handleLiveBadge)
 
@@ -933,6 +936,39 @@ func handleSocketFrame(p *party.Party, member *party.Member, sc *hub.SafeConn, f
 	case protocol.FrameSyncQueue:
 		_ = sc.WriteJSON(queueFrame(p))
 
+	case protocol.FrameSyncChat:
+		_ = sc.WriteJSON(chatSnapshotFrame(p))
+
+	case protocol.FrameChat:
+		if !p.SpendChatBudget(member) {
+			_ = sc.WriteJSON(map[string]interface{}{
+				"type":    protocol.FrameError,
+				"error":   "chat_rate_limited",
+				"message": "You are sending messages too quickly.",
+			})
+			return
+		}
+		text, _ := frame["text"].(string)
+		id, _ := frame["id"].(string)
+		msg, added := p.AddChat(member, id, text)
+		if msg == nil {
+			_ = sc.WriteJSON(map[string]interface{}{
+				"type":    protocol.FrameError,
+				"error":   "invalid_message",
+				"message": "That message was empty.",
+			})
+			return
+		}
+		if added {
+			// The sender gets the broadcast too: it is the confirmation that
+			// turns their optimistic "sending" bubble into a landed message.
+			hubInst.Broadcast(p.Code, chatMessageFrame(p, msg), "")
+		} else {
+			// A retry of a message that already landed — confirm it to the
+			// sender alone instead of showing everyone a duplicate.
+			_ = sc.WriteJSON(chatMessageFrame(p, msg))
+		}
+
 	case protocol.FrameReport:
 		// Playhead position report from client for monitoring
 		if posNum, ok := frame["positionMs"].(float64); ok && p.Playback.IsPlaying {
@@ -955,6 +991,22 @@ func handleSocketFrame(p *party.Party, member *party.Member, sc *hub.SafeConn, f
 		queueBefore := p.Playback.QueueSeq
 		action, _ := frame["action"].(string)
 		success, errCode, errMsg := applyControl(p, member, action, frame)
+		if success && action == protocol.ActionEnd {
+			// Everyone is let go, sender included. Dropping the party waits
+			// a beat so the bye frames reach the sockets before they close.
+			hubInst.Broadcast(p.Code, map[string]interface{}{
+				"type":    protocol.FrameBye,
+				"reason":  "ended",
+				"message": "The host ended this party.",
+			}, "")
+			code := p.Code
+			go func() {
+				time.Sleep(150 * time.Millisecond)
+				store.Drop(code)
+				hubInst.DropParty(code)
+			}()
+			return
+		}
 		if success {
 			p.Touch()
 			// If queue changed, broadcast queue first
@@ -967,7 +1019,10 @@ func handleSocketFrame(p *party.Party, member *party.Member, sc *hub.SafeConn, f
 				action == protocol.ActionSetHostOnlyControl {
 				hubInst.Broadcast(p.Code, membersFrame(p), "")
 			}
-			hubInst.Broadcast(p.Code, activityFrame(member, action, frame), "")
+			// A song finishing is not something anyone *did* — no activity line.
+			if action != protocol.ActionEnded {
+				hubInst.Broadcast(p.Code, activityFrame(member, action, frame), "")
+			}
 		} else if errCode != "" {
 			_ = sc.WriteJSON(map[string]interface{}{
 				"type":    protocol.FrameError,
@@ -1152,6 +1207,26 @@ func applyControl(p *party.Party, member *party.Member, action string, frame map
 		}
 		return true, "", ""
 
+	case protocol.ActionEnded:
+		trackId, _ := frame["trackId"].(string)
+		if trackId == "" {
+			trackId, _ = frame["videoId"].(string)
+		}
+		if p.Playback.Ended(&member.MemberId, trackId, &member.DisplayName) {
+			return true, "", ""
+		}
+		// Stale or early report: nothing changed, so no broadcast either.
+		// An empty errCode keeps the handler silent rather than replying
+		// with an error for what is usually just a second device
+		// reporting the same finished song.
+		return false, "", ""
+
+	case protocol.ActionEnd:
+		if !member.IsHost {
+			return false, "host_only", "Only the host can end the party for everyone."
+		}
+		return true, "", ""
+
 	case protocol.ActionKick:
 		targetID, _ := frame["memberId"].(string)
 		if !member.IsHost { return false, "host_only", "Only the host can remove listeners." }
@@ -1214,6 +1289,25 @@ func activityFrame(member *party.Member, action string, frame map[string]interfa
 	return map[string]interface{}{"type": protocol.FrameActivity, "action": action, "by": member.DisplayName, "detail": detail, "atMs": clock.NowMs()}
 }
 
+func chatMessageFrame(p *party.Party, msg *party.ChatMessage) map[string]interface{} {
+	return map[string]interface{}{
+		"type":     protocol.FrameChat,
+		"chatSeq":  p.ChatSeq,
+		"message":  msg,
+		"serverMs": clock.NowMs(),
+	}
+}
+
+func chatSnapshotFrame(p *party.Party) map[string]interface{} {
+	return map[string]interface{}{
+		"type":     protocol.FrameChat,
+		"snapshot": true,
+		"chatSeq":  p.ChatSeq,
+		"messages": p.ChatToWire(),
+		"serverMs": clock.NowMs(),
+	}
+}
+
 func queueFrame(p *party.Party) map[string]interface{} {
 	return map[string]interface{}{
 		"type":     protocol.FrameQueue,
@@ -1244,7 +1338,9 @@ func startPresenceSweeper() {
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 	for range ticker.C {
-		presenceTracker.Sweep(clock.NowMs())
+		now := clock.NowMs()
+		presenceTracker.Sweep(now)
+		invites.sweep(now)
 	}
 }
 

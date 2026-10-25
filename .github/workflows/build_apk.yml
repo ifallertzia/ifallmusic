@@ -25,6 +25,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The Listen Together party server (backend/): the app release ships the
+  # client, but a broken server must still fail the build loudly.
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Vet and test the party server
+        working-directory: backend
+        run: |
+          go vet ./...
+          go test ./...
+
   build:
     runs-on: ubuntu-latest
 

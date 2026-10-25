@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/ifallertzia/ifallmusic/backend/clock"
@@ -445,6 +446,44 @@ func (p *PlaybackState) Step(memberId *string, delta int, memberName *string) bo
 	return true
 }
 
+// Ended advances the room because a member's player finished the current
+// track. It is the one playback-changing report a non-controller may make,
+// so the server agrees the track is over before believing it:
+//
+//   - the report must name the track that is actually current (every later
+//     "ended" for the same song is then stale by construction, which is
+//     what makes five devices finishing together advance exactly once), and
+//   - when the duration is known, the server's own playhead must be within
+//     15s of the end — a device far behind the room cannot finish the song
+//     for everyone. With no known duration there is nothing to check
+//     against, so the report is taken at face value.
+//
+// Returns true when the state changed. At the end of the queue the room
+// stops at the end of the last track instead of hanging in "playing".
+func (p *PlaybackState) Ended(memberId *string, trackId string, memberName *string) bool {
+	if p.Track == nil || trackId == "" || p.Track.VideoId != trackId {
+		return false
+	}
+	now := clock.NowMs()
+	if p.Track.DurationMs != nil && *p.Track.DurationMs > 0 &&
+		p.PositionAt(now) < *p.Track.DurationMs-15000 {
+		return false
+	}
+	if p.Step(memberId, 1, memberName) {
+		return true
+	}
+	if !p.IsPlaying {
+		return false
+	}
+	p.IsPlaying = false
+	if p.Track.DurationMs != nil && *p.Track.DurationMs > 0 {
+		p.PositionMs = *p.Track.DurationMs
+	}
+	p.AnchorMs = now
+	p.touch(memberId)
+	return true
+}
+
 func (p *PlaybackState) ToWire(serverMs int64) map[string]interface{} {
 	var trackWire interface{}
 	if p.Track != nil {
@@ -504,6 +543,8 @@ type Member struct {
 	ControlBudgetAtMs  int64   `json:"-"`
 	FrameBudget        float64 `json:"-"`
 	FrameBudgetAtMs    int64   `json:"-"`
+	ChatBudget         float64 `json:"-"`
+	ChatBudgetAtMs     int64   `json:"-"`
 }
 
 func (m *Member) ToWire() map[string]interface{} {
@@ -517,6 +558,17 @@ func (m *Member) ToWire() map[string]interface{} {
 		"joinedAtMs":  m.JoinedAtMs,
 		"lastSeenMs":  m.LastSeenMs,
 	}
+}
+
+// ChatMessage is one line of room chat. The client mints the Id (a UUID)
+// so an optimistic resend after a dropped frame lands only once.
+type ChatMessage struct {
+	Id       string `json:"id"`
+	MemberId string `json:"memberId"`
+	UserId   string `json:"userId"`
+	Name     string `json:"by"`
+	Text     string `json:"text"`
+	AtMs     int64  `json:"atMs"`
 }
 
 // Party holds members and playback state for a single room code.
@@ -533,9 +585,12 @@ type Party struct {
 	// seconds. It travels with MaxMembers on the members frame instead, which
 	// is only sent when something about the membership actually changes.
 	HostOnlyControl bool
-	CreatedAtMs     int64
-	TouchedAtMs     int64
-	EmptySinceMs    *int64
+	// Chat is the room's conversation — a rolling window, gone with the room.
+	Chat         []*ChatMessage
+	ChatSeq      int64
+	CreatedAtMs  int64
+	TouchedAtMs  int64
+	EmptySinceMs *int64
 }
 
 func NewParty(code string) *Party {
@@ -609,6 +664,8 @@ func (p *Party) Join(userId, deviceId, displayName string, avatarUrl *string) (*
 		ControlBudgetAtMs: now,
 		FrameBudget:       config.FrameRatePerSecond,
 		FrameBudgetAtMs:   now,
+		ChatBudget:        config.ChatRatePerSecond * 2,
+		ChatBudgetAtMs:    now,
 	}
 	p.Members[m.MemberId] = m
 	p.Touch()
@@ -671,10 +728,20 @@ func (p *Party) Remove(memberId string) *Member {
 	}
 	delete(p.Members, memberId)
 	if m.IsHost && len(p.Members) > 0 {
+		// The crown goes to whoever has been here longest — map iteration
+		// order would hand it out at random.
+		var earliest *Member
 		for _, next := range p.Members {
-			next.IsHost = true
-			break
+			if earliest == nil || next.JoinedAtMs < earliest.JoinedAtMs {
+				earliest = next
+			}
 		}
+		earliest.IsHost = true
+	}
+	if len(p.Members) == 0 {
+		// An empty room keeps nothing: chat dies with its audience.
+		p.Chat = nil
+		p.ChatSeq = 0
 	}
 	p.Touch()
 	p.refreshEmptiness()
@@ -697,6 +764,71 @@ func (p *Party) SpendControlBudget(member *Member) bool {
 	}
 	member.ControlBudget -= 1.0
 	return true
+}
+
+// SpendChatBudget keeps chat human-paced: singles refill at
+// ChatRatePerSecond with a small burst, far below the control budget — a
+// member mashing send (or a script) hits this long before the frame ceiling.
+func (p *Party) SpendChatBudget(member *Member) bool {
+	now := clock.NowMs()
+	elapsedS := float64(now-member.ChatBudgetAtMs) / 1000.0
+	if elapsedS < 0 {
+		elapsedS = 0
+	}
+	member.ChatBudget += elapsedS * config.ChatRatePerSecond
+	if burst := config.ChatRatePerSecond * 2; member.ChatBudget > burst {
+		member.ChatBudget = burst
+	}
+	member.ChatBudgetAtMs = now
+	if member.ChatBudget < 1.0 {
+		return false
+	}
+	member.ChatBudget -= 1.0
+	return true
+}
+
+// AddChat stores one chat line. Whitespace collapses to single spaces and
+// the text is capped, so a wall of pasted text becomes one tidy line. A
+// repeated (member, id) pair is an optimistic-resend retry: the stored
+// message comes back with added=false and nothing lands twice.
+func (p *Party) AddChat(member *Member, id, rawText string) (msg *ChatMessage, added bool) {
+	text := strings.Join(strings.Fields(rawText), " ")
+	if text == "" {
+		return nil, false
+	}
+	if runes := []rune(text); len(runes) > config.ChatMaxRunes {
+		text = string(runes[:config.ChatMaxRunes])
+	}
+	if id != "" {
+		for _, existing := range p.Chat {
+			if existing.MemberId == member.MemberId && existing.Id == id {
+				return existing, false
+			}
+		}
+	}
+	msg = &ChatMessage{
+		Id:       id,
+		MemberId: member.MemberId,
+		UserId:   member.UserId,
+		Name:     member.DisplayName,
+		Text:     text,
+		AtMs:     clock.NowMs(),
+	}
+	p.Chat = append(p.Chat, msg)
+	if len(p.Chat) > config.ChatMaxMessages {
+		p.Chat = p.Chat[len(p.Chat)-config.ChatMaxMessages:]
+	}
+	p.ChatSeq++
+	p.Touch()
+	return msg, true
+}
+
+// ChatToWire is the snapshot form of the conversation: welcome frames and
+// "syncChat" answers carry it whole; live messages travel one at a time.
+func (p *Party) ChatToWire() []*ChatMessage {
+	out := make([]*ChatMessage, len(p.Chat))
+	copy(out, p.Chat)
+	return out
 }
 
 // SpendFrameBudget limits every received WebSocket frame, not just controls.
@@ -785,6 +917,8 @@ func (p *Party) ToWire() map[string]interface{} {
 		"members":         membersWire,
 		"playback":        p.Playback.ToWire(now),
 		"queue":           p.Playback.QueueToWire(),
+		"chat":            p.ChatToWire(),
+		"chatSeq":         p.ChatSeq,
 		"serverMs":        now,
 	}
 }
