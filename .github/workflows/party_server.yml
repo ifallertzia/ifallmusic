@@ -1,0 +1,66 @@
+name: Party server keep-warm & smoke test
+
+# Two jobs in one file, both about the live Listen Together server
+# (Render free tier):
+#
+#  - Scheduled ping (every 10 minutes): one GET /healthz. Render's free
+#    plan spins the service down after ~15 idle minutes, which drops
+#    every party and makes the next Create wait out a cold start;
+#    BitChord's README prescribes "a free uptime monitor pinging
+#    /healthz every 12 minutes" — this is that monitor, and the server
+#    also pings itself (backend/keepalive.go), so either one alone
+#    keeps it warm. Note: GitHub disables schedules after 60 days
+#    without repository activity; any commit re-arms them.
+#
+#  - Manual smoke test (Actions tab -> Run workflow): runs
+#    backend/tools/jam_probe.py against the real server — create,
+#    preview, join, both WebSockets, queue sync, chat — so "is the
+#    server actually working" is answered by a machine in minutes,
+#    without installing an APK on a phone. Each step is echoed as a
+#    ::notice annotation so results are readable at a glance.
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+    inputs:
+      smoke:
+        description: 'Run the full create/join/chat probe'
+        type: boolean
+        default: true
+      server:
+        description: 'Server base URL'
+        type: string
+        default: 'https://ifallmusic-party.onrender.com'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: party-server
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Ping /healthz (keeps the free instance awake)
+        continue-on-error: ${{ github.event_name == 'schedule' }}
+        run: |
+          URL="${{ inputs.server || 'https://ifallmusic-party.onrender.com' }}/healthz"
+          echo "Pinging $URL"
+          curl -fsS -m 240 -w '\nhttp %{http_code} in %{time_total}s\n' "$URL"
+
+      - uses: actions/checkout@v4
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.smoke }}
+
+      - name: Smoke-probe the live server (create/join/queue/chat)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.smoke }}
+        run: |
+          python3 -m pip install --quiet 'websockets>=12'
+          set +e
+          python3 backend/tools/jam_probe.py "${{ inputs.server }}" | tee probe.log
+          status=${PIPESTATUS[0]}
+          grep '^PROBE ' probe.log | while IFS= read -r line; do echo "::notice::$line"; done
+          exit $status

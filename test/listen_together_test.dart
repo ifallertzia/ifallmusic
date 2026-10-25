@@ -53,16 +53,19 @@ void main() {
     });
 
     /// A service with millisecond patience, so cold-start retry tests
-    /// run in a blink instead of the production ~100s budget.
+    /// run in a blink instead of production timing. With no [budget]
+    /// it matches production create/join: keep going until cancelled.
     Future<JamService> fastJam({
       Duration attemptTimeout = const Duration(seconds: 2),
-      Duration budget = const Duration(seconds: 5),
+      Duration? budget,
     }) async {
       final SharedPreferences prefs = await SharedPreferences.getInstance();
       final JamService service = JamService(
         settings: SettingsService(prefs),
         openAttemptTimeout: attemptTimeout,
+        createAttemptTimeout: attemptTimeout,
         openBudget: budget,
+        rateLimitDelay: const Duration(milliseconds: 10),
         openRetryDelays: const <Duration>[Duration(milliseconds: 10)],
       );
       service.identify(
@@ -164,6 +167,62 @@ void main() {
         expect(ok, isTrue);
         expect(message, contains('Server is up'));
         expect(server.healthAttempts, 2);
+      } finally {
+        cold.dispose();
+      }
+    });
+
+    test('create waits out a 429 caused by its own held requests', () async {
+      final JamService cold = await fastJam();
+      try {
+        // The router held earlier attempts during boot and delivered
+        // them first, spending the two-creates-a-minute allowance.
+        server.openFailStatus = HttpStatus.tooManyRequests;
+        server.failNextOpens = 2;
+        final bool ok = await cold.create();
+        expect(ok, isTrue, reason: cold.error ?? '');
+        expect(server.openAttempts, 3);
+        expect(cold.state, JamConnectionState.connected);
+        await cold.leave();
+      } finally {
+        cold.dispose();
+      }
+    });
+
+    test('cancelOpen unblocks a create that would otherwise keep trying',
+        () async {
+      final JamService cold = await fastJam();
+      try {
+        server.failNextOpens = 99;
+        final Future<bool> creating = cold.create();
+        await untilTrue(() => server.openAttempts >= 3);
+        cold.cancelOpen();
+        final bool ok =
+            await creating.timeout(const Duration(seconds: 5));
+        expect(ok, isFalse);
+        expect(cold.state, JamConnectionState.idle);
+        expect(cold.error, isNull);
+        expect(cold.inRoom, isFalse);
+      } finally {
+        cold.dispose();
+      }
+    });
+
+    test('a refused first socket heals through the reconnect loop', () async {
+      final JamService cold = await fastJam();
+      try {
+        server.failNextSockets = 1;
+        final bool ok = await cold.create();
+        // Holding the room + token already counts as opened; the socket
+        // is earned back in the background instead of erroring out.
+        expect(ok, isTrue, reason: cold.error ?? '');
+        expect(cold.inRoom, isTrue);
+        await untilTrue(
+          () => cold.state == JamConnectionState.connected,
+          timeout: const Duration(seconds: 10),
+        );
+        expect(server.socketAttempts, 2);
+        await cold.leave();
       } finally {
         cold.dispose();
       }

@@ -477,7 +477,7 @@ class _ListenTogetherPageState extends State<ListenTogetherPage> {
         const PageTitle('Listen Together'),
         if (jam.state == JamConnectionState.error && jam.error != null)
           _errorBanner(jam.error!, jam.clearError),
-        if (jam.serverWaking) _wakingHint(),
+        if (jam.serverWaking) _wakingHint(jam),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           child: Text(
@@ -1490,7 +1490,7 @@ class _ListenTogetherPageState extends State<ListenTogetherPage> {
 
   /// Shown while the (free, sleepy) room server is being woken up, so a
   /// long first connect reads as "working on it" instead of a hang.
-  Widget _wakingHint() {
+  Widget _wakingHint(JamService jam) {
     final SidifyTokens t = context.sidify;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
@@ -1508,10 +1508,17 @@ class _ListenTogetherPageState extends State<ListenTogetherPage> {
           Expanded(
             child: Text(
               'Waking up the room server… the first visit after a '
-              'quiet spell can take a minute.',
+              'quiet spell can take a minute. Hang tight — it keeps '
+              'trying on its own.',
               style: TextStyle(fontSize: 12.5, height: 1.4, color: t.text2),
             ),
           ),
+          // The wait is open-ended by design, so the way out is a tap.
+          if (jam.state == JamConnectionState.joining)
+            TextButton(
+              onPressed: jam.cancelOpen,
+              child: Text('Cancel', style: TextStyle(color: t.text2)),
+            ),
         ],
       ),
     );

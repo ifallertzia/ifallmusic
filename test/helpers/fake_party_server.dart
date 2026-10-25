@@ -22,11 +22,17 @@ class FakePartyServer {
   /// client's per-attempt timeout fires first. [openAttempts] counts
   /// how many times the client kept asking.
   int failNextOpens = 0;
+  int openFailStatus = HttpStatus.badGateway;
   int stallNextOpens = 0;
   Duration openStall = const Duration(milliseconds: 300);
   int openAttempts = 0;
   int failNextHealths = 0;
   int healthAttempts = 0;
+
+  /// Refuse the next N WebSocket upgrades outright (500, no upgrade) —
+  /// the way a just-booted process or a flaky edge sometimes does.
+  int failNextSockets = 0;
+  int socketAttempts = 0;
 
   static const Map<String, dynamic> trackA = <String, dynamic>{
     'videoId': 'aaaaaaaaaaa',
@@ -110,6 +116,13 @@ class FakePartyServer {
     _server!.listen((HttpRequest request) async {
       final String path = request.uri.path;
       if (path.startsWith('/ws/')) {
+        socketAttempts++;
+        if (failNextSockets > 0) {
+          failNextSockets--;
+          request.response.statusCode = HttpStatus.internalServerError;
+          await request.response.close();
+          return;
+        }
         final WebSocket ws = await WebSocketTransformer.upgrade(request);
         socket = ws;
         ws.add(jsonEncode(<String, dynamic>{
@@ -180,7 +193,7 @@ class FakePartyServer {
         }
         if (failNextOpens > 0) {
           failNextOpens--;
-          request.response.statusCode = HttpStatus.badGateway;
+          request.response.statusCode = openFailStatus;
           request.response.write('{"error":"booting"}');
           await request.response.close();
           return;
