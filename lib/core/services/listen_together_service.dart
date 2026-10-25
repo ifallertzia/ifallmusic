@@ -528,10 +528,11 @@ class JamService extends ChangeNotifier {
   int get serverNowMs =>
       DateTime.now().millisecondsSinceEpoch + (_clockOffsetMs ?? 0);
 
-  /// The production party server, used unless the listener named their own
-  /// in Settings. Self-hosting the Go server in `backend/` is a first-class
-  /// option, never a build-time change.
-  static const String defaultServer = 'https://party.ifallmusic.app';
+  /// The production party server (the Go program in `backend/`, running
+  /// as a free Render web service — see `backend/DEPLOY.md`), used unless
+  /// the listener named their own in Settings. Self-hosting stays a
+  /// first-class option, never a build-time change.
+  static const String defaultServer = 'https://ifallmusic-party.onrender.com';
 
   /// Kept under its old name for call sites that show it as a placeholder.
   static const String placeholderServer = defaultServer;

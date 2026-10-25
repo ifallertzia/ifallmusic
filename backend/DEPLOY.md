@@ -1,9 +1,13 @@
 # Listen Together server — FREE deploy guide
 
-App rooms ke liye `https://party.ifallmusic.app` par baat karta hai.
-Wo server yehi Go program hai (`backend/` folder). Is file me use
-**bilkul free me live** karne ka pura tareeqa hai — na code download
-karna hai, na kuch install. Repo already ready hai.
+App ka default room server `https://ifallmusic-party.onrender.com`
+hai — yehi Go program (`backend/` folder), Render ke free plan par
+live. Is file me use live rakhne / dobara deploy karne ka pura
+tareeqa hai.
+
+> **Status (Oct 2026): server LIVE hai** upar wale address par aur app
+> ka default yahi set hai. Neeche ki guide dobara-deploy ya custom
+> domain lagane ke kaam aayegi.
 
 ---
 
@@ -52,13 +56,19 @@ region me karega, Singapore bas India ke liye sabse tez hai.*
 
 ---
 
-## Step 2 — App ko jodna (do raaste)
+## Step 2 — App ko jodna
 
-### Raasta A (best): `party.ifallmusic.app` custom domain
+Step 1 ke baad kuch karna hi nahi hai: app ka default server
+`https://ifallmusic-party.onrender.com` set hai, deploy hote hi app
+connect hone lagta hai. Apna phone test karne ke liye app me
+**Listen Together → Create room** dabao — code ban gaya matlab sab
+set hai.
 
+### Optional, baad me: `party.ifallmusic.app` custom domain
+
+Sirf sundarta ke liye (invite links me onrender ki jagah apna naam).
 Agar `ifallmusic.app` domain tumhare paas hai (jahan bhi DNS hai —
-Cloudflare/Namecheap/etc.), to app ko **koi update nahi lagega**,
-kyunki app pehle se hi `party.ifallmusic.app` par jaata hai:
+Cloudflare/Namecheap/etc.):
 
 1. Render dashboard → `ifallmusic-party` service → **Settings →
    Custom Domains → Add Custom Domain** → `party.ifallmusic.app` likho.
@@ -71,19 +81,11 @@ kyunki app pehle se hi `party.ifallmusic.app` par jaata hai:
    laga dega.
 4. Test: `https://party.ifallmusic.app/healthz`
 
-Bas — ab har user ka app seedha connect hoga.
-
-### Raasta B: domain nahi hai to
-
-`onrender.com` wala address bhi chalega, bas app ko batana hoga:
-
-- **Test ke liye abhi**: app me **Listen Together** tab ke neeche
-  **Room server** row hai — wahan
-  `https://ifallmusic-party.onrender.com` daal do, apne phone par
-  turant test ho jayega.
-- **Sab users ke liye**: wo URL mujhe bhej do, main app ka default
-  server usi par karke chhota sa update nikaal dunga. (Baad me domain
-  mil jaye to Raasta A par shift kar sakte ho.)
+Domain lagte hi us par jo invite links banenge wo bhi app me
+khulenge (deep link dono hosts ke liye registered hai). Jab domain
+chalu ho jaye to bata dena — app ka default bhi
+`party.ifallmusic.app` kar dunga taaki sab jagah wahi naam dikhe.
+Tab tak onrender wala address hi kaafi hai.
 
 ---
 
