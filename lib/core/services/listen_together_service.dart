@@ -411,11 +411,36 @@ class JamService extends ChangeNotifier {
   JamService({
     required SettingsService settings,
     http.Client? client,
+    Duration openAttemptTimeout = const Duration(seconds: 20),
+    Duration openBudget = const Duration(seconds: 100),
+    List<Duration> openRetryDelays = const <Duration>[
+      Duration(seconds: 1),
+      Duration(seconds: 2),
+      Duration(seconds: 3),
+      Duration(seconds: 5),
+    ],
   })  : _settings = settings,
-        _client = client ?? http.Client();
+        _client = client ?? http.Client(),
+        _openAttemptTimeout = openAttemptTimeout,
+        _openBudget = openBudget,
+        _openRetryDelays = openRetryDelays;
 
   final SettingsService _settings;
   final http.Client _client;
+
+  /// How patiently the first REST calls (create/join/preview) treat a
+  /// sleeping server. The free host shuts the process down when idle and
+  /// needs most of a minute to boot, so a single short timeout made the
+  /// first room of the day impossible; these are constructor seams so
+  /// tests can use millisecond values instead of waiting minutes.
+  final Duration _openAttemptTimeout;
+  final Duration _openBudget;
+  final List<Duration> _openRetryDelays;
+
+  /// True while an open/preview/test call has had to retry — the UI uses
+  /// it to say "waking the server up" instead of spinning in silence.
+  bool _serverWaking = false;
+  DateTime? _lastWarmUp;
 
   WebSocket? _socket;
   StreamSubscription<dynamic>? _sub;
@@ -461,6 +486,10 @@ class JamService extends ChangeNotifier {
   // ------------------------------------------------------------------ getters
   JamConnectionState get state => _state;
   String? get error => _error;
+
+  /// Whether a create/join/preview/test call is currently retrying
+  /// against a server that is probably waking up from idle sleep.
+  bool get serverWaking => _serverWaking;
   bool get isConnected => _state == JamConnectionState.connected;
   bool get isReconnecting => _state == JamConnectionState.reconnecting;
 
@@ -592,6 +621,155 @@ class JamService extends ChangeNotifier {
         'Content-Type': 'application/json',
       };
 
+  // ------------------------------------------------------ waking the server
+
+  /// One REST call, asked patiently.
+  ///
+  /// Free hosts sleep when idle and take the better part of a minute to
+  /// wake: while the process boots, requests either hang at the edge or
+  /// bounce off with 502/503/504. Giving up after a single short timeout
+  /// therefore failed every first-tap of the day with "could not reach
+  /// the server" even though the server was fine. This keeps asking —
+  /// briefly pausing between tries — until the budget runs out, and
+  /// flags [serverWaking] so the UI can say what is happening.
+  ///
+  /// A definitive answer (any other status: 404 room gone, 409 full…)
+  /// returns at once for the caller to explain; if the budget runs out
+  /// on a waking status, the last response is returned for the same
+  /// treatment. Network/timeout errors rethrow the last one, preserving
+  /// the callers' existing message split.
+  Future<http.Response> _withWakeRetry(
+    Future<http.Response> Function() send, {
+    Duration? budget,
+  }) async {
+    final Duration limit = budget ?? _openBudget;
+    final Stopwatch watch = Stopwatch()..start();
+    int attempt = 0;
+    // Even a single hung first attempt should explain itself quickly,
+    // long before the attempt timeout gives the retry loop its cue.
+    final Timer wakingHint = Timer(const Duration(seconds: 4), () {
+      if (!_serverWaking) {
+        _serverWaking = true;
+        notifyListeners();
+      }
+    });
+    try {
+      while (true) {
+        attempt++;
+        try {
+          final http.Response response =
+              await send().timeout(_openAttemptTimeout);
+          if (!_isWakingStatus(response.statusCode) ||
+              watch.elapsed >= limit) {
+            return response;
+          }
+        } catch (_) {
+          // Timeout, socket or TLS blip while the host boots: ask again,
+          // unless the patience budget is spent — then surface it.
+          if (watch.elapsed >= limit) rethrow;
+        }
+        if (!_serverWaking) {
+          _serverWaking = true;
+          notifyListeners();
+        }
+        final Duration delay = _openRetryDelays.isEmpty
+            ? Duration.zero
+            : _openRetryDelays[
+                math.min(attempt - 1, _openRetryDelays.length - 1)];
+        await Future<void>.delayed(delay);
+      }
+    } finally {
+      wakingHint.cancel();
+      if (_serverWaking) {
+        _serverWaking = false;
+        notifyListeners();
+      }
+    }
+  }
+
+  /// The statuses a booting free-tier host answers with before the app
+  /// process is ready to take requests.
+  static bool _isWakingStatus(int status) =>
+      status == 502 || status == 503 || status == 504;
+
+  /// Nudges the server awake before anyone taps anything (the lobby
+  /// calls this on open), so by the time a room is created the process
+  /// is usually already up. Fire-and-forget and coalesced: at most one
+  /// nudge every couple of minutes, and never while inside a room.
+  void warmUp({bool force = false}) {
+    if (!hasServer || inRoom) return;
+    final DateTime now = DateTime.now();
+    if (!force &&
+        _lastWarmUp != null &&
+        now.difference(_lastWarmUp!) < const Duration(minutes: 2)) {
+      return;
+    }
+    _lastWarmUp = now;
+    unawaited(() async {
+      try {
+        await _client
+            .get(Uri.parse('$serverBase/healthz'))
+            .timeout(const Duration(seconds: 75));
+      } catch (_) {
+        // Best effort only; create/join retry on their own.
+      }
+    }());
+  }
+
+  /// Asks the server (or [base], when testing an address that has not
+  /// been saved yet) whether it is alive, and explains the answer in
+  /// words a person can act on. This is the no-new-build sanity check:
+  /// it separates "server asleep/down" from "app bug" on the spot.
+  Future<(bool, String)> testServer({String? base}) async {
+    final String target =
+        (base == null || base.trim().isEmpty) ? serverBase : base.trim();
+    final Stopwatch watch = Stopwatch()..start();
+    try {
+      final http.Response response = await _withWakeRetry(
+        () => _client.get(
+          Uri.parse('$target/healthz'),
+          headers: const <String, String>{'Accept': 'application/json'},
+        ),
+        budget: const Duration(seconds: 75),
+      );
+      watch.stop();
+      final String secs =
+          (watch.elapsedMilliseconds / 1000).toStringAsFixed(1);
+      if (response.statusCode == 200) {
+        bool ok = false;
+        try {
+          final Object? decoded = jsonDecode(response.body);
+          ok = decoded is Map && decoded['ok'] == true;
+        } catch (_) {
+          // Not JSON at all — something answered, but not our server.
+        }
+        return ok
+            ? (true, 'Server is up — it answered in ${secs}s.')
+            : (
+                false,
+                'Something answered in ${secs}s, but it does not look '
+                    'like the room server. Check the address.'
+              );
+      }
+      return (
+        false,
+        'The server answered with an error (${response.statusCode}). '
+            'If it was asleep, give it a minute and test again.'
+      );
+    } on TimeoutException {
+      return (
+        false,
+        'No answer. The server may still be waking up — wait a few '
+            'seconds and test again — or the address is wrong.'
+      );
+    } catch (_) {
+      return (
+        false,
+        'Could not reach $target. Check the address and your connection.'
+      );
+    }
+  }
+
   // ------------------------------------------------------------- create / join
 
   /// Opens a new room and joins it as the host.
@@ -621,13 +799,13 @@ class JamService extends ChangeNotifier {
       return (null, 'Room codes are six letters or digits.');
     }
     try {
-      final http.Response response = await _client
-          .get(
-            Uri.parse(
-                '$serverBase/api/parties/${Uri.encodeComponent(code)}/preview'),
-            headers: const <String, String>{'Accept': 'application/json'},
-          )
-          .timeout(const Duration(seconds: 10));
+      final http.Response response = await _withWakeRetry(
+        () => _client.get(
+          Uri.parse(
+              '$serverBase/api/parties/${Uri.encodeComponent(code)}/preview'),
+          headers: const <String, String>{'Accept': 'application/json'},
+        ),
+      );
       if (response.statusCode != 200) {
         return (null, _explainStatus(response.statusCode, response.body));
       }
@@ -676,13 +854,13 @@ class JamService extends ChangeNotifier {
           : Uri.parse(
               '$serverBase/api/parties/${Uri.encodeComponent(normalised)}/join',
             );
-      final http.Response response = await _client
-          .post(
-            uri,
-            headers: const <String, String>{'Content-Type': 'application/json'},
-            body: jsonEncode(<String, dynamic>{..._identity, ...extra}),
-          )
-          .timeout(const Duration(seconds: 15));
+      final http.Response response = await _withWakeRetry(
+        () => _client.post(
+          uri,
+          headers: const <String, String>{'Content-Type': 'application/json'},
+          body: jsonEncode(<String, dynamic>{..._identity, ...extra}),
+        ),
+      );
 
       if (response.statusCode != 200 && response.statusCode != 201) {
         _fail(_explainStatus(response.statusCode, response.body));
@@ -777,7 +955,9 @@ class JamService extends ChangeNotifier {
       409 => server.isNotEmpty ? server : 'That room is full.',
       422 => 'The server needs a name before you can join.',
       429 => 'Too many rooms too quickly. Try again in a minute.',
-      503 => 'The room server is busy right now. Try again in a few minutes.',
+      // Only reached after the wake-up budget is spent (see _withWakeRetry).
+      502 || 503 || 504 =>
+        'The room server did not wake up in time. Give it a minute and try again.',
       _ => server.isNotEmpty
           ? server
           : 'The server refused the request ($status).',

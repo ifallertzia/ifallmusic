@@ -17,6 +17,17 @@ class FakePartyServer {
   int playbackSeq = 1;
   Map<String, dynamic>? trackNow;
 
+  /// Cold-start simulation knobs: make the next N create/join calls fail
+  /// the way a booting free host does — 502s, or answers so slowly the
+  /// client's per-attempt timeout fires first. [openAttempts] counts
+  /// how many times the client kept asking.
+  int failNextOpens = 0;
+  int stallNextOpens = 0;
+  Duration openStall = const Duration(milliseconds: 300);
+  int openAttempts = 0;
+  int failNextHealths = 0;
+  int healthAttempts = 0;
+
   static const Map<String, dynamic> trackA = <String, dynamic>{
     'videoId': 'aaaaaaaaaaa',
     'title': 'Track A',
@@ -159,7 +170,35 @@ class FakePartyServer {
         });
         return;
       }
-      if (request.method == 'POST' && path == '/api/parties') {
+      final bool isOpen = request.method == 'POST' &&
+          (path == '/api/parties' || path.endsWith('/join'));
+      if (isOpen) {
+        openAttempts++;
+        if (stallNextOpens > 0) {
+          stallNextOpens--;
+          await Future<void>.delayed(openStall);
+        }
+        if (failNextOpens > 0) {
+          failNextOpens--;
+          request.response.statusCode = HttpStatus.badGateway;
+          request.response.write('{"error":"booting"}');
+          await request.response.close();
+          return;
+        }
+      }
+      if (request.method == 'GET' && path == '/healthz') {
+        healthAttempts++;
+        if (failNextHealths > 0) {
+          failNextHealths--;
+          request.response.statusCode = HttpStatus.badGateway;
+          request.response.write('{"error":"booting"}');
+        } else {
+          request.response.write(jsonEncode(<String, dynamic>{
+            'ok': true,
+            'serverMs': _now(),
+          }));
+        }
+      } else if (request.method == 'POST' && path == '/api/parties') {
         request.response.statusCode = HttpStatus.created;
         request.response.write(jsonEncode(_snapshot()));
       } else if (request.method == 'POST' && path.endsWith('/join')) {
