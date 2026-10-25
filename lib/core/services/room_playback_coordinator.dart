@@ -246,7 +246,7 @@ class RoomPlaybackCoordinator {
                 const Duration(milliseconds: 2500);
         if (withinGrace) return;
       }
-      _loadRoomTrack(track, roomIds, localIds);
+      _loadRoomTrack(track, pb.seq, roomIds, localIds);
     } else {
       _everSynced = true;
       _divergedTrackId = '';
@@ -277,6 +277,7 @@ class RoomPlaybackCoordinator {
 
   void _loadRoomTrack(
     JamTrack track,
+    int seq,
     List<String> roomIds,
     List<String> localIds,
   ) {
@@ -317,7 +318,13 @@ class RoomPlaybackCoordinator {
             playback.current?.id == track.videoId) {
           await playback.pause();
         }
-        if (playback.current?.id == track.videoId) _everSynced = true;
+        if (playback.current?.id == track.videoId) {
+          _everSynced = true;
+          // In step as of the state this load was made from: from here
+          // on, a different seq means the room moved (see
+          // _roomMovedSinceSync), with no un-synced gap after a load.
+          _lastFreshSeq = seq;
+        }
       } catch (_) {
         // A failed load is retried by the reconcile loop; nothing to do.
       }

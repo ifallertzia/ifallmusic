@@ -217,6 +217,8 @@ void main() {
     expect(await jam.join('ABC123'), isTrue);
     await untilTrue(() => playback.current?.id == 'aaaaaaaaaaa');
     await untilTrue(() => playback.isPlaying);
+    // Let the coordinator settle fully in sync on A first.
+    await Future<void>.delayed(const Duration(milliseconds: 800));
     final int framesBefore = server.controlFrames.length;
     // Next is pressed mid-song: the room's playback seq advances to B
     // while this device is happily playing A.
