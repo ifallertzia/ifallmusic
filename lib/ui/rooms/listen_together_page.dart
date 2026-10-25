@@ -392,6 +392,7 @@ class _ListenTogetherPageState extends State<ListenTogetherPage> {
     final PlaybackService playback = context.watch<PlaybackService>();
     final Song? current = playback.current;
     final String code = _codeController.text;
+    final String lastCode = settings.jamLastCode ?? '';
     final bool joinReady = code.length == jamCodeLength && !_busy;
 
     return ListView(
@@ -641,13 +642,12 @@ class _ListenTogetherPageState extends State<ListenTogetherPage> {
                   icon: Icons.login_rounded,
                   onTap: joinReady ? () => _joinRoom(code) : null,
                 ),
-                if (settings.jamLastCode.isNotEmpty &&
-                    settings.jamLastCode != code) ...<Widget>[
+                if (lastCode.isNotEmpty && lastCode != code) ...<Widget>[
                   const SizedBox(width: 8),
                   SidifyButton(
-                    label: 'Rejoin ${settings.jamLastCode}',
+                    label: 'Rejoin $lastCode',
                     variant: SidifyButtonVariant.secondary,
-                    onTap: _busy ? null : () => _joinRoom(settings.jamLastCode),
+                    onTap: _busy ? null : () => _joinRoom(lastCode),
                   ),
                 ],
               ],

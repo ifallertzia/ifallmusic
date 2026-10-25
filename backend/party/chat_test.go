@@ -85,7 +85,7 @@ func TestChatWindowIsBounded(t *testing.T) {
 	if p.Chat[0].Text != "message 10" {
 		t.Errorf("oldest kept = %q, want the window to have rolled", p.Chat[0].Text)
 	}
-	if p.ChatSeq != config.ChatMaxMessages+10 {
+	if p.ChatSeq != int64(config.ChatMaxMessages+10) {
 		t.Errorf("ChatSeq = %d, want every landed message counted", p.ChatSeq)
 	}
 }
