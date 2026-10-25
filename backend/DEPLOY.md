@@ -89,15 +89,37 @@ Tab tak onrender wala address hi kaafi hai.
 
 ---
 
-## Free tier ka sach (chhoti si keemat)
+## Free tier ka sach — aur uska ilaaj (BitChord wala tareeqa)
 
-- Render free service **15 minute koi na aaye to so jata hai**. Pehla
-  user room banane aaye to server jaagne me **~1 minute** lag sakta
-  hai (app khud retry/reconnect karta hai, isliye user ko bas thoda
-  intezaar dikhega, error nahi).
+Render free service **15 minute koi na aaye to so jata hai**, aur
+jaagne me ~1 minute leta hai. BitChord (jis app se ye server design
+aaya hai) production me isse bilkul nahi ladta — unka server ek
+**hamesha-jaagti free VM** (Oracle Cloud Always Free) par chalta hai,
+aur Render ke liye unki salah hai: *"free uptime monitor, har 12
+minute `/healthz` ping kare"*. Humne wahi ilaaj do jagah lagaya hai,
+taaki server soye hi na:
+
+1. **Server khud ko jagaye rakhta hai** (`backend/keepalive.go`):
+   chalte hue process har 10 minute apne public `/healthz` ko
+   request karta hai (Render khud `RENDER_EXTERNAL_URL` deta hai).
+   Band karna ho to env `JAM_SELF_PING=off`.
+2. **GitHub bhi har 10 minute ping karta hai**
+   (`.github/workflows/party_server.yml`, Actions tab me dikhta hai)
+   — agar server kabhi gir bhi gaya to ye use jaga dega. Yehi
+   workflow **Run workflow** dabane par asal server par poora test
+   chalata hai (create, join, queue, chat) — `backend/tools/jam_probe.py`.
+   Bina APK download kiye server ki sehat dekhni ho to yahi dabao.
+
+Aur agar kisi din dono ke bawajood server thanda mila, to app ab
+haar nahi maanta: Create/Join tab tak sabr se koshish karte hai jab
+tak room na ban jaye (screen par "Waking up the room server…" aur
+**Cancel** button ke saath), bilkul BitChord ke app ki tarah jiska
+create-request bina timeout ke server ke jaagne ka intezaar karta hai.
+
 - Ek baar jaag jaye to jab tak log use kar rahe hai, full speed.
-- Hamesha jaagta chahiye to Render ka sabse sasta paid plan
-  (Starter, ~$7/month) — baad ki baat hai, shuruaat free se karo.
+- Aur pakka upay chahiye to wahi BitChord wala: Oracle Always Free VM
+  par `backend/deploy/setup.sh` se install (repo me taiyaar hai),
+  ya Render Starter (~$7/month).
 
 ## Kuch kaam ki baatein
 

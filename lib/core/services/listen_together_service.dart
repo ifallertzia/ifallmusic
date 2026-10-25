@@ -412,7 +412,9 @@ class JamService extends ChangeNotifier {
     required SettingsService settings,
     http.Client? client,
     Duration openAttemptTimeout = const Duration(seconds: 20),
-    Duration openBudget = const Duration(seconds: 100),
+    Duration createAttemptTimeout = const Duration(seconds: 120),
+    Duration? openBudget,
+    Duration rateLimitDelay = const Duration(seconds: 20),
     List<Duration> openRetryDelays = const <Duration>[
       Duration(seconds: 1),
       Duration(seconds: 2),
@@ -422,19 +424,39 @@ class JamService extends ChangeNotifier {
   })  : _settings = settings,
         _client = client ?? http.Client(),
         _openAttemptTimeout = openAttemptTimeout,
+        _createAttemptTimeout = createAttemptTimeout,
         _openBudget = openBudget,
+        _rateLimitDelay = rateLimitDelay,
         _openRetryDelays = openRetryDelays;
 
   final SettingsService _settings;
   final http.Client _client;
 
-  /// How patiently the first REST calls (create/join/preview) treat a
-  /// sleeping server. The free host shuts the process down when idle and
-  /// needs most of a minute to boot, so a single short timeout made the
-  /// first room of the day impossible; these are constructor seams so
-  /// tests can use millisecond values instead of waiting minutes.
+  /// How patiently the REST calls treat a sleeping server — modelled on
+  /// BitChord's client, whose party requests carry no read timeout at
+  /// all and whose socket loop never gives up.
+  ///
+  /// The free host shuts the process down when idle and needs most of a
+  /// minute to boot, and while it boots its router *holds* requests
+  /// instead of answering them. Firing short-timeout retries into that
+  /// hold is worse than waiting: every queued attempt is delivered when
+  /// the process comes up, so the first creates a throwaway room, the
+  /// second another — and the server's two-creates-a-minute limit then
+  /// rejects the attempt the user is actually waiting on. So:
+  ///
+  ///  - create/join get a long per-attempt timeout ([_createAttemptTimeout])
+  ///    that lets one request ride out a cold start, retry after that,
+  ///    treat 429 as "your own earlier attempt landed — wait it out",
+  ///    and have no overall budget: they run until they succeed, get a
+  ///    definitive answer, or the user cancels via [cancelOpen].
+  ///  - preview/test get the shorter [_openAttemptTimeout] and bounded
+  ///    budgets of their own.
+  ///
+  /// Constructor seams all, so tests run in milliseconds.
   final Duration _openAttemptTimeout;
-  final Duration _openBudget;
+  final Duration _createAttemptTimeout;
+  final Duration? _openBudget;
+  final Duration _rateLimitDelay;
   final List<Duration> _openRetryDelays;
 
   /// True while an open/preview/test call has had to retry — the UI uses
@@ -475,7 +497,12 @@ class JamService extends ChangeNotifier {
   String? _avatarUrl;
 
   bool _intentionalClose = false;
-  bool _everConnected = false;
+
+  /// Cancellation for an in-flight create/join. The generation makes a
+  /// late-finishing open harmless when a newer one has taken its place;
+  /// the completer is what [cancelOpen] fires to unblock the waiter.
+  int _openGeneration = 0;
+  Completer<void>? _openCanceller;
   int _reconnectAttempt = 0;
   int _connectionGeneration = 0;
 
@@ -627,23 +654,49 @@ class JamService extends ChangeNotifier {
   ///
   /// Free hosts sleep when idle and take the better part of a minute to
   /// wake: while the process boots, requests either hang at the edge or
-  /// bounce off with 502/503/504. Giving up after a single short timeout
-  /// therefore failed every first-tap of the day with "could not reach
-  /// the server" even though the server was fine. This keeps asking —
-  /// briefly pausing between tries — until the budget runs out, and
-  /// flags [serverWaking] so the UI can say what is happening.
+  /// bounce off with 502/503/504. This loop is how the tolerance above
+  /// is implemented: retry timeouts, socket errors and waking statuses
+  /// — and, for create/join, also 429, which in practice means a
+  /// request the router held during boot was delivered just before
+  /// this one and spent the per-minute create allowance; the honest
+  /// move is to wait out the fixed window and ask again.
   ///
-  /// A definitive answer (any other status: 404 room gone, 409 full…)
-  /// returns at once for the caller to explain; if the budget runs out
-  /// on a waking status, the last response is returned for the same
-  /// treatment. Network/timeout errors rethrow the last one, preserving
-  /// the callers' existing message split.
+  /// [budget] bounds the whole effort (`null` = until [cancelSignal]);
+  /// [attemptTimeout] bounds one try. A definitive answer (any other
+  /// status: 404 room gone, 409 full…) returns at once for the caller
+  /// to explain; if the budget runs out on a waking status, the last
+  /// response is returned for the same treatment. Network/timeout
+  /// errors rethrow the last one, preserving the callers' existing
+  /// message split. [serverWaking] is flagged while this runs long, so
+  /// the UI can say what is happening.
   Future<http.Response> _withWakeRetry(
     Future<http.Response> Function() send, {
     Duration? budget,
+    Duration? attemptTimeout,
+    Future<void>? cancelSignal,
+    bool retryRateLimit = false,
   }) async {
-    final Duration limit = budget ?? _openBudget;
+    final Duration? limit = budget ?? _openBudget;
+    final Duration perAttempt = attemptTimeout ?? _openAttemptTimeout;
     final Stopwatch watch = Stopwatch()..start();
+    bool budgetSpent() => limit != null && watch.elapsed >= limit;
+
+    // First completion wins. (Not Future.any: that swallows an early
+    // error while the loser is still pending, which would hang here.)
+    Future<T> raceCancel<T>(Future<T> future) {
+      if (cancelSignal == null) return future;
+      final Completer<T> out = Completer<T>();
+      future.then((T value) {
+        if (!out.isCompleted) out.complete(value);
+      }, onError: (Object error, StackTrace stack) {
+        if (!out.isCompleted) out.completeError(error, stack);
+      });
+      cancelSignal.then((_) {
+        if (!out.isCompleted) out.completeError(const _OpenCancelled());
+      });
+      return out.future;
+    }
+
     int attempt = 0;
     // Even a single hung first attempt should explain itself quickly,
     // long before the attempt timeout gives the retry loop its cue.
@@ -656,27 +709,35 @@ class JamService extends ChangeNotifier {
     try {
       while (true) {
         attempt++;
+        bool rateLimited = false;
         try {
           final http.Response response =
-              await send().timeout(_openAttemptTimeout);
-          if (!_isWakingStatus(response.statusCode) ||
-              watch.elapsed >= limit) {
+              await raceCancel(send().timeout(perAttempt));
+          rateLimited = retryRateLimit && response.statusCode == 429;
+          if (!rateLimited && !_isWakingStatus(response.statusCode)) {
             return response;
           }
+          if (budgetSpent()) return response;
+        } on _OpenCancelled {
+          rethrow;
         } catch (_) {
           // Timeout, socket or TLS blip while the host boots: ask again,
           // unless the patience budget is spent — then surface it.
-          if (watch.elapsed >= limit) rethrow;
+          if (budgetSpent()) rethrow;
         }
         if (!_serverWaking) {
           _serverWaking = true;
           notifyListeners();
         }
-        final Duration delay = _openRetryDelays.isEmpty
-            ? Duration.zero
-            : _openRetryDelays[
-                math.min(attempt - 1, _openRetryDelays.length - 1)];
-        await Future<void>.delayed(delay);
+        // A 429 window is a minute long and does not slide, so a longer
+        // pause clears it in a few tries instead of hammering.
+        final Duration delay = rateLimited
+            ? _rateLimitDelay
+            : _openRetryDelays.isEmpty
+                ? Duration.zero
+                : _openRetryDelays[
+                    math.min(attempt - 1, _openRetryDelays.length - 1)];
+        await raceCancel(Future<void>.delayed(delay));
       }
     } finally {
       wakingHint.cancel();
@@ -684,6 +745,23 @@ class JamService extends ChangeNotifier {
         _serverWaking = false;
         notifyListeners();
       }
+    }
+  }
+
+  /// Backs out of an in-flight create/join. The underlying HTTP request
+  /// cannot be un-sent, but the waiter unblocks at once and whatever it
+  /// eventually does land is ignored (a stray room simply expires).
+  void cancelOpen() {
+    if (_state != JamConnectionState.joining && _openCanceller == null) {
+      return;
+    }
+    _openGeneration++;
+    _intentionalClose = true;
+    final Completer<void>? canceller = _openCanceller;
+    if (canceller != null && !canceller.isCompleted) canceller.complete();
+    if (_state == JamConnectionState.joining) {
+      _error = null;
+      _setState(JamConnectionState.idle);
     }
   }
 
@@ -805,6 +883,9 @@ class JamService extends ChangeNotifier {
               '$serverBase/api/parties/${Uri.encodeComponent(code)}/preview'),
           headers: const <String, String>{'Accept': 'application/json'},
         ),
+        // A look-up, not a commitment: patient through one cold start,
+        // but never an open-ended wait behind a six-letter code.
+        budget: const Duration(seconds: 45),
       );
       if (response.statusCode != 200) {
         return (null, _explainStatus(response.statusCode, response.body));
@@ -845,7 +926,9 @@ class JamService extends ChangeNotifier {
     _intentionalClose = false;
     _cancelReconnect();
     _reconnectAttempt = 0;
-    _everConnected = false;
+    final int gen = ++_openGeneration;
+    final Completer<void> canceller = Completer<void>();
+    _openCanceller = canceller;
     _setState(JamConnectionState.joining);
     _error = null;
     try {
@@ -854,13 +937,19 @@ class JamService extends ChangeNotifier {
           : Uri.parse(
               '$serverBase/api/parties/${Uri.encodeComponent(normalised)}/join',
             );
+      // No overall budget: a cold start takes as long as it takes, and
+      // the way out is the Cancel button, not a stopwatch.
       final http.Response response = await _withWakeRetry(
         () => _client.post(
           uri,
           headers: const <String, String>{'Content-Type': 'application/json'},
           body: jsonEncode(<String, dynamic>{..._identity, ...extra}),
         ),
+        attemptTimeout: _createAttemptTimeout,
+        cancelSignal: canceller.future,
+        retryRateLimit: true,
       );
+      if (gen != _openGeneration) return false; // cancelled as it landed
 
       if (response.statusCode != 200 && response.statusCode != 201) {
         _fail(_explainStatus(response.statusCode, response.body));
@@ -878,13 +967,22 @@ class JamService extends ChangeNotifier {
       }
       await _settings.setJamLastCode(_party?.code);
       await _connectSocket();
-      return _state == JamConnectionState.connected;
+      // A room with a token counts as opened even if the first socket
+      // is still being earned back by the reconnect loop — the room
+      // view shows "Reconnecting…" rather than an error.
+      return inRoom;
+    } on _OpenCancelled {
+      return false; // cancelOpen() already reset the state
     } on TimeoutException {
+      if (gen != _openGeneration) return false;
       _fail('The Listen Together server did not answer in time.');
       return false;
     } catch (e) {
+      if (gen != _openGeneration) return false;
       _fail('Could not reach the Listen Together server. Check your connection.');
       return false;
+    } finally {
+      if (identical(_openCanceller, canceller)) _openCanceller = null;
     }
   }
 
@@ -1002,7 +1100,6 @@ class JamService extends ChangeNotifier {
       },
       cancelOnError: false,
     );
-    _everConnected = true;
     _reconnectAttempt = 0;
     _setState(JamConnectionState.connected);
     _pingTimer?.cancel();
@@ -1014,7 +1111,11 @@ class JamService extends ChangeNotifier {
   }
 
   void _socketFailed(String message) {
-    if (_everConnected && _party != null && !_intentionalClose) {
+    // Holding a room and a token is enough: even the very first socket
+    // failing is a reconnect-loop problem, not a dead end. (BitChord's
+    // client is built the same way — the loop is the design, and the
+    // server's grace window holds the seat meanwhile.)
+    if (_party != null && !_intentionalClose) {
       _onSocketDropped();
     } else {
       _fail(message);
@@ -1513,6 +1614,7 @@ class JamService extends ChangeNotifier {
 
   /// Gives up the slot and closes the socket.
   Future<void> leave() async {
+    cancelOpen(); // an in-flight create/join stops racing us
     _intentionalClose = true;
     _cancelReconnect();
     final String? code = _party?.code;
@@ -1554,7 +1656,6 @@ class JamService extends ChangeNotifier {
     _clockOffsetMs = null;
     _bestRoundTripMs = null;
     _token = null;
-    _everConnected = false;
     _reconnectAttempt = 0;
     try {
       _socket?.close();
@@ -1588,9 +1689,16 @@ class JamService extends ChangeNotifier {
 
   @override
   void dispose() {
+    cancelOpen();
     _intentionalClose = true;
     _teardown();
     _client.close();
     super.dispose();
   }
+}
+
+/// Thrown inside the wake-retry loop when [JamService.cancelOpen] fires.
+/// Private on purpose: cancellation is a control path, not an error.
+class _OpenCancelled implements Exception {
+  const _OpenCancelled();
 }

@@ -47,6 +47,7 @@ var (
 func main() {
 	go startHeartbeatTicker()
 	go startPresenceSweeper()
+	startSelfKeepAlive()
 
 	mux := http.NewServeMux()
 
