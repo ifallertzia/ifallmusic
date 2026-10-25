@@ -1,0 +1,33 @@
+# Render Blueprint — one-click FREE deploy of the Listen Together server.
+#
+# Kaise use karein (5 minute):
+#   1. render.com par free account banao, GitHub connect karo.
+#   2. New +  →  Blueprint  →  ye repo (ifallmusic) select karo  →  Apply.
+#   3. Bas. Server live hoga: https://ifallmusic-party.onrender.com
+#      Check: https://ifallmusic-party.onrender.com/healthz
+#
+# Poori guide (custom domain party.ifallmusic.app samet): backend/DEPLOY.md
+#
+# Note: repo ke main branch par backend/ me koi change push hote hi
+# Render khud naya version deploy kar deta hai (autoDeploy).
+
+services:
+  - type: web
+    name: ifallmusic-party
+    runtime: docker
+    plan: free
+    # India ke sabse paas wala region = rooms ki latency sabse kam.
+    region: singapore
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      # Render ek proxy ke peeche chalta hai — isse invite links
+      # https:// wale bante hain.
+      - key: JAM_TRUST_PROXY
+        value: "true"
+      # JAM_PUBLIC_ORIGIN abhi mat set karo: server khud sahi address
+      # (onrender wala ya custom domain) pehchan leta hai. Galat value
+      # daal di to purane invite links users ko mare hue address par
+      # bhej denge.
