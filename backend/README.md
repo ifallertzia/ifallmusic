@@ -12,6 +12,13 @@ Anyone in the party can control the music.
 Go + a WebSocket per device, no database, deployed as a single Render web
 service.
 
+**Deploying (free, ~5 min):** the repo root carries a `render.yaml`
+Blueprint and this folder a `Dockerfile` — Render → New → Blueprint →
+pick this repo → Apply. Full walkthrough incl. the
+`party.ifallmusic.app` custom domain: [DEPLOY.md](DEPLOY.md).
+(It cannot run on Vercel/serverless: rooms live in memory behind
+long-held WebSockets.)
+
 ```bash
 go run .
 go test -v ./...

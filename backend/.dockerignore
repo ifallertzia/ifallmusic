@@ -1,0 +1,4 @@
+# Keep the Docker build context to just what `go build` needs.
+*.md
+party-server
+.DS_Store
