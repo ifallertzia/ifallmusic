@@ -515,9 +515,8 @@ func (p *PlaybackState) SetAutoplay(memberId *string, enabled bool) {
 		return
 	}
 	p.AutoplayEnabled = enabled
-	// touch, not just the timestamp: clients drop state frames whose seq
-	// has not moved, so without the bump this toggle never reaches them.
-	p.touch(memberId)
+	p.UpdatedBy = memberId
+	p.UpdatedAtMs = clock.NowMs()
 }
 
 func (p *PlaybackState) QueueToWire() map[string]interface{} {

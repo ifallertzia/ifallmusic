@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -9,6 +11,9 @@ import 'helpers/fake_party_server.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  // The fake party server is a real localhost socket; undo the test
+  // binding's blanket HTTP mock (which answers 400 to everything).
+  HttpOverrides.global = null;
 
   group('room codes', () {
     test('normalisation mirrors the server', () {

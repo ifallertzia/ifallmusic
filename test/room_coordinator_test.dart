@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:just_audio/just_audio.dart';
@@ -147,6 +148,9 @@ class TestPlayback extends PlaybackService {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  // The fake party server is a real localhost socket; undo the test
+  // binding's blanket HTTP mock (which answers 400 to everything).
+  HttpOverrides.global = null;
 
   late FakePartyServer server;
   late FakePlayer player;

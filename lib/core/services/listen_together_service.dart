@@ -1118,7 +1118,30 @@ class JamService extends ChangeNotifier {
   /// what stops two devices from fighting over the same pause.
   void _applyPlayback(Map<String, dynamic> json) {
     final JamPlayback incoming = JamPlayback.fromJson(json);
-    if (incoming.seq <= _appliedSeq) return;
+    if (incoming.seq < _appliedSeq) return;
+    if (incoming.seq == _appliedSeq) {
+      // The server deliberately does not bump seq for an AutoPlay toggle
+      // (it is not a playback change), so let just that flag through.
+      final JamPlayback? current = _playback;
+      if (current != null &&
+          incoming.autoplayEnabled != current.autoplayEnabled) {
+        _playback = JamPlayback(
+          track: current.track,
+          positionMs: current.positionMs,
+          anchorMs: current.anchorMs,
+          isPlaying: current.isPlaying,
+          seq: current.seq,
+          queueSeq: current.queueSeq,
+          queueIndex: current.queueIndex,
+          queueLength: current.queueLength,
+          autoplayEnabled: incoming.autoplayEnabled,
+          startedBy: current.startedBy,
+          startedByName: current.startedByName,
+          updatedBy: current.updatedBy,
+        );
+      }
+      return;
+    }
     _appliedSeq = incoming.seq;
     _playback = incoming;
   }
