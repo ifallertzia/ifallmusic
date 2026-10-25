@@ -81,13 +81,19 @@ class JamInviteService extends ChangeNotifier {
     required SettingsService settings,
     required JamFriendsService friends,
     http.Client? client,
+    String? serverOverride,
   })  : _settings = settings,
         _friends = friends,
-        _client = client ?? http.Client();
+        _client = client ?? http.Client(),
+        _serverOverride = serverOverride;
 
   final SettingsService _settings;
   final JamFriendsService _friends;
   final http.Client _client;
+
+  /// Test seam, same as [JamService]'s: production always talks to
+  /// [JamService.defaultServer]; the address is not user-editable.
+  final String? _serverOverride;
 
   /// A new invitation arrived (already in [pending]) — show it to the user.
   void Function(JamInvite invite)? onInvite;
@@ -113,11 +119,7 @@ class JamInviteService extends ChangeNotifier {
 
   bool isOnline(String userId) => _online.contains(userId);
 
-  String get _base {
-    final String custom =
-        _settings.jamServer.trim().replaceAll(RegExp(r'/+$'), '');
-    return custom.isNotEmpty ? custom : JamService.defaultServer;
-  }
+  String get _base => _serverOverride ?? JamService.defaultServer;
 
   String get _me => _settings.installId;
 

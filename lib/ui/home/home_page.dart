@@ -105,6 +105,9 @@ class _HomePageState extends State<HomePage> {
             _loadingShelves()
           else ...<Widget>[
             _topPicks(context, catalog, liked, recent, seed, trending),
+            // Listen Together lives near the top of home, not buried
+            // under the shelves — it is a headline way to use the app.
+            _roomInvite(context),
             if (quick.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(bottom: 36),
@@ -134,7 +137,6 @@ class _HomePageState extends State<HomePage> {
                     SongCard(tracks: recent, index: i, label: 'Recently played'),
                 ],
               ),
-            _roomInvite(context),
             if (recommended.isNotEmpty)
               ShelfSection(
                 title: 'Recommended for you',

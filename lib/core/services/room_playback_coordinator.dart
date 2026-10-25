@@ -180,6 +180,22 @@ class RoomPlaybackCoordinator {
   bool get _intentHeld =>
       _intentHoldUntil != null && DateTime.now().isBefore(_intentHoldUntil!);
 
+  /// Whether the room has made a newer decision (its playback `seq`
+  /// advanced) since this device was last in step with it — someone,
+  /// possibly this device's own room-aware buttons, pressed next /
+  /// previous / picked a song *in the room*. That is the room moving,
+  /// not this listener veering off: the new track must be loaded at
+  /// once, and the still-playing old one must not be reported back as
+  /// "intent" over it. Without this distinction a mid-song skip only
+  /// ever changed the UI: the push below helpfully re-reported the old
+  /// track, the server reverted to it, and the old song kept playing.
+  /// (A natural ending always worked because [_justCompleted] and
+  /// [_localAtEnd] bypass both paths.)
+  bool get _roomMovedSinceSync {
+    final JamPlayback? pb = jam.playback;
+    return pb != null && _lastFreshSeq >= 0 && pb.seq != _lastFreshSeq;
+  }
+
   // ------------------------------------------------------------- room → local
 
   void _applyRemote() {
@@ -209,11 +225,15 @@ class RoomPlaybackCoordinator {
       // its listener picking a new song: give the intent push a couple of
       // seconds to reach the server before the room's track is reloaded
       // over it. A just-finished track is not intent, and neither is
-      // whatever was playing before this device ever synced up.
+      // whatever was playing before this device ever synced up — and nor
+      // is a room that itself moved since we were last in step: that is
+      // a skip or a new pick landing *from* the room (the mid-song Next
+      // that only changed the UI), and it must simply be loaded.
       final String localId = playback.current?.id ?? '';
       final DateTime now = DateTime.now();
       if (_everSynced &&
           jam.canControl &&
+          !_roomMovedSinceSync &&
           localId.isNotEmpty &&
           !_justCompleted(localId, now) &&
           !_localAtEnd()) {
@@ -226,7 +246,7 @@ class RoomPlaybackCoordinator {
                 const Duration(milliseconds: 2500);
         if (withinGrace) return;
       }
-      _loadRoomTrack(track, roomIds, localIds);
+      _loadRoomTrack(track, pb.seq, roomIds, localIds);
     } else {
       _everSynced = true;
       _divergedTrackId = '';
@@ -257,6 +277,7 @@ class RoomPlaybackCoordinator {
 
   void _loadRoomTrack(
     JamTrack track,
+    int seq,
     List<String> roomIds,
     List<String> localIds,
   ) {
@@ -297,7 +318,13 @@ class RoomPlaybackCoordinator {
             playback.current?.id == track.videoId) {
           await playback.pause();
         }
-        if (playback.current?.id == track.videoId) _everSynced = true;
+        if (playback.current?.id == track.videoId) {
+          _everSynced = true;
+          // In step as of the state this load was made from: from here
+          // on, a different seq means the room moved (see
+          // _roomMovedSinceSync), with no un-synced gap after a load.
+          _lastFreshSeq = seq;
+        }
       } catch (_) {
         // A failed load is retried by the reconcile loop; nothing to do.
       }
@@ -376,6 +403,10 @@ class RoomPlaybackCoordinator {
     // 1) A different song is on locally: that is the listener taking over
     //    (tapped a song somewhere in the app) — tell the room.
     if (roomTrack == null || song.id != roomTrack.videoId) {
+      if (_roomMovedSinceSync) {
+        return; // the room just moved; _applyRemote loads its track —
+        // pushing our still-playing old one would undo the change
+      }
       if (_loadingTrackId != null && _loadingTrackId == roomTrack?.videoId) {
         return; // the room's track is still loading here
       }

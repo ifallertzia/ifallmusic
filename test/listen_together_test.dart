@@ -35,11 +35,13 @@ void main() {
       server = FakePartyServer();
       await server.start();
       SharedPreferences.setMockInitialValues(<String, Object>{
-        SettingsService.kJamServer: server.base,
         SettingsService.kGapless: false,
       });
       final SharedPreferences prefs = await SharedPreferences.getInstance();
-      jam = JamService(settings: SettingsService(prefs));
+      jam = JamService(
+        settings: SettingsService(prefs),
+        serverOverride: server.base,
+      );
       jam.identify(
         userId: 'u-alice',
         deviceId: 'd-alice',
@@ -62,6 +64,7 @@ void main() {
       final SharedPreferences prefs = await SharedPreferences.getInstance();
       final JamService service = JamService(
         settings: SettingsService(prefs),
+        serverOverride: server.base,
         openAttemptTimeout: attemptTimeout,
         createAttemptTimeout: attemptTimeout,
         openBudget: budget,
