@@ -20,6 +20,11 @@ name: Party server keep-warm & smoke test
 #    ::notice annotation so results are readable at a glance.
 
 on:
+  # TEMPORARY (removed before merge): run the smoke probe from this
+  # branch, since workflow_dispatch needs the file on main first.
+  push:
+    branches: ['arena/**']
+    paths: ['backend/tools/jam_probe.py', '.github/workflows/party_server.yml']
   schedule:
     - cron: '*/10 * * * *'
   workflow_dispatch:
@@ -53,14 +58,16 @@ jobs:
           curl -fsS -m 240 -w '\nhttp %{http_code} in %{time_total}s\n' "$URL"
 
       - uses: actions/checkout@v4
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.smoke }}
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.smoke) }}
 
       - name: Smoke-probe the live server (create/join/queue/chat)
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.smoke }}
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.smoke) }}
         run: |
           python3 -m pip install --quiet 'websockets>=12'
+          SERVER="${{ inputs.server }}"
+          [ -z "$SERVER" ] && SERVER="https://ifallmusic-party.onrender.com"
           set +e
-          python3 backend/tools/jam_probe.py "${{ inputs.server }}" | tee probe.log
+          python3 backend/tools/jam_probe.py "$SERVER" | tee probe.log
           status=${PIPESTATUS[0]}
           grep '^PROBE ' probe.log | while IFS= read -r line; do echo "::notice::$line"; done
           exit $status
