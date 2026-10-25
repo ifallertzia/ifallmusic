@@ -213,6 +213,10 @@ Future<AppBoot> _initializeApp() async {
     deviceId: settings.installId,
     displayName: settings.displayName,
   );
+  // Start waking the (free-tier, sleepy) room server the moment the
+  // app opens, so by the time anyone creates or joins a room it is
+  // already up. Fire-and-forget; also kept warm on every resume.
+  jam.warmUp();
   final JamFriendsService jamFriends =
       JamFriendsService(prefs, selfUserId: settings.installId);
   final RoomPlaybackCoordinator roomCoordinator = RoomPlaybackCoordinator(
@@ -585,7 +589,9 @@ class _SidifyAppState extends State<SidifyApp> with WidgetsBindingObserver {
   }
 
   /// Handles `ifallmusic://party/{code}` and
-  /// `https://…/invite/{code}` links (optionally carrying `?server=`).
+  /// `https://…/invite/{code}` links. (A `?server=` from the server's
+  /// own landing page is ignored: rooms always use the built-in
+  /// default address, which is never user-editable.)
   void _onDeepLink(String link) {
     // Consume the stored copy so a warm-start link can't be replayed on
     // the next cold start.
@@ -593,14 +599,6 @@ class _SidifyAppState extends State<SidifyApp> with WidgetsBindingObserver {
     try {
       final Uri uri = Uri.parse(link.trim());
       final AppBoot boot = widget.boot;
-      final String? server = uri.queryParameters['server'];
-      if (server != null && server.trim().isNotEmpty) {
-        String s = server.trim().replaceAll(RegExp(r'/+$'), '');
-        if (!s.startsWith('http://') && !s.startsWith('https://')) {
-          s = 'https://$s';
-        }
-        unawaited(boot.settings.setJamServer(s));
-      }
       final String raw = uri.queryParameters['code'] ??
           (uri.pathSegments.isNotEmpty ? uri.pathSegments.last : '');
       final String code = normalizeJamCode(raw);

@@ -9,10 +9,12 @@ import '../../core/services/listen_together_service.dart';
 import '../../core/services/music_download_service.dart';
 import '../../core/services/playback_service.dart';
 import '../../core/services/settings_service.dart';
+import '../../core/theme/sidify_theme.dart';
 import '../../core/utils/format.dart';
 import '../artist/artist_page.dart';
 import '../rooms/room_transport.dart';
 import '../shell/sidify_routes.dart';
+import '../shell/sidify_shell_controller.dart';
 import '../widgets/sidify_widgets.dart';
 import '../widgets/song_menu.dart';
 import 'lyrics_view.dart';
@@ -44,6 +46,7 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
   Widget build(BuildContext context) {
     final PlaybackService playback = context.watch<PlaybackService>();
     final SettingsService settings = context.watch<SettingsService>();
+    final bool inRoom = context.watch<JamService>().inRoom;
     final Song? song = playback.current;
     if (song == null) {
       return const Scaffold(
@@ -99,6 +102,20 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
                             Expanded(
                               child: _playingFrom(context),
                             ),
+                            _glassBtn(
+                              Icons.people_rounded,
+                              'Listen together',
+                              () {
+                                Navigator.of(context).pop();
+                                context
+                                    .read<SidifyShellController>()
+                                    .goTogether();
+                              },
+                              size: 36,
+                              iconSize: 19,
+                              active: inRoom,
+                            ),
+                            const SizedBox(width: 10),
                             _glassBtn(
                               Icons.more_horiz_rounded,
                               'More',
@@ -772,6 +789,7 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
     VoidCallback onTap, {
     double size = 34,
     double iconSize = 18,
+    bool active = false,
   }) {
     return GestureDetector(
       onTap: onTap,
@@ -780,7 +798,9 @@ class _FullPlayerPageState extends State<FullPlayerPage> {
         width: size,
         height: size,
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.14),
+          color: active
+              ? context.sidify.brand
+              : Colors.white.withValues(alpha: 0.14),
           shape: BoxShape.circle,
           border: Border.all(
             color: Colors.white.withValues(alpha: 0.10),

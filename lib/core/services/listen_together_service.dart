@@ -411,6 +411,7 @@ class JamService extends ChangeNotifier {
   JamService({
     required SettingsService settings,
     http.Client? client,
+    String? serverOverride,
     Duration openAttemptTimeout = const Duration(seconds: 20),
     Duration createAttemptTimeout = const Duration(seconds: 120),
     Duration? openBudget,
@@ -423,6 +424,7 @@ class JamService extends ChangeNotifier {
     ],
   })  : _settings = settings,
         _client = client ?? http.Client(),
+        _serverOverride = serverOverride,
         _openAttemptTimeout = openAttemptTimeout,
         _createAttemptTimeout = createAttemptTimeout,
         _openBudget = openBudget,
@@ -431,6 +433,11 @@ class JamService extends ChangeNotifier {
 
   final SettingsService _settings;
   final http.Client _client;
+
+  /// Test seam: point the client at a fake server. Production passes
+  /// nothing — the address is [defaultServer], a product constant that
+  /// is deliberately never shown in or editable from the UI.
+  final String? _serverOverride;
 
   /// How patiently the REST calls treat a sleeping server — modelled on
   /// BitChord's client, whose party requests carry no read timeout at
@@ -585,22 +592,19 @@ class JamService extends ChangeNotifier {
       DateTime.now().millisecondsSinceEpoch + (_clockOffsetMs ?? 0);
 
   /// The production party server (the Go program in `backend/`, running
-  /// as a free Render web service — see `backend/DEPLOY.md`), used unless
-  /// the listener named their own in Settings. Self-hosting stays a
-  /// first-class option, never a build-time change.
+  /// as a free Render web service — see `backend/DEPLOY.md`).
+  ///
+  /// This is a product constant, full stop: it is never displayed in
+  /// the UI and there is no way to edit it from the app, so a listener
+  /// can neither see it nor break rooms by typing a wrong one. (It
+  /// necessarily travels inside shared invite links — that is what a
+  /// link is.) A custom address saved by an older build is ignored.
   static const String defaultServer = 'https://ifallmusic-party.onrender.com';
 
-  /// Kept under its old name for call sites that show it as a placeholder.
-  static const String placeholderServer = defaultServer;
+  /// The base address every request goes to. Only tests bend it, via
+  /// the constructor's `serverOverride`.
+  String get serverBase => _serverOverride ?? defaultServer;
 
-  /// The base address with any trailing slash removed.
-  String get serverBase {
-    final String custom =
-        _settings.jamServer.trim().replaceAll(RegExp(r'/+$'), '');
-    return custom.isNotEmpty ? custom : defaultServer;
-  }
-
-  bool get hasCustomServer => _settings.jamServer.trim().isNotEmpty;
   bool get hasServer => serverBase.isNotEmpty;
 
   /// The shareable web link for the current room (the server's invite page,
@@ -794,18 +798,17 @@ class JamService extends ChangeNotifier {
     }());
   }
 
-  /// Asks the server (or [base], when testing an address that has not
-  /// been saved yet) whether it is alive, and explains the answer in
-  /// words a person can act on. This is the no-new-build sanity check:
-  /// it separates "server asleep/down" from "app bug" on the spot.
-  Future<(bool, String)> testServer({String? base}) async {
-    final String target =
-        (base == null || base.trim().isEmpty) ? serverBase : base.trim();
+  /// Asks the server whether it is alive, and explains the answer in
+  /// words a person can act on (never naming the address — it is not
+  /// shown anywhere in the app). This is the no-new-build sanity
+  /// check: it separates "server asleep/down" from "app bug" on the
+  /// spot.
+  Future<(bool, String)> testServer() async {
     final Stopwatch watch = Stopwatch()..start();
     try {
       final http.Response response = await _withWakeRetry(
         () => _client.get(
-          Uri.parse('$target/healthz'),
+          Uri.parse('$serverBase/healthz'),
           headers: const <String, String>{'Accept': 'application/json'},
         ),
         budget: const Duration(seconds: 75),
@@ -826,24 +829,25 @@ class JamService extends ChangeNotifier {
             : (
                 false,
                 'Something answered in ${secs}s, but it does not look '
-                    'like the room server. Check the address.'
+                    'like the room server. Try again in a bit.'
               );
       }
       return (
         false,
         'The server answered with an error (${response.statusCode}). '
-            'If it was asleep, give it a minute and test again.'
+            'If it was asleep, give it a minute and run the test again.'
       );
     } on TimeoutException {
       return (
         false,
-        'No answer. The server may still be waking up — wait a few '
-            'seconds and test again — or the address is wrong.'
+        'No answer yet. The server may still be waking up — wait a '
+            'few seconds and run the test again.'
       );
     } catch (_) {
       return (
         false,
-        'Could not reach $target. Check the address and your connection.'
+        'Could not reach the server. Check your connection and run '
+            'the test again.'
       );
     }
   }
@@ -1195,6 +1199,10 @@ class JamService extends ChangeNotifier {
   /// Called when the app comes back to the front: re-earn a dropped socket
   /// now instead of at the next backoff tick, or re-ask for the truth.
   void onAppResumed() {
+    // Coming back to the app after a while is the other moment a room
+    // is about to be wanted; keep the server warm for it (coalesced,
+    // and a no-op while in a room).
+    warmUp();
     if (_state == JamConnectionState.reconnecting) {
       _cancelReconnect();
       unawaited(_attemptReconnect());

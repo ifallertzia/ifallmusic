@@ -162,7 +162,6 @@ void main() {
     server = FakePartyServer();
     await server.start();
     SharedPreferences.setMockInitialValues(<String, Object>{
-      SettingsService.kJamServer: server.base,
       SettingsService.kGapless: false,
     });
     final SharedPreferences prefs = await SharedPreferences.getInstance();
@@ -174,7 +173,7 @@ void main() {
       library: LibraryService(prefs),
       player: player,
     );
-    jam = JamService(settings: settings);
+    jam = JamService(settings: settings, serverOverride: server.base);
     jam.identify(userId: 'u-alice', deviceId: 'd-alice', displayName: 'Alice');
     coordinator = RoomPlaybackCoordinator(jam: jam, playback: playback);
     coordinator.attach();
@@ -212,6 +211,33 @@ void main() {
     expect(playback.current?.id, 'aaaaaaaaaaa');
     server.advanceToB();
     await untilTrue(() => playback.current?.id == 'bbbbbbbbbbb');
+  });
+
+  test('a mid-song skip from the room is loaded, not pushed back', () async {
+    expect(await jam.join('ABC123'), isTrue);
+    await untilTrue(() => playback.current?.id == 'aaaaaaaaaaa');
+    await untilTrue(() => playback.isPlaying);
+    final int framesBefore = server.controlFrames.length;
+    // Next is pressed mid-song: the room's playback seq advances to B
+    // while this device is happily playing A.
+    server.advanceToB();
+    await untilTrue(
+      () => playback.current?.id == 'bbbbbbbbbbb',
+      timeout: const Duration(seconds: 5),
+    );
+    // The old track must not be reported back as "local intent": on the
+    // real server that setTrack reverts the skip — the UI showed the
+    // next song while the old one kept playing. (The fake ignores
+    // setTrack, so this asserts on the frames it recorded.)
+    expect(
+      server.controlFrames.skip(framesBefore).any(
+            (Map<String, dynamic> f) =>
+                f['action'] == 'setTrack' &&
+                (f['track'] as Map?)?['videoId'] == 'aaaaaaaaaaa',
+          ),
+      isFalse,
+      reason: 'the old track must not be pushed back over a room skip',
+    );
   });
 
   test('playing something else locally is reported to the room', () async {

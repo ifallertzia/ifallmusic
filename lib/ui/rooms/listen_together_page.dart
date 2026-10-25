@@ -306,26 +306,17 @@ class _ListenTogetherPageState extends State<ListenTogetherPage> {
     return ok == true;
   }
 
-  Future<void> _editServer(JamService jam) async {
-    final SettingsService settings = context.read<SettingsService>();
+  /// The one server affordance left in the UI: run the reachability
+  /// test and show its verdict. The address itself is a built-in
+  /// constant — never shown, never editable — so there is nothing
+  /// here for a listener to see or break.
+  Future<void> _runServerTest(JamService jam) async {
     final SidifyTokens t = context.sidify;
-    final TextEditingController controller =
-        TextEditingController(text: settings.jamServer);
     bool testing = false;
     bool testOk = false;
     String? testResult;
 
-    // The address as it would be used if saved right now (blank = default).
-    String candidateServer() {
-      String v = controller.text.trim().replaceAll(RegExp(r'/+$'), '');
-      if (v.isEmpty) return JamService.defaultServer;
-      if (!v.startsWith('http://') && !v.startsWith('https://')) {
-        v = 'https://$v';
-      }
-      return v;
-    }
-
-    final String? value = await showDialog<String>(
+    await showDialog<void>(
       context: context,
       builder: (BuildContext ctx) => StatefulBuilder(
         builder: (BuildContext ctx, StateSetter setDialogState) {
@@ -337,25 +328,11 @@ class _ListenTogetherPageState extends State<ListenTogetherPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Text(
-                  'Rooms live on ${JamService.defaultServer} unless you run '
-                  'your own (the Go server in the backend/ folder). Leave '
-                  'blank for the default.',
+                  'Check that rooms can reach their server from this '
+                  'phone right now.',
                   style: TextStyle(fontSize: 13, height: 1.45, color: t.text2),
                 ),
                 const SizedBox(height: 14),
-                TextField(
-                  controller: controller,
-                  autocorrect: false,
-                  keyboardType: TextInputType.url,
-                  style: TextStyle(color: t.text),
-                  decoration: InputDecoration(
-                    hintText: JamService.defaultServer,
-                    hintStyle: TextStyle(color: t.text3),
-                    border: const OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                ),
-                const SizedBox(height: 10),
                 Align(
                   alignment: Alignment.centerLeft,
                   child: TextButton.icon(
@@ -367,7 +344,7 @@ class _ListenTogetherPageState extends State<ListenTogetherPage> {
                               testResult = null;
                             });
                             final (bool ok, String message) =
-                                await jam.testServer(base: candidateServer());
+                                await jam.testServer();
                             if (!ctx.mounted) return;
                             setDialogState(() {
                               testing = false;
@@ -385,7 +362,7 @@ class _ListenTogetherPageState extends State<ListenTogetherPage> {
                             ),
                           )
                         : const Icon(Icons.wifi_tethering_rounded, size: 18),
-                    label: Text(testing ? 'Testing…' : 'Test connection'),
+                    label: Text(testing ? 'Running…' : 'Run test'),
                     style: TextButton.styleFrom(foregroundColor: t.brand),
                   ),
                 ),
@@ -410,36 +387,13 @@ class _ListenTogetherPageState extends State<ListenTogetherPage> {
             actions: <Widget>[
               TextButton(
                 onPressed: () => Navigator.of(ctx).pop(),
-                child: Text('Cancel', style: TextStyle(color: t.text2)),
-              ),
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
-                child: Text('Save', style: TextStyle(color: t.brand)),
+                child: Text('Close', style: TextStyle(color: t.text2)),
               ),
             ],
           );
         },
       ),
     );
-    controller.dispose();
-    if (value == null || !mounted) return;
-    String v = value.trim().replaceAll(RegExp(r'/+$'), '');
-    if (v.isNotEmpty &&
-        !v.startsWith('http://') &&
-        !v.startsWith('https://')) {
-      v = 'https://$v';
-    }
-    await settings.setJamServer(v);
-    if (jam.inRoom) {
-      await jam.leave();
-      showAppNotice('Server changed — you left the old room.');
-    } else {
-      showAppNotice(
-        v.isEmpty ? 'Using the default room server.' : 'Room server saved.',
-      );
-    }
-    // A freshly chosen server may be just as asleep; start waking it now.
-    jam.warmUp(force: true);
   }
 
   // --------------------------------------------------------------------- build
@@ -764,9 +718,9 @@ class _ListenTogetherPageState extends State<ListenTogetherPage> {
               SidifyGroupRow(
                 icon: Icons.dns_outlined,
                 title: 'Room server',
-                subtitle: jam.serverBase,
+                subtitle: 'Tap to run a connection test',
                 chevron: true,
-                onTap: () => _editServer(jam),
+                onTap: () => _runServerTest(jam),
               ),
             ],
           ),
