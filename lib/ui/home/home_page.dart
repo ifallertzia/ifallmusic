@@ -524,7 +524,7 @@ class _HomePageState extends State<HomePage> {
                             borderRadius: BorderRadius.circular(999),
                           ),
                           child: Text(
-                            'Coming soon',
+                            'NEW',
                             style: TextStyle(
                               fontSize: 10.5,
                               fontWeight: FontWeight.w700,
