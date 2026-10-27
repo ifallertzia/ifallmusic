@@ -951,7 +951,19 @@ func handleSocketFrame(p *party.Party, member *party.Member, sc *hub.SafeConn, f
 		}
 		text, _ := frame["text"].(string)
 		id, _ := frame["id"].(string)
-		msg, added := p.AddChat(member, id, text)
+		// A swipe-to-reply message carries a small quote of the original.
+		// The server keeps only those three fields, so a huge or malformed
+		// frame cannot make the chat window grow without bound.
+		var reply *party.ChatReply
+		if raw, ok := frame["replyTo"].(map[string]interface{}); ok {
+			qId, _ := raw["id"].(string)
+			qBy, _ := raw["by"].(string)
+			qText, _ := raw["text"].(string)
+			if qId != "" {
+				reply = &party.ChatReply{Id: qId, By: qBy, Text: qText}
+			}
+		}
+		msg, added := p.AddChat(member, id, text, reply)
 		if msg == nil {
 			_ = sc.WriteJSON(map[string]interface{}{
 				"type":    protocol.FrameError,
@@ -968,6 +980,35 @@ func handleSocketFrame(p *party.Party, member *party.Member, sc *hub.SafeConn, f
 			// A retry of a message that already landed — confirm it to the
 			// sender alone instead of showing everyone a duplicate.
 			_ = sc.WriteJSON(chatMessageFrame(p, msg))
+		}
+
+	case protocol.FrameChatEdit:
+		id, _ := frame["id"].(string)
+		text, _ := frame["text"].(string)
+		if msg, ok := p.EditChat(member, id, text); ok {
+			hubInst.Broadcast(p.Code, chatUpdateFrame(p, msg), "")
+		} else {
+			_ = sc.WriteJSON(map[string]interface{}{
+				"type":    protocol.FrameError,
+				"error":   "chat_edit_failed",
+				"message": "Only your own messages can be edited.",
+			})
+		}
+
+	case protocol.FrameChatReact:
+		id, _ := frame["id"].(string)
+		emoji, _ := frame["emoji"].(string)
+		if msg, ok := p.ToggleReaction(member, id, emoji); ok {
+			hubInst.Broadcast(p.Code, chatUpdateFrame(p, msg), "")
+		}
+
+	case protocol.FrameChatRead:
+		seq := int64(0)
+		if n, ok := frame["chatSeq"].(float64); ok {
+			seq = int64(n)
+		}
+		if p.MarkChatRead(member, seq) {
+			hubInst.Broadcast(p.Code, chatReadFrame(p), "")
 		}
 
 	case protocol.FrameReport:
@@ -990,6 +1031,12 @@ func handleSocketFrame(p *party.Party, member *party.Member, sc *hub.SafeConn, f
 		}
 
 		queueBefore := p.Playback.QueueSeq
+		// next / previous / setTrack move the needle WITHOUT changing the
+		// queue contents, so QueueSeq stays put. Devices that missed the
+		// queue frame used to keep the old index and then load the wrong
+		// song (or nothing at all) — broadcast the queue whenever the
+		// index moved too.
+		indexBefore := p.Playback.QueueIndex
 		action, _ := frame["action"].(string)
 		success, errCode, errMsg := applyControl(p, member, action, frame)
 		if success && action == protocol.ActionEnd {
@@ -1010,8 +1057,11 @@ func handleSocketFrame(p *party.Party, member *party.Member, sc *hub.SafeConn, f
 		}
 		if success {
 			p.Touch()
-			// If queue changed, broadcast queue first
-			if p.Playback.QueueSeq != queueBefore {
+			// If the queue (or just its position) changed, broadcast it
+			// first so every device loads the state frame against the
+			// same track list and the same needle.
+			if p.Playback.QueueSeq != queueBefore ||
+				p.Playback.QueueIndex != indexBefore {
 				hubInst.Broadcast(p.Code, queueFrame(p), "")
 			}
 			hubInst.Broadcast(p.Code, stateFrame(p), "")
@@ -1299,12 +1349,34 @@ func chatMessageFrame(p *party.Party, msg *party.ChatMessage) map[string]interfa
 	}
 }
 
+// chatUpdateFrame carries an edited or reacted-to message. It deliberately
+// does not advance chatSeq: the bubble is replaced in place, not appended.
+func chatUpdateFrame(p *party.Party, msg *party.ChatMessage) map[string]interface{} {
+	return map[string]interface{}{
+		"type":     protocol.FrameChat,
+		"update":   true,
+		"chatSeq":  p.ChatSeq,
+		"message":  msg,
+		"serverMs": clock.NowMs(),
+	}
+}
+
+func chatReadFrame(p *party.Party) map[string]interface{} {
+	return map[string]interface{}{
+		"type":     protocol.FrameChatRead,
+		"chatSeq":  p.ChatSeq,
+		"reads":    p.ChatReadsWire(),
+		"serverMs": clock.NowMs(),
+	}
+}
+
 func chatSnapshotFrame(p *party.Party) map[string]interface{} {
 	return map[string]interface{}{
 		"type":     protocol.FrameChat,
 		"snapshot": true,
 		"chatSeq":  p.ChatSeq,
 		"messages": p.ChatToWire(),
+		"reads":    p.ChatReadsWire(),
 		"serverMs": clock.NowMs(),
 	}
 }
@@ -1327,6 +1399,7 @@ func membersFrame(p *party.Party) map[string]interface{} {
 		"members":         membersList,
 		"maxMembers":      p.MaxMembers,
 		"hostOnlyControl": p.HostOnlyControl,
+		"chatReads":       p.ChatReadsWire(),
 		"serverMs":        clock.NowMs(),
 	}
 }

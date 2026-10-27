@@ -10,13 +10,16 @@ import android.media.audiofx.Equalizer
 import android.media.audiofx.Virtualizer
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
+import android.speech.tts.TextToSpeech
 import androidx.core.content.FileProvider
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.io.FileInputStream
+import java.util.Locale
 import kotlin.concurrent.thread
 
 /**
@@ -31,6 +34,11 @@ class SaxifyBridge(private val activity: Activity) {
     private var virtualizer: Virtualizer? = null
     private var reverb: EnvironmentalReverb? = null
     private val spatialProcessor = SpatialAudioProcessor()
+
+    // ---- Room announcements: the device's own assistant voice ---------------
+    private var tts: TextToSpeech? = null
+    private var ttsReady = false
+    private val pendingSpeech = mutableListOf<String>()
 
     fun handle(call: MethodCall, result: MethodChannel.Result) {
         try {
@@ -118,10 +126,62 @@ class SaxifyBridge(private val activity: Activity) {
                     releaseSpatial()
                     result.success(null)
                 }
+                "speak" -> {
+                    speak(call.argument<String>("text") ?: "")
+                    result.success(null)
+                }
                 else -> result.notImplemented()
             }
         } catch (e: Exception) {
             result.error("saxify", e.message, null)
+        }
+    }
+
+    /**
+     * Speaks a short room announcement with Android's built-in TTS engine.
+     * The engine starts asynchronously, so the first announcement is queued
+     * and flushed on the init callback. Anything the engine cannot do is
+     * swallowed — a missing voice must never take a room down.
+     */
+    private fun speak(raw: String) {
+        val text = raw.trim().take(160)
+        if (text.isEmpty()) return
+        try {
+            if (tts == null) {
+                pendingSpeech.add(text)
+                tts = TextToSpeech(activity.applicationContext) { status ->
+                    if (status == TextToSpeech.SUCCESS) {
+                        try {
+                            tts?.setLanguage(Locale.US)
+                        } catch (_: Exception) {
+                            // The engine keeps its default voice.
+                        }
+                        ttsReady = true
+                        val queued = pendingSpeech.toList()
+                        pendingSpeech.clear()
+                        queued.forEach { speakNow(it) }
+                    } else {
+                        pendingSpeech.clear()
+                    }
+                }
+            } else if (ttsReady) {
+                speakNow(text)
+            } else if (pendingSpeech.size < 6) {
+                pendingSpeech.add(text)
+            }
+        } catch (_: Exception) {
+            // No TTS engine on this device: the activity line in chat still
+            // tells the listener who joined or left.
+        }
+    }
+
+    private fun speakNow(text: String) {
+        try {
+            val params = Bundle()
+            params.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 0.85f)
+            tts?.speak(text, TextToSpeech.QUEUE_ADD, params, "room-${System.currentTimeMillis()}")
+        } catch (_: Exception) {
+            // Ignore a failed utterance.
         }
     }
 

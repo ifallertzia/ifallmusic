@@ -279,8 +279,41 @@ class JamQueue {
       );
 }
 
+/// A short quote of the message a reply points at. Only these three fields
+/// travel, so a reply stays readable after the original rolls off the top
+/// of the room's chat window.
+class JamReply {
+  const JamReply({required this.id, required this.by, required this.text});
+
+  final String id;
+  final String by;
+  final String text;
+
+  factory JamReply.fromJson(Map<String, dynamic> json) => JamReply(
+        id: json['id']?.toString() ?? '',
+        by: json['by']?.toString() ?? '',
+        text: json['text']?.toString() ?? '',
+      );
+
+  factory JamReply.of(JamChatMessage message) => JamReply(
+        id: message.id,
+        by: message.by,
+        text: message.text,
+      );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'id': id,
+        'by': by,
+        'text': text,
+      };
+}
+
 /// One line of room chat. [pending] / [failed] are local-only delivery
 /// states for the optimistic bubble; the server's copy never carries them.
+///
+/// [seq] is the server's chat sequence number for this line — read receipts
+/// compare against it. [reactions] maps an emoji to the member ids that
+/// used it, so tapping the same emoji twice removes the reaction again.
 class JamChatMessage {
   const JamChatMessage({
     required this.id,
@@ -289,6 +322,10 @@ class JamChatMessage {
     required this.by,
     required this.text,
     required this.atMs,
+    this.seq = 0,
+    this.replyTo,
+    this.reactions = const <String, List<String>>{},
+    this.editedAtMs = 0,
     this.pending = false,
     this.failed = false,
   });
@@ -299,29 +336,77 @@ class JamChatMessage {
   final String by;
   final String text;
   final int atMs;
+  final int seq;
+  final JamReply? replyTo;
+  final Map<String, List<String>> reactions;
+  final int editedAtMs;
   final bool pending;
   final bool failed;
 
-  factory JamChatMessage.fromJson(Map<String, dynamic> json) =>
-      JamChatMessage(
-        id: json['id']?.toString() ?? '',
-        memberId: json['memberId']?.toString() ?? '',
-        userId: json['userId']?.toString() ?? '',
-        by: json['by']?.toString() ?? 'Listener',
-        text: json['text']?.toString() ?? '',
-        atMs: (json['atMs'] as num?)?.round() ?? 0,
-      );
+  factory JamChatMessage.fromJson(Map<String, dynamic> json) {
+    final Map<dynamic, dynamic> rawReactions =
+        json['reactions'] is Map ? json['reactions'] as Map : <dynamic, dynamic>{};
+    final Map<String, List<String>> reactions = <String, List<String>>{};
+    rawReactions.forEach((dynamic key, dynamic value) {
+      if (value is List) {
+        reactions[key.toString()] =
+            value.map((dynamic e) => e.toString()).toList();
+      }
+    });
+    return JamChatMessage(
+      id: json['id']?.toString() ?? '',
+      memberId: json['memberId']?.toString() ?? '',
+      userId: json['userId']?.toString() ?? '',
+      by: json['by']?.toString() ?? 'Listener',
+      text: json['text']?.toString() ?? '',
+      atMs: (json['atMs'] as num?)?.round() ?? 0,
+      seq: (json['seq'] as num?)?.round() ?? 0,
+      replyTo: json['replyTo'] is Map
+          ? JamReply.fromJson(
+              (json['replyTo'] as Map).cast<String, dynamic>(),
+            )
+          : null,
+      reactions: reactions,
+      editedAtMs: (json['editedAtMs'] as num?)?.round() ?? 0,
+    );
+  }
 
-  JamChatMessage copyWith({bool? pending, bool? failed}) => JamChatMessage(
+  JamChatMessage copyWith({
+    int? seq,
+    String? text,
+    JamReply? replyTo,
+    Map<String, List<String>>? reactions,
+    int? editedAtMs,
+    bool? pending,
+    bool? failed,
+  }) =>
+      JamChatMessage(
         id: id,
         memberId: memberId,
         userId: userId,
         by: by,
-        text: text,
+        text: text ?? this.text,
         atMs: atMs,
+        seq: seq ?? this.seq,
+        replyTo: replyTo ?? this.replyTo,
+        reactions: reactions ?? this.reactions,
+        editedAtMs: editedAtMs ?? this.editedAtMs,
         pending: pending ?? this.pending,
         failed: failed ?? this.failed,
       );
+
+  /// True when [memberId] already used [emoji] on this line.
+  bool reactedBy(String emoji, String memberId) =>
+      (reactions[emoji] ?? const <String>[]).contains(memberId);
+}
+
+/// Somebody entered or left the room. The app turns this into the spoken
+/// "Alice has joined the room" / "…has left the room" announcement.
+class JamPresenceEvent {
+  const JamPresenceEvent({required this.name, required this.joined});
+
+  final String name;
+  final bool joined;
 }
 
 /// One "Alice skipped to the next song" line, shown interleaved with chat.
@@ -490,6 +575,19 @@ class JamService extends ChangeNotifier {
   int _chatSeq = 0;
   List<JamActivity> _activities = const <JamActivity>[];
 
+  /// memberId -> highest chatSeq that member has read. Sent by the server
+  /// on every receipt change and folded into snapshots/members frames.
+  Map<String, int> _chatReads = const <String, int>{};
+  int _sentReadSeq = 0;
+
+  /// Presence diffing: the first membership snapshot seeds the set, later
+  /// snapshots/frames announce only real changes.
+  bool _presenceSeeded = false;
+  Set<String> _knownMemberIds = const <String>{};
+
+  /// Set by the app shell to speak join/leave announcements aloud.
+  void Function(JamPresenceEvent event)? onPresence;
+
   /// Server clock minus device clock, in milliseconds.
   ///
   /// Estimated from ping/pong; `null` until the first round trip completes,
@@ -551,6 +649,22 @@ class JamService extends ChangeNotifier {
       List<JamChatMessage>.unmodifiable(_chatMessages);
   List<JamActivity> get activities =>
       List<JamActivity>.unmodifiable(_activities);
+
+  /// Highest chat sequence read by anybody *other* than this device. A
+  /// sender's bubble gets its second, green tick once this reaches the
+  /// message's [JamChatMessage.seq].
+  int get maxOtherReadSeq {
+    final String self = _you?.memberId ?? '';
+    int best = 0;
+    _chatReads.forEach((String memberId, int seq) {
+      if (memberId != self && seq > best) best = seq;
+    });
+    return best;
+  }
+
+  /// True when someone else in the room has seen [message].
+  bool isReadByOthers(JamChatMessage message) =>
+      message.seq > 0 && message.seq <= maxOtherReadSeq;
 
   /// The host's name for "Alice's room" headings; '' when unknown.
   String get hostName {
@@ -1001,6 +1115,7 @@ class JamService extends ChangeNotifier {
     final Map<String, dynamic> partyMap = payload['party'] is Map
         ? (payload['party'] as Map).cast<String, dynamic>()
         : payload;
+    _absorbChatReads(payload['chatReads'] ?? partyMap['chatReads']);
     if (partyMap['code'] != null) {
       _party = JamParty.fromJson(partyMap);
     }
@@ -1011,18 +1126,29 @@ class JamService extends ChangeNotifier {
       _applyPlayback((partyMap['playback'] as Map).cast<String, dynamic>());
     }
     if (partyMap['members'] is List) {
-      _members = (partyMap['members'] as List)
-          .whereType<Map>()
-          .map((Map m) => JamMember.fromJson(m.cast<String, dynamic>()))
-          .toList();
+      _updateMembers(
+        (partyMap['members'] as List)
+            .whereType<Map>()
+            .map((Map m) => JamMember.fromJson(m.cast<String, dynamic>()))
+            .toList(),
+      );
       _refreshYouFromMembers();
     }
     if (partyMap['chat'] is List) {
-      _chatMessages = (partyMap['chat'] as List)
+      final List<JamChatMessage> fresh = (partyMap['chat'] as List)
           .whereType<Map>()
           .map((Map m) => JamChatMessage.fromJson(m.cast<String, dynamic>()))
           .toList();
-      _chatSeq = (partyMap['chatSeq'] as num?)?.round() ?? _chatMessages.length;
+      // Older servers did not stamp each line with its sequence. Number
+      // the tail of the window so receipts still work against them.
+      final int last = (partyMap['chatSeq'] as num?)?.round() ?? fresh.length;
+      for (int i = 0; i < fresh.length; i++) {
+        if (fresh[i].seq <= 0) {
+          fresh[i] = fresh[i].copyWith(seq: last - (fresh.length - 1 - i));
+        }
+      }
+      _chatMessages = fresh;
+      _chatSeq = last;
     }
     final Object? serverMs = payload['serverMs'] ?? partyMap['serverMs'];
     if (serverMs is num && _clockOffsetMs == null) {
@@ -1040,6 +1166,67 @@ class JamService extends ChangeNotifier {
         return;
       }
     }
+  }
+
+  void _absorbChatReads(dynamic raw) {
+    if (raw is! Map) return;
+    final Map<String, int> next = <String, int>{..._chatReads};
+    raw.forEach((dynamic key, dynamic value) {
+      if (value is num) next[key.toString()] = value.round();
+    });
+    _chatReads = next;
+  }
+
+  /// Swaps in a membership list and turns the difference into join/leave
+  /// events. The very first list is the room we just walked into: those
+  /// people did not "join" in front of us, so it only seeds the set.
+  void _updateMembers(List<JamMember> next) {
+    final List<JamMember> previous = _members;
+    _members = next;
+    final Set<String> ids = <String>{
+      for (final JamMember m in next) m.memberId,
+    };
+    if (!_presenceSeeded) {
+      _presenceSeeded = true;
+      _knownMemberIds = ids;
+      return;
+    }
+    final String self = _you?.memberId ?? '';
+    final Set<String> before = _knownMemberIds;
+    for (final JamMember m in next) {
+      if (m.memberId.isEmpty || m.memberId == self) continue;
+      if (!before.contains(m.memberId)) {
+        _emitPresence(m.displayName, joined: true);
+      }
+    }
+    for (final JamMember m in previous) {
+      if (m.memberId.isEmpty || m.memberId == self) continue;
+      if (!ids.contains(m.memberId)) {
+        _emitPresence(m.displayName, joined: false);
+      }
+    }
+    _knownMemberIds = ids;
+  }
+
+  void _emitPresence(String name, {required bool joined}) {
+    final String who = name.trim().isEmpty ? 'A listener' : name.trim();
+    final String detail = joined
+        ? '$who joined the room 🎧'
+        : '$who left the room';
+    final List<JamActivity> next = <JamActivity>[
+      ..._activities,
+      JamActivity(
+        action: joined ? 'join' : 'leave',
+        by: who,
+        detail: detail,
+        atMs: serverNowMs,
+      ),
+    ];
+    _activities = next.length > maxActivities
+        ? next.sublist(next.length - maxActivities)
+        : next;
+    final void Function(JamPresenceEvent event)? cb = onPresence;
+    if (cb != null) cb(JamPresenceEvent(name: who, joined: joined));
   }
 
   String _explainStatus(int status, String body) {
@@ -1213,6 +1400,9 @@ class JamService extends ChangeNotifier {
 
   /// Asks for the truth again — after the app comes back to the front.
   void resync() {
+    // A freshly booted server may have lost its receipt table: let the
+    // panel report what this device has read again.
+    _sentReadSeq = 0;
     _send(<String, dynamic>{'type': 'sync'});
     _send(<String, dynamic>{'type': 'syncQueue'});
     _send(<String, dynamic>{'type': 'syncChat'});
@@ -1290,11 +1480,12 @@ class JamService extends ChangeNotifier {
           notifyListeners();
         }
       case 'members':
+        _absorbChatReads(frame['chatReads']);
         if (frame['members'] is List) {
-          _members = (frame['members'] as List)
+          _updateMembers((frame['members'] as List)
               .whereType<Map>()
               .map((Map m) => JamMember.fromJson(m.cast<String, dynamic>()))
-              .toList();
+              .toList());
           _refreshYouFromMembers();
         }
         if (_party != null) {
@@ -1310,6 +1501,9 @@ class JamService extends ChangeNotifier {
         notifyListeners();
       case 'chat':
         _applyChatFrame(frame);
+        notifyListeners();
+      case 'chatRead':
+        _absorbChatReads(frame['reads']);
         notifyListeners();
       case 'activity':
         final JamActivity activity = JamActivity.fromJson(frame);
@@ -1349,11 +1543,17 @@ class JamService extends ChangeNotifier {
 
   void _applyChatFrame(Map<String, dynamic> frame) {
     final int seq = (frame['chatSeq'] as num?)?.round() ?? _chatSeq;
+    _absorbChatReads(frame['reads']);
     if (frame['snapshot'] == true && frame['messages'] is List) {
       final List<JamChatMessage> fresh = (frame['messages'] as List)
           .whereType<Map>()
           .map((Map m) => JamChatMessage.fromJson(m.cast<String, dynamic>()))
           .toList();
+      for (int i = 0; i < fresh.length; i++) {
+        if (fresh[i].seq <= 0) {
+          fresh[i] = fresh[i].copyWith(seq: seq - (fresh.length - 1 - i));
+        }
+      }
       final Set<String> landed = fresh.map((JamChatMessage m) => m.id).toSet();
       // Keep any optimistic bubbles the snapshot predates; they either land
       // next (and dedupe by id) or were refused and already marked failed.
@@ -1365,18 +1565,28 @@ class JamService extends ChangeNotifier {
       return;
     }
     if (frame['message'] is! Map) return;
-    final JamChatMessage message =
+    JamChatMessage message =
         JamChatMessage.fromJson((frame['message'] as Map).cast<String, dynamic>());
+    final bool update = frame['update'] == true;
+    if (message.seq <= 0) message = message.copyWith(seq: seq);
     final int existing =
         _chatMessages.indexWhere((JamChatMessage m) => m.id == message.id);
     if (existing >= 0) {
+      final JamChatMessage old = _chatMessages[existing];
+      // An edit/reaction frame replaces the line in place. A plain echo
+      // settles an optimistic bubble; keep the local quote it carried so
+      // older servers (which do not echo replyTo) cannot lose it.
+      final JamChatMessage merged = message.copyWith(
+        replyTo: message.replyTo ?? old.replyTo,
+      );
       final List<JamChatMessage> next =
           List<JamChatMessage>.of(_chatMessages);
-      next[existing] = message;
+      next[existing] = merged.copyWith(seq: old.seq > 0 ? old.seq : seq);
       _chatMessages = next;
       _chatSeq = math.max(_chatSeq, seq);
       return;
     }
+    if (update) return; // an edit for a message already scrolled away
     if (seq <= _chatSeq) return;
     if (seq > _chatSeq + 1) {
       // A message was missed: keep this one and ask for the whole window.
@@ -1434,6 +1644,19 @@ class JamService extends ChangeNotifier {
     }
     _appliedSeq = incoming.seq;
     _playback = incoming;
+    _alignQueueIndex(incoming);
+  }
+
+  /// `next` / `previous` move the queue's needle without changing its
+  /// contents, so older servers never sent a new queue frame. The state
+  /// frame still carries the authoritative index: fold it in here, or a
+  /// device that missed one frame keeps loading the wrong song.
+  void _alignQueueIndex(JamPlayback pb) {
+    final JamQueue q = _queue;
+    if (q.seq != pb.queueSeq) return;
+    if (pb.queueIndex < 0 || pb.queueIndex >= q.items.length) return;
+    if (pb.queueIndex == q.index) return;
+    _queue = JamQueue(items: q.items, index: pb.queueIndex, seq: q.seq);
   }
 
   void _applyQueue(Map<String, dynamic> json) {
@@ -1568,9 +1791,10 @@ class JamService extends ChangeNotifier {
   // ---------------------------------------------------------------------- chat
 
   /// Sends a chat message with an optimistic local bubble; the server's
-  /// broadcast of the same id settles it. Returns false when there was
-  /// nothing to send or no live socket to send it on.
-  bool sendChat(String rawText) {
+  /// broadcast of the same id settles it. A [replyTo] quote travels with
+  /// the message so every device can show what it answers.
+  /// Returns false when there was nothing to send or no live socket.
+  bool sendChat(String rawText, {JamChatMessage? replyTo, JamReply? replyQuote}) {
     if (!isConnected) return false;
     String text = rawText.replaceAll(RegExp(r'\s+'), ' ').trim();
     if (text.isEmpty) return false;
@@ -1578,6 +1802,8 @@ class JamService extends ChangeNotifier {
       text = String.fromCharCodes(text.runes.take(maxChatRunes));
     }
     final String id = newUuid();
+    final JamReply? quote =
+        replyQuote ?? (replyTo == null ? null : JamReply.of(replyTo));
     final JamChatMessage optimistic = JamChatMessage(
       id: id,
       memberId: _you?.memberId ?? '',
@@ -1585,6 +1811,7 @@ class JamService extends ChangeNotifier {
       by: effectiveDisplayName,
       text: text,
       atMs: serverNowMs,
+      replyTo: quote,
       pending: true,
     );
     final List<JamChatMessage> next = <JamChatMessage>[
@@ -1595,7 +1822,12 @@ class JamService extends ChangeNotifier {
         ? next.sublist(next.length - maxChatMessages)
         : next;
     notifyListeners();
-    _send(<String, dynamic>{'type': 'chat', 'id': id, 'text': text});
+    _send(<String, dynamic>{
+      'type': 'chat',
+      'id': id,
+      'text': text,
+      if (quote != null) 'replyTo': quote.toJson(),
+    });
     return true;
   }
 
@@ -1605,7 +1837,83 @@ class JamService extends ChangeNotifier {
         .where((JamChatMessage m) => m.id != message.id)
         .toList();
     notifyListeners();
-    return sendChat(message.text);
+    return sendChat(message.text, replyQuote: message.replyTo);
+  }
+
+  /// Edits one of this device's own messages. The bubble changes at once;
+  /// the server's update frame confirms it for everybody else.
+  bool editChat(JamChatMessage message, String rawText) {
+    if (!isConnected || message.id.isEmpty) return false;
+    final String text = rawText.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (text.isEmpty || text == message.text) return false;
+    final int index =
+        _chatMessages.indexWhere((JamChatMessage m) => m.id == message.id);
+    if (index < 0) return false;
+    final List<JamChatMessage> next = List<JamChatMessage>.of(_chatMessages);
+    next[index] = next[index].copyWith(
+      text: text,
+      editedAtMs: serverNowMs,
+    );
+    _chatMessages = next;
+    notifyListeners();
+    _send(<String, dynamic>{
+      'type': 'chatEdit',
+      'id': message.id,
+      'text': text,
+    });
+    return true;
+  }
+
+  /// Taps an emoji on/off a message. The optimistic update makes the chip
+  /// feel instant; the server's update frame is the truth for the room.
+  void toggleReaction(JamChatMessage message, String emoji) {
+    if (!isConnected || message.id.isEmpty || emoji.isEmpty) return;
+    final int index =
+        _chatMessages.indexWhere((JamChatMessage m) => m.id == message.id);
+    if (index < 0) return;
+    final String self = _you?.memberId ?? _userId;
+    if (self.isEmpty) return;
+    final JamChatMessage current = _chatMessages[index];
+    final Map<String, List<String>> next =
+        <String, List<String>>{};
+    current.reactions.forEach((String key, List<String> value) {
+      next[key] = List<String>.of(value);
+    });
+    final List<String> users = List<String>.of(next[emoji] ?? const <String>[]);
+    if (users.contains(self)) {
+      users.remove(self);
+    } else {
+      users.add(self);
+    }
+    if (users.isEmpty) {
+      next.remove(emoji);
+    } else {
+      next[emoji] = users;
+    }
+    final List<JamChatMessage> updated = List<JamChatMessage>.of(_chatMessages);
+    updated[index] = current.copyWith(reactions: next);
+    _chatMessages = updated;
+    notifyListeners();
+    _send(<String, dynamic>{
+      'type': 'chatReact',
+      'id': message.id,
+      'emoji': emoji,
+    });
+  }
+
+  /// Reports that this device has actually looked at the conversation up to
+  /// [seq]. The server relays it to the other members, whose own messages
+  /// then switch from one tick to two green ticks.
+  void markChatRead(int seq) {
+    if (!isConnected || seq <= 0) return;
+    final String self = _you?.memberId ?? '';
+    if (self.isNotEmpty && (_chatReads[self] ?? 0) < seq) {
+      final Map<String, int> next = <String, int>{..._chatReads, self: seq};
+      _chatReads = next;
+    }
+    if (seq <= _sentReadSeq) return;
+    _sentReadSeq = seq;
+    _send(<String, dynamic>{'type': 'chatRead', 'chatSeq': seq});
   }
 
   /// Tells the server where this device really is. It is only logged there —
@@ -1659,6 +1967,10 @@ class JamService extends ChangeNotifier {
     _chatMessages = const <JamChatMessage>[];
     _activities = const <JamActivity>[];
     _chatSeq = 0;
+    _chatReads = const <String, int>{};
+    _sentReadSeq = 0;
+    _presenceSeeded = false;
+    _knownMemberIds = const <String>{};
     _appliedSeq = -1;
     _appliedQueueSeq = -1;
     _clockOffsetMs = null;

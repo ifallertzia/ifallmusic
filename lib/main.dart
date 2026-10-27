@@ -37,6 +37,7 @@ import 'core/services/youtube_service.dart';
 import 'core/services/update_service.dart';
 import 'core/services/update_reminders.dart';
 import 'ui/settings/update_dialog.dart';
+import 'ui/rooms/room_chat_launcher.dart';
 import 'core/theme/sidify_theme.dart';
 import 'movies/services/eon_movies_service.dart';
 import 'movies/services/movie_download_service.dart';
@@ -419,6 +420,15 @@ class _SidifyAppState extends State<SidifyApp> with WidgetsBindingObserver {
   /// a notice, and invitation links open the room they name.
   void _wireRoomSocial() {
     final AppBoot boot = widget.boot;
+    // Join/leave announcements are spoken by the device's own AI-style
+    // assistant voice, and also land in the chat feed as activity lines.
+    boot.jam.onPresence = (JamPresenceEvent event) {
+      final String line = event.joined
+          ? '${event.name} has joined the room'
+          : '${event.name} has left the room';
+      unawaited(NativeBridge.speak(line));
+      showAppNotice(line);
+    };
     boot.jamInvites.onInvite = _onInviteArrived;
     boot.jamInvites.onResponse = _onInviteAnswered;
     AppNotifications.route('jam-invite:', _onInviteNotification);
@@ -806,6 +816,16 @@ class _SidifyRoot extends StatelessWidget {
               SidifyDock(
                 observer: routeObserver,
                 navigatorKey: navigatorKey,
+              ),
+              // The red chat button: above the navigator, so every section
+              // of the app can open the room chat after joining a room.
+              ValueListenableBuilder<bool>(
+                valueListenable: routeObserver.hidden,
+                builder: (BuildContext context, bool hidden, Widget? _) =>
+                    RoomChatLauncher(
+                      hidden: hidden,
+                      navigatorKey: navigatorKey,
+                    ),
               ),
               // Notices ride above the dock, so they are readable on every
               // page — including while the mini player is showing.

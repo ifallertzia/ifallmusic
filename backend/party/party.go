@@ -545,6 +545,10 @@ type Member struct {
 	FrameBudgetAtMs    int64   `json:"-"`
 	ChatBudget         float64 `json:"-"`
 	ChatBudgetAtMs     int64   `json:"-"`
+	// Highest chatSeq this member has actually looked at. Read receipts are
+	// derived from it: a sender's line is "seen" once somebody else's
+	// LastReadChatSeq has reached that line's Seq.
+	LastReadChatSeq int64 `json:"-"`
 }
 
 func (m *Member) ToWire() map[string]interface{} {
@@ -560,16 +564,42 @@ func (m *Member) ToWire() map[string]interface{} {
 	}
 }
 
+// ChatReply is a compact quote of the message a reply points at. Only the
+// three pieces the bubble needs are copied, so a reply stays readable even
+// when the original has already rolled out of the chat window.
+type ChatReply struct {
+	Id   string `json:"id"`
+	By   string `json:"by"`
+	Text string `json:"text"`
+}
+
 // ChatMessage is one line of room chat. The client mints the Id (a UUID)
 // so an optimistic resend after a dropped frame lands only once.
+//
+// Seq is the chatSeq assigned when the line landed; read receipts compare
+// against it. Reactions map an emoji to the memberIds that used it, which
+// makes a second tap on the same emoji a toggle instead of a second vote.
 type ChatMessage struct {
-	Id       string `json:"id"`
-	MemberId string `json:"memberId"`
-	UserId   string `json:"userId"`
-	Name     string `json:"by"`
-	Text     string `json:"text"`
-	AtMs     int64  `json:"atMs"`
+	Id          string                `json:"id"`
+	MemberId    string                `json:"memberId"`
+	UserId      string                `json:"userId"`
+	Name        string                `json:"by"`
+	Text        string                `json:"text"`
+	AtMs        int64                 `json:"atMs"`
+	Seq         int64                 `json:"seq"`
+	ReplyTo     *ChatReply            `json:"replyTo,omitempty"`
+	Reactions   map[string][]string   `json:"reactions,omitempty"`
+	EditedAtMs  int64                 `json:"editedAtMs,omitempty"`
 }
+
+// Allowed emoji for reactions. Keeping the set on the server means a rogue
+// client cannot fill a message with arbitrary strings.
+var chatEmoji = map[string]bool{
+	"❤️": true, "🔥": true, "😂": true, "😮": true,
+	"👍": true, "🎵": true, "👏": true, "😍": true,
+}
+
+func ValidChatEmoji(emoji string) bool { return chatEmoji[emoji] }
 
 // Party holds members and playback state for a single room code.
 type Party struct {
@@ -791,7 +821,7 @@ func (p *Party) SpendChatBudget(member *Member) bool {
 // the text is capped, so a wall of pasted text becomes one tidy line. A
 // repeated (member, id) pair is an optimistic-resend retry: the stored
 // message comes back with added=false and nothing lands twice.
-func (p *Party) AddChat(member *Member, id, rawText string) (msg *ChatMessage, added bool) {
+func (p *Party) AddChat(member *Member, id, rawText string, reply ...*ChatReply) (msg *ChatMessage, added bool) {
 	text := strings.Join(strings.Fields(rawText), " ")
 	if text == "" {
 		return nil, false
@@ -806,6 +836,24 @@ func (p *Party) AddChat(member *Member, id, rawText string) (msg *ChatMessage, a
 			}
 		}
 	}
+	var quoted *ChatReply
+	if len(reply) > 0 && reply[0] != nil {
+		q := reply[0]
+		quoted = &ChatReply{
+			Id:   q.Id,
+			By:   q.By,
+			Text: strings.Join(strings.Fields(q.Text), " "),
+		}
+		if len(quoted.Id) > 128 {
+			quoted.Id = quoted.Id[:128]
+		}
+		if len(quoted.By) > 80 {
+			quoted.By = quoted.By[:80]
+		}
+		if runes := []rune(quoted.Text); len(runes) > 140 {
+			quoted.Text = string(runes[:140])
+		}
+	}
 	msg = &ChatMessage{
 		Id:       id,
 		MemberId: member.MemberId,
@@ -813,14 +861,105 @@ func (p *Party) AddChat(member *Member, id, rawText string) (msg *ChatMessage, a
 		Name:     member.DisplayName,
 		Text:     text,
 		AtMs:     clock.NowMs(),
+		ReplyTo:  quoted,
 	}
 	p.Chat = append(p.Chat, msg)
 	if len(p.Chat) > config.ChatMaxMessages {
 		p.Chat = p.Chat[len(p.Chat)-config.ChatMaxMessages:]
 	}
 	p.ChatSeq++
+	// The sequence numbers travel with each line: a reader reports the
+	// highest one it saw and the sender turns its single tick green.
+	msg.Seq = p.ChatSeq
 	p.Touch()
 	return msg, true
+}
+
+// ChatById finds a line in the rolling window. Edits and reactions name a
+// message by the id its author minted.
+func (p *Party) ChatById(id string) *ChatMessage {
+	if id == "" {
+		return nil
+	}
+	for _, m := range p.Chat {
+		if m.Id == id {
+			return m
+		}
+	}
+	return nil
+}
+
+// EditChat changes the text of the caller's own message. Only the author may
+// edit, and only a non-empty line is accepted; the id and seq stay put so
+// read receipts and optimistic bubbles keep pointing at the same line.
+func (p *Party) EditChat(member *Member, id, rawText string) (*ChatMessage, bool) {
+	msg := p.ChatById(id)
+	if msg == nil || msg.MemberId != member.MemberId {
+		return nil, false
+	}
+	text := strings.Join(strings.Fields(rawText), " ")
+	if text == "" || text == msg.Text {
+		return nil, false
+	}
+	if runes := []rune(text); len(runes) > config.ChatMaxRunes {
+		text = string(runes[:config.ChatMaxRunes])
+	}
+	msg.Text = text
+	msg.EditedAtMs = clock.NowMs()
+	p.Touch()
+	return msg, true
+}
+
+// ToggleReaction adds or removes this member's emoji on a message. The
+// returned message is broadcast as an update, not a new chat line, so no
+// sequence number is consumed and no duplicate bubble appears.
+func (p *Party) ToggleReaction(member *Member, id, emoji string) (*ChatMessage, bool) {
+	msg := p.ChatById(id)
+	if msg == nil || !ValidChatEmoji(emoji) {
+		return nil, false
+	}
+	if msg.Reactions == nil {
+		msg.Reactions = make(map[string][]string)
+	}
+	users := msg.Reactions[emoji]
+	for i, who := range users {
+		if who == member.MemberId {
+			msg.Reactions[emoji] = append(users[:i], users[i+1:]...)
+			if len(msg.Reactions[emoji]) == 0 {
+				delete(msg.Reactions, emoji)
+			}
+			p.Touch()
+			return msg, true
+		}
+	}
+	msg.Reactions[emoji] = append(users, member.MemberId)
+	p.Touch()
+	return msg, true
+}
+
+// MarkChatRead records the highest chatSeq a member has seen. It never goes
+// backwards and never runs past the room's own sequence, so a stale frame
+// from a reconnecting device cannot resurrect an old receipt.
+func (p *Party) MarkChatRead(member *Member, seq int64) bool {
+	if seq > p.ChatSeq {
+		seq = p.ChatSeq
+	}
+	if seq <= member.LastReadChatSeq {
+		return false
+	}
+	member.LastReadChatSeq = seq
+	p.Touch()
+	return true
+}
+
+// ChatReadsWire is the receipt table every device needs to decide whether
+// its own messages have been seen by somebody else.
+func (p *Party) ChatReadsWire() map[string]int64 {
+	out := make(map[string]int64, len(p.Members))
+	for id, m := range p.Members {
+		out[id] = m.LastReadChatSeq
+	}
+	return out
 }
 
 // ChatToWire is the snapshot form of the conversation: welcome frames and
@@ -919,6 +1058,7 @@ func (p *Party) ToWire() map[string]interface{} {
 		"queue":           p.Playback.QueueToWire(),
 		"chat":            p.ChatToWire(),
 		"chatSeq":         p.ChatSeq,
+		"chatReads":       p.ChatReadsWire(),
 		"serverMs":        now,
 	}
 }
