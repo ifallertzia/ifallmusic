@@ -573,34 +573,67 @@ class RoomChatPopup {
   RoomChatPopup._();
 
   static Future<void> show(BuildContext context) async {
-    await showDialog<void>(
+    // showGeneralDialog gives us our own insets (showDialog hard-codes a
+    // 40px margin on either side, which made the chat far too narrow) and
+    // lets the popup slide down from the top.
+    await showGeneralDialog<void>(
       context: context,
-      insetPadding: const EdgeInsets.fromLTRB(12, 24, 12, 24),
-      builder: (BuildContext ctx) {
+      barrierDismissible: true,
+      barrierLabel: 'Room chat',
+      barrierColor: Colors.black54,
+      transitionDuration: const Duration(milliseconds: 220),
+      pageBuilder: (
+        BuildContext ctx,
+        Animation<double> animation,
+        Animation<double> secondaryAnimation,
+      ) {
         final SidifyTokens t = ctx.sidify;
-        // Leave space for the status bar, the dialog padding and the
+        // Leave space for the status bar, our own padding and the
         // keyboard, so the panel never overflows on a small phone.
         final double screen = MediaQuery.sizeOf(ctx).height;
         final double keyboard = MediaQuery.viewInsetsOf(ctx).bottom;
         final double top = MediaQuery.paddingOf(ctx).top;
         final double available = screen - keyboard - top - 76;
         final double panelHeight = (available * 0.9).clamp(280.0, 620.0);
-        return Align(
-          alignment: Alignment.topCenter,
-          child: Material(
-            color: t.surface,
-            borderRadius: BorderRadius.circular(20),
-            clipBehavior: Clip.antiAlias,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-              child: RoomChatPanel(
-                height: panelHeight,
-                onClose: () => Navigator.of(ctx).pop(),
+        return SafeArea(
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(12, 24, 12, 16 + keyboard),
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: Material(
+                color: t.surface,
+                borderRadius: BorderRadius.circular(20),
+                clipBehavior: Clip.antiAlias,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+                  child: RoomChatPanel(
+                    height: panelHeight,
+                    onClose: () => Navigator.of(ctx).pop(),
+                  ),
+                ),
               ),
             ),
           ),
         );
       },
+      transitionBuilder: (
+        BuildContext ctx,
+        Animation<double> animation,
+        Animation<double> secondaryAnimation,
+        Widget child,
+      ) =>
+          FadeTransition(
+        opacity: CurvedAnimation(parent: animation, curve: Curves.easeOut),
+        child: SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(0, -0.06),
+            end: Offset.zero,
+          ).animate(
+            CurvedAnimation(parent: animation, curve: Curves.easeOut),
+          ),
+          child: child,
+        ),
+      ),
     );
   }
 }
