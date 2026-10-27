@@ -16,6 +16,18 @@ const (
 	FrameBye      = "bye"
 	FrameActivity = "activity"
 	FrameChat     = "chat"
+	// Chat read receipts: a map of memberId -> highest chatSeq that member
+	// has seen. Sent whenever a receipt changes and folded into the members
+	// frame so a reconnecting device learns the same thing.
+	FrameChatRead = "chatRead"
+)
+
+// Client -> Server chat actions. A chat message can be edited, reacted to,
+// or marked as read by another member; all three are small frames that the
+// server validates before broadcasting the updated message back.
+const (
+	FrameChatEdit  = "chatEdit"
+	FrameChatReact = "chatReact"
 )
 
 // Client -> Server frame types

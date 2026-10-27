@@ -51,8 +51,17 @@ class RoomPlaybackCoordinator {
   bool _emptiedOnce = false;
   List<String> _lastQueueIds = const <String>[];
   String? _loadingTrackId;
+  DateTime? _loadStartedAt;
+  int _loadGeneration = 0;
   DateTime? _applyingUntil;
   DateTime? _intentHoldUntil;
+
+  // The last room track this device has heard about. A state frame naming
+  // a different track is authoritative: no "local intent" grace window may
+  // hold it back, and the old local song must not be pushed back over it.
+  String _roomTrackId = '';
+  DateTime? _roomChangedAt;
+  bool _loadFailed = false;
 
   int _lastFreshSeq = -1;
   int _driftStrikes = 0;
@@ -99,6 +108,11 @@ class RoomPlaybackCoordinator {
       _lastQueueIds =
           jam.queueItems.map((JamTrack t) => t.videoId).toList();
       _lastFreshSeq = -1;
+      _roomTrackId = '';
+      _roomChangedAt = null;
+      _loadFailed = false;
+      _loadStartedAt = null;
+      _loadGeneration++;
       // Whatever was playing before the room opened is not "intent" — give
       // the first room state a moment to land before reporting anything.
       _intentHoldUntil = DateTime.now().add(const Duration(seconds: 3));
@@ -107,9 +121,14 @@ class RoomPlaybackCoordinator {
     if (!inRoom && _wasInRoom) {
       playback.deferTrackCompletion = false;
       _loadingTrackId = null;
+      _loadStartedAt = null;
+      _loadGeneration++;
       _everSynced = false;
       _divergedTrackId = '';
       _divergedAt = null;
+      _roomTrackId = '';
+      _roomChangedAt = null;
+      _loadFailed = false;
       _lastQueueIds = const <String>[];
     }
     _wasInRoom = inRoom;
@@ -193,7 +212,22 @@ class RoomPlaybackCoordinator {
   /// [_localAtEnd] bypass both paths.)
   bool get _roomMovedSinceSync {
     final JamPlayback? pb = jam.playback;
+    if (_roomChangePending) return true;
     return pb != null && _lastFreshSeq >= 0 && pb.seq != _lastFreshSeq;
+  }
+
+  /// True from the moment the room names a new song until this device is
+  /// actually playing it. Some devices take longer to resolve a stream (or
+  /// briefly fail); a stale local song in that window is NEVER intent.
+  bool get _roomChangePending {
+    if (_loadingTrackId != null) return true;
+    final JamTrack? track = jam.currentTrack;
+    if (track == null) return false;
+    if (playback.current?.id == track.videoId) return false;
+    if (!_loadFailed) return false;
+    final DateTime? changed = _roomChangedAt;
+    return changed != null &&
+        DateTime.now().difference(changed) < const Duration(seconds: 20);
   }
 
   // ------------------------------------------------------------- room → local
@@ -214,13 +248,34 @@ class RoomPlaybackCoordinator {
       return;
     }
     _emptiedOnce = false;
+    // A state frame naming a different track is the room moving. Remember
+    // it *before* any grace-window maths: on a slow phone this is what
+    // keeps an old local song from being pushed back over a room skip.
+    if (track.videoId != _roomTrackId) {
+      _roomTrackId = track.videoId;
+      _roomChangedAt = DateTime.now();
+      _divergedTrackId = '';
+      _divergedAt = null;
+    }
     final List<String> roomIds =
         jam.queueItems.map((JamTrack t) => t.videoId).toList();
     final List<String> localIds =
         playback.queue.map((Song s) => s.id).toList();
 
     if (playback.current?.id != track.videoId) {
-      if (_loadingTrackId == track.videoId && playback.isLoading) return;
+      if (_loadingTrackId == track.videoId) {
+        // A load that never resolves (a dead resolver on one device) used
+        // to wedge the room here forever: clear it after a bounded wait
+        // so the reconcile loop can try again.
+        final DateTime? started = _loadStartedAt;
+        if (playback.isLoading ||
+            (started != null &&
+                DateTime.now().difference(started) <
+                    const Duration(seconds: 12))) {
+          return;
+        }
+        _loadingTrackId = null;
+      }
       // A device that was in step and just veered off is almost certainly
       // its listener picking a new song: give the intent push a couple of
       // seconds to reach the server before the room's track is reloaded
@@ -246,7 +301,7 @@ class RoomPlaybackCoordinator {
                 const Duration(milliseconds: 2500);
         if (withinGrace) return;
       }
-      _loadRoomTrack(track, pb.seq, roomIds, localIds);
+      _loadRoomTrack(track, pb.seq, pb.queueIndex, roomIds, localIds);
     } else {
       _everSynced = true;
       _divergedTrackId = '';
@@ -278,34 +333,52 @@ class RoomPlaybackCoordinator {
   void _loadRoomTrack(
     JamTrack track,
     int seq,
+    int roomQueueIndex,
     List<String> roomIds,
     List<String> localIds,
   ) {
     _loadingTrackId = track.videoId;
+    _loadStartedAt = DateTime.now();
+    final int generation = ++_loadGeneration;
     _markApplying();
     final bool sameQueue = _sameIds(localIds, roomIds) &&
         localIds.contains(track.videoId);
-    final List<Song> songs;
-    if (sameQueue) {
-      songs = playback.queue;
-    } else if (roomIds.isNotEmpty) {
-      final Map<String, Song> localById = <String, Song>{
-        for (final Song s in playback.queue) s.id: s,
-      };
-      songs = jam.queueItems
-          .map((JamTrack t) => localById[t.videoId] ?? t.toSong())
-          .toList();
-    } else {
-      songs = <Song>[track.toSong()];
+    final Map<String, Song> localById = <String, Song>{
+      for (final Song s in playback.queue) s.id: s,
+    };
+    final List<Song> songs = sameQueue
+        ? List<Song>.of(playback.queue)
+        : roomIds.isNotEmpty
+            ? jam.queueItems
+                .map((JamTrack t) => localById[t.videoId] ?? t.toSong())
+                .toList()
+            : <Song>[track.toSong()];
+
+    // A queue frame can be missed on a bad connection. If the room's new
+    // song is not in the list we were handed, put it in instead of playing
+    // whatever happened to be first — the bug that made a room song change
+    // silently fail on some devices. The state frame's queueIndex is the
+    // authoritative needle (duplicated songs no longer resolve to the
+    // first copy).
+    int startIndex = songs.indexWhere((Song s) => s.id == track.videoId);
+    if (roomQueueIndex >= 0 &&
+        roomQueueIndex < songs.length &&
+        songs[roomQueueIndex].id == track.videoId) {
+      startIndex = roomQueueIndex;
     }
-    final int startIndex =
-        songs.indexWhere((Song s) => s.id == track.videoId);
+    if (startIndex < 0) {
+      final int at = roomQueueIndex < 0
+          ? songs.length
+          : roomQueueIndex.clamp(0, songs.length).toInt();
+      songs.insert(at, localById[track.videoId] ?? track.toSong());
+      startIndex = at;
+    }
     unawaited(() async {
+      bool ok = false;
       try {
-        await playback.playQueue(
-          songs,
-          startIndex: startIndex < 0 ? 0 : startIndex,
-        );
+        await playback
+            .playQueue(songs, startIndex: startIndex)
+            .timeout(const Duration(seconds: 20));
         _markApplying();
         final Duration want = jam.positionNow;
         if (want > const Duration(seconds: 1) &&
@@ -318,17 +391,30 @@ class RoomPlaybackCoordinator {
             playback.current?.id == track.videoId) {
           await playback.pause();
         }
-        if (playback.current?.id == track.videoId) {
-          _everSynced = true;
-          // In step as of the state this load was made from: from here
-          // on, a different seq means the room moved (see
-          // _roomMovedSinceSync), with no un-synced gap after a load.
-          _lastFreshSeq = seq;
-        }
+        ok = playback.current?.id == track.videoId &&
+            jam.currentTrack?.videoId == track.videoId;
       } catch (_) {
-        // A failed load is retried by the reconcile loop; nothing to do.
+        // A resolver that never answers must not freeze the room forever:
+        // the reconcile loop retries with the latest state.
+        ok = false;
       }
-      if (_loadingTrackId == track.videoId) _loadingTrackId = null;
+      if (generation != _loadGeneration) return;
+      if (ok) {
+        _everSynced = true;
+        _loadFailed = false;
+        _roomChangedAt = null;
+        _divergedTrackId = '';
+        _divergedAt = null;
+        // In step as of the state this load was made from: from here
+        // on, a different seq means the room moved (see
+        // _roomMovedSinceSync), with no un-synced gap after a load.
+        _lastFreshSeq = seq;
+      } else {
+        _loadFailed = true;
+        _roomChangedAt = DateTime.now();
+      }
+      _loadingTrackId = null;
+      _loadStartedAt = null;
       _markApplying();
     }());
   }
@@ -394,7 +480,10 @@ class RoomPlaybackCoordinator {
   }
 
   void _pushLocalIntent() {
-    if (!jam.isConnected || _isApplying) return;
+    // While the room's new song is still landing here, the old local track
+    // is an echo of the past — reporting it would make the server undo
+    // the very change we are applying.
+    if (!jam.isConnected || _isApplying || _roomChangePending) return;
     final Song? song = playback.current;
     if (song == null) return;
     final DateTime now = DateTime.now();

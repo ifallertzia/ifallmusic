@@ -21,6 +21,23 @@ class NativeBridge {
     await SystemNavigator.pop();
   }
 
+  /// Speaks a short line with the device's built-in assistant voice.
+  ///
+  /// Used for room join/leave announcements ("Alice has joined the room"),
+  /// so the room's social layer is audible without adding a cloud TTS
+  /// dependency or a network round trip. No-op on platforms without the
+  /// native bridge; a missing engine must never break a room.
+  static Future<void> speak(String text) async {
+    if (kIsWeb || !Platform.isAndroid || text.trim().isEmpty) return;
+    try {
+      await _channel.invokeMethod<void>('speak', <String, Object>{
+        'text': text,
+      });
+    } catch (e) {
+      debugPrint('[IfallMusic][Voice] speak failed: $e');
+    }
+  }
+
   static Future<BootSnapshot> bootState() async {
     if (kIsWeb || !Platform.isAndroid) {
       return const BootSnapshot(safeMode: false, fails: 0, sdk: 0);

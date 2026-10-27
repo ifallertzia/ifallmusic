@@ -12,6 +12,10 @@ class FakePartyServer {
 
   final List<Map<String, dynamic>> controlFrames =
       <Map<String, dynamic>>[];
+
+  /// Every decoded client frame, so chat, reaction and receipt tests can
+  /// assert on what the app actually put on the wire.
+  final List<Map<String, dynamic>> allFrames = <Map<String, dynamic>>[];
   final List<Map<String, dynamic>> chatLog = <Map<String, dynamic>>[];
   int chatSeq = 0;
   int playbackSeq = 1;
@@ -137,6 +141,7 @@ class FakePartyServer {
           if (decoded is! Map) return;
           final Map<String, dynamic> frame =
               decoded.cast<String, dynamic>();
+          allFrames.add(frame);
           switch (frame['type']) {
             case 'ping':
               ws.add(jsonEncode(<String, dynamic>{

@@ -520,15 +520,20 @@ class _HomePageState extends State<HomePage> {
                             vertical: 3,
                           ),
                           decoration: BoxDecoration(
-                            color: t.fill2,
+                            color: t.brand.withValues(alpha: 0.16),
                             borderRadius: BorderRadius.circular(999),
+                            border: Border.all(
+                              color: t.brand.withValues(alpha: 0.5),
+                              width: 0.5,
+                            ),
                           ),
                           child: Text(
-                            'Coming soon',
+                            '✦ NEW',
                             style: TextStyle(
                               fontSize: 10.5,
-                              fontWeight: FontWeight.w700,
-                              color: t.text2,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.4,
+                              color: t.brand,
                             ),
                           ),
                         ),
@@ -537,7 +542,8 @@ class _HomePageState extends State<HomePage> {
                     const SizedBox(height: 3),
                     Text(
                       'Start a room, share the code, and everyone hears the '
-                      'same song at the same moment.',
+                      'same song at the same moment — with live chat, replies, '
+                      'reactions, read ticks and voice announcements.',
                       style: TextStyle(
                         fontSize: 13.5,
                         height: 1.35,

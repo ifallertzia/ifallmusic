@@ -1056,7 +1056,9 @@ class _ListenTogetherPageState extends State<ListenTogetherPage> {
         // ----------------------------------------------------------------- chat
         const Padding(
           padding: EdgeInsets.fromLTRB(16, 4, 16, 0),
-          child: RoomChatPanel(height: 360),
+          // More room for the conversation: replies, reactions and the
+          // activity feed all need breathing space.
+          child: RoomChatPanel(height: 560),
         ),
         const SizedBox(height: 20),
 
