@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -66,6 +67,14 @@ void main() {
         displayName: 'Alice',
       );
       expect(await jam.create(), isTrue, reason: jam.error ?? '');
+      // Let the initial syncChat handshake finish before we push server
+      // frames, so the real socket's startup traffic cannot race the test.
+      await untilTrue(
+        () => server.allFrames.any(
+          (Map<String, dynamic> f) => f['type'] == 'syncChat',
+        ),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 60));
     });
 
     tearDown(() async {

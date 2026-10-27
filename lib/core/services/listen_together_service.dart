@@ -1545,6 +1545,10 @@ class JamService extends ChangeNotifier {
     final int seq = (frame['chatSeq'] as num?)?.round() ?? _chatSeq;
     _absorbChatReads(frame['reads']);
     if (frame['snapshot'] == true && frame['messages'] is List) {
+      // A "syncChat" answer can land *after* a live message that arrived
+      // while it was in flight. Its window is older: applying it would
+      // erase that message (and rewind the sequence), so ignore it.
+      if (seq < _chatSeq) return;
       final List<JamChatMessage> fresh = (frame['messages'] as List)
           .whereType<Map>()
           .map((Map m) => JamChatMessage.fromJson(m.cast<String, dynamic>()))
