@@ -1,3 +1,34 @@
+# Sidify 2.11.0
+
+## Movies — HDHub4U joins EonMovies
+
+- **Two catalogs, one Movies tab.** HDHub4U is now a first-class provider next
+  to EonMovies instead of a replacement: browsing (Recommended, Bollywood,
+  Hollywood, …) stays on EonMovies, and the newest HDHub4U titles ride in their
+  own *Premium catalog* rail on the Movies home page.
+- **Search asks both.** Typing a title queries EonMovies and HDHub4U in
+  parallel, so a film that exists in both shows up twice: the EonMovies row
+  exactly as before, and the HDHub4U row underneath it with a gold
+  **PREMIUM** badge. Only the premium row is badged.
+- **A title opens in the catalog it came from.** Every quality, episode group
+  and ZIP pack remembers its provider, so a premium link is always resolved by
+  the premium resolver (HDHub4U → hubcloud / hubdrive → vcloud → Cloudflare
+  Storage, Pixeldrain, FastDL, HubCDN, worker mirrors) and an EonMovies link by
+  the EonMovies one. Watchlist and Recently watched keep that memory across
+  restarts.
+- **Playback starts light and climbs only on failure.** A title now opens at the
+  *lowest* quality it can stream and escalates 480p → 720p → 1080p only when a
+  stream actually fails, skipping mirrors that are dead or that the player
+  cannot seek. The quality menu still lists the best print first, and downloads
+  still default to the best available.
+- **Downloads that used to die now retry themselves.** A failed transfer is
+  re-resolved from scratch — up to three automatic attempts with a short
+  backoff — so a rotated mirror, an expired token or a dead host no longer means
+  a permanent "download failed". Each attempt discards the partial file when the
+  mirror or the filename changed, refuses to patch a different file together,
+  and rejects a transfer that stops short of the advertised size. Season packs
+  unzip episode-by-episode through the same premium resolver.
+
 # Sidify 2.10.0
 
 ## Unreleased — the player talks, downloads post, Movies folds into Search

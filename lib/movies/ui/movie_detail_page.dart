@@ -6,9 +6,9 @@ import 'package:provider/provider.dart';
 import '../../core/services/app_feedback.dart';
 import '../../core/theme/sidify_theme.dart';
 import '../models/movie_models.dart';
-import '../services/eon_movies_service.dart';
 import '../services/movie_download_service.dart';
 import '../services/movie_library_service.dart';
+import '../services/movies_repository.dart';
 import 'movie_downloads_page.dart';
 import 'movie_player_page.dart';
 import 'movie_ui_widgets.dart';
@@ -48,13 +48,16 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
   MoviePost get _currentPost {
     final MovieDetail? detail = _detail;
     if (detail == null) return widget.initialPost;
-    return MoviePost(
+    return widget.initialPost.copyWith(
       title: detail.title,
       link: detail.webUrl,
-      imageUrl: detail.posterUrl.isNotEmpty ? detail.posterUrl : widget.initialPost.imageUrl,
+      imageUrl: detail.posterUrl.isNotEmpty
+          ? detail.posterUrl
+          : widget.initialPost.imageUrl,
       fallbackImageUrl: detail.fallbackPosterUrl,
       badge: detail.isSeries ? 'Series' : 'Movie',
       subtitle: detail.year,
+      provider: detail.provider,
     );
   }
 
@@ -66,8 +69,11 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
       _error = null;
     });
     try {
-      final EonMoviesService svc = context.read<EonMoviesService>();
-      final MovieDetail detail = await svc.fetchDetail(widget.initialPost.link);
+      final MoviesRepository repo = moviesRepositoryOf(context);
+      final MovieDetail detail = await repo.fetchDetail(
+        widget.initialPost.provider,
+        widget.initialPost.link,
+      );
       if (!mounted) return;
       setState(() {
         _detail = detail;
@@ -90,8 +96,8 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
     setState(() => _loadingGroupIds.add(group.id));
 
     try {
-      final EonMoviesService svc = context.read<EonMoviesService>();
-      final MovieEpisodeGroup loaded = await svc.expandEpisodeGroup(group);
+      final MoviesRepository repo = moviesRepositoryOf(context);
+      final MovieEpisodeGroup loaded = await repo.expandEpisodeGroup(group);
       if (!mounted) return null;
       final MovieDetail latest = _detail ?? current;
       MovieEpisodeGroup replaceLoaded(MovieEpisodeGroup g) {
@@ -107,28 +113,7 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
       setState(() {
         _loadingGroupIds.remove(group.id);
         _collapsedGroupIds.remove(group.id);
-        _detail = MovieDetail(
-          title: latest.title,
-          cleanTitle: latest.cleanTitle,
-          type: latest.type,
-          webUrl: latest.webUrl,
-          year: latest.year,
-          releaseDate: latest.releaseDate,
-          backdropUrl: latest.backdropUrl,
-          fallbackBackdropUrl: latest.fallbackBackdropUrl,
-          posterUrl: latest.posterUrl,
-          fallbackPosterUrl: latest.fallbackPosterUrl,
-          languages: latest.languages,
-          languageList: latest.languageList,
-          genres: latest.genres,
-          director: latest.director,
-          qualityBadges: latest.qualityBadges,
-          synopsis: latest.synopsis,
-          defaultSeasonLabel: latest.defaultSeasonLabel,
-          directQualities: latest.directQualities,
-          episodeGroups: updated,
-          relatedPosts: latest.relatedPosts,
-        );
+        _detail = latest.copyWith(episodeGroups: updated);
       });
       return loaded;
     } catch (_) {
@@ -161,10 +146,11 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
       'Cannot play $title online but you can still download it and play offline.';
 
   void _playQualities(MovieDetail detail, List<MovieQualityLink> qualities) {
-    // Playback starts on the *best* stream available, then the player walks
-    // down the list itself if that one is dead.
-    final MovieQualityLink? best = highestPlayableQuality(qualities);
-    if (best == null) {
+    // Playback starts on the *lightest* stream (360p/480p) so a picture is up
+    // almost instantly; the player climbs to the next resolution up when that
+    // stream is dead or unplayable.
+    final MovieQualityLink? start = lowestPlayableQuality(qualities);
+    if (start == null) {
       showAppNotice(
         _offlineLine(
           detail.cleanTitle.isNotEmpty ? detail.cleanTitle : detail.title,
@@ -176,8 +162,8 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
     openOnlineMoviePlayer(
       context,
       detail: detail,
-      quality: best,
-      allQualities: playableQualitiesBestFirst(qualities),
+      quality: start,
+      allQualities: playableQualitiesLowestFirst(qualities),
     );
   }
 

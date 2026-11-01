@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/movie_models.dart';
+import '../models/movie_provider.dart';
 
 class MovieLibraryService extends ChangeNotifier {
   MovieLibraryService(this._prefs) {
@@ -73,6 +74,7 @@ class MovieLibraryService extends ChangeNotifier {
                 fallbackImageUrl: item['fallbackImageUrl'] as String? ?? '',
                 badge: item['badge'] as String? ?? '',
                 subtitle: item['subtitle'] as String? ?? '',
+                provider: MovieProvider.fromId(item['provider']),
               ))
           .where((MoviePost post) => post.link.isNotEmpty)
           .toList();
@@ -92,6 +94,7 @@ class MovieLibraryService extends ChangeNotifier {
                 'fallbackImageUrl': post.fallbackImageUrl,
                 'badge': post.badge,
                 'subtitle': post.subtitle,
+                'provider': post.provider.id,
               })
           .toList()),
     );

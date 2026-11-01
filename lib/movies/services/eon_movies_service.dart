@@ -1,13 +1,15 @@
 import 'dart:convert';
 
 import '../models/movie_models.dart';
+import '../models/movie_provider.dart';
 import 'eon_html_parser.dart';
 import 'movie_http_client.dart';
+import 'movie_source.dart';
 import 'remote_zip.dart';
 
 /// Full client for EonMovies catalog/search/details + Dotflix multi-mirror
 /// direct download URL extraction.
-class EonMoviesService {
+class EonMoviesService implements MovieSource {
   EonMoviesService({
     MovieHttpTransport? transport,
     String initialBaseUrl = defaultBaseUrl,
@@ -34,7 +36,12 @@ class EonMoviesService {
   final Map<String, MovieZipPackListing> _zipListingCache =
       <String, MovieZipPackListing>{};
 
+  @override
   MovieHttpTransport get transport => _transport;
+
+  @override
+  MovieProvider get provider => MovieProvider.eonMovies;
+
   String get baseUrl => _baseUrl;
 
   void setBaseUrl(String next) {
@@ -511,7 +518,7 @@ class EonMoviesService {
   /// layer. Ordinary movie and per-episode links resolve to direct video
   /// files and can be streamed.
   static bool canAttemptOnlinePlayback(MovieQualityLink quality) {
-    return !quality.isZipPack && !quality.isZipEntryEpisode;
+    return movieQualityCanStreamOnline(quality);
   }
 
   /// Filters a download resolution down to candidates that are safe to hand
@@ -519,22 +526,7 @@ class EonMoviesService {
   static List<MovieStreamCandidate> streamableCandidates(
     ResolvedMovieStream resolved,
   ) {
-    final String filename = resolved.filename.trim().toLowerCase();
-    final String mimeType = resolved.mimeType.trim().toLowerCase();
-    if (filename.endsWith('.zip') || mimeType.contains('zip')) {
-      return const <MovieStreamCandidate>[];
-    }
-
-    return List<MovieStreamCandidate>.unmodifiable(
-      resolved.candidates.where((MovieStreamCandidate candidate) {
-        if (candidate.isZip) return false;
-        final Uri? uri = Uri.tryParse(candidate.url.trim());
-        if (uri == null || uri.host.isEmpty) return false;
-        if (uri.scheme != 'http' && uri.scheme != 'https') return false;
-        if (uri.path.toLowerCase().endsWith('.zip')) return false;
-        return true;
-      }),
-    );
+    return streamableMovieCandidates(resolved);
   }
 
   /// Resolves a quality for online playback using the same mirror chain as
@@ -1033,6 +1025,7 @@ class EonMoviesService {
     return '$safe.$ext';
   }
 
+  @override
   void dispose() {
     if (_ownsTransport) {
       _transport.close();

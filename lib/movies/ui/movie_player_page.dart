@@ -12,7 +12,7 @@ import '../../core/services/playback_service.dart';
 import '../../core/theme/sidify_theme.dart';
 import '../../core/utils/track_labels.dart';
 import '../models/movie_models.dart';
-import '../services/eon_movies_service.dart';
+import '../services/movies_repository.dart';
 import '../services/movie_download_service.dart';
 import '../services/movie_quality_order.dart';
 import '../services/movie_seek_runner.dart';
@@ -111,7 +111,7 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
   final List<StreamSubscription<dynamic>> _subscriptions =
       <StreamSubscription<dynamic>>[];
 
-  EonMoviesService? _moviesService;
+  MoviesRepository? _movieRepository;
   MovieDownloadService? _downloadService;
   PlaybackService? _musicPlayback;
 
@@ -232,8 +232,9 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
   void initState() {
     super.initState();
     _availableQualities = _buildAvailableQualities();
-    // Playback always starts on the best stream on offer — not on whatever
-    // row was tapped. The pick drops one step at a time if it is dead.
+    // Playback always starts on the *lightest* stream on offer — not on
+    // whatever row was tapped. 480p opens fast; if that stream is dead or
+    // unplayable the pick climbs one resolution at a time instead of dropping.
     _currentQuality = _availableQualities.isNotEmpty
         ? _availableQualities.first
         : widget.initialQuality;
@@ -298,7 +299,7 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
     if (_providersReady) return;
     _providersReady = true;
 
-    _moviesService = context.read<EonMoviesService>();
+    _movieRepository = moviesRepositoryOf(context);
     _downloadService = context.read<MovieDownloadService>();
     _musicPlayback = context.read<PlaybackService>();
     unawaited(_pauseMusicPlayback());
@@ -336,7 +337,7 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
       ...widget.qualities,
       if (initial != null) initial,
     ];
-    return playableQualitiesBestFirst(source);
+    return playableQualitiesLowestFirst(source);
   }
 
   MaterialVideoControlsThemeData _buildControlsTheme() {
@@ -623,9 +624,9 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
     Duration? start,
     bool autoFallback = false,
   }) async {
-    final EonMoviesService? service = _moviesService;
+    final MoviesRepository? repository = _movieRepository;
     final MovieDetail? detail = widget.detail;
-    if (service == null || detail == null) {
+    if (repository == null || detail == null) {
       _showFatalError('Streaming service is unavailable right now.');
       return;
     }
@@ -646,7 +647,8 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
     }
 
     try {
-      final ResolvedMovieStream resolved = await service.resolvePlaybackStream(
+      final ResolvedMovieStream resolved =
+          await repository.resolvePlaybackStream(
         quality,
         fallbackTitle:
             detail.cleanTitle.isNotEmpty ? detail.cleanTitle : detail.title,
@@ -674,8 +676,8 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
       if (!_isCurrentGeneration(generation)) return;
       _isResolving = false;
       if (autoFallback || !_ready) {
-        // This quality's link is dead (or the page never started): step down
-        // to the next one instead of bothering the person with it.
+        // This quality's link is dead (or the page never started): climb to
+        // the next one instead of bothering the person with it.
         await _advanceToNextQuality(generation: generation);
         return;
       }
@@ -691,7 +693,7 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
     }
   }
 
-  /// True when there is a lower, untried quality to fall back to.
+  /// True when there is a higher, untried quality to climb to.
   MovieQualityLink? _nextQualityAfter(MovieQualityLink? current) {
     if (_availableQualities.isEmpty) return null;
     final int from = current == null
@@ -699,8 +701,8 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
         : _availableQualities.indexWhere(
             (MovieQualityLink q) => q.id == current.id,
           );
-    // Deliberately only *down* the list: 1080p -> 720p -> 480p. Once the
-    // bottom is reached the title is treated as not streamable.
+    // Deliberately only *up* the list: 360p -> 480p -> 720p -> 1080p. Once
+    // the top is reached the title is treated as not streamable.
     for (int i = from + 1; i < _availableQualities.length; i++) {
       if (!_failedQualities.contains(_availableQualities[i].id)) {
         return _availableQualities[i];
@@ -709,7 +711,7 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
     return null;
   }
 
-  /// Marks the current quality dead and tries the next-lower one. When every
+  /// Marks the current quality dead and tries the next-higher one. When every
   /// quality (and every mirror inside it) has failed, the player shows the
   /// honest "download it and watch offline" message instead.
   Future<void> _advanceToNextQuality({required int generation}) async {
@@ -736,7 +738,7 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
   }) async {
     final int? next = _findNextCandidateIndex();
     if (next == null) {
-      // Every mirror of this quality is dead — step down to the next-lower
+      // Every mirror of this quality is dead — climb to the next-higher
       // quality rather than giving up on the title.
       await _advanceToNextQuality(generation: generation);
       return;
@@ -1054,8 +1056,8 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
       return;
     }
 
-    // Retry means retry *everything* again, best quality first: the list of
-    // qualities and mirrors that failed a moment ago is cleared.
+    // Retry means retry *everything* again, from the lightest stream up: the
+    // list of qualities and mirrors that failed a moment ago is cleared.
     _failedQualities.clear();
     _failedCandidates.clear();
     final MovieQualityLink? quality = _availableQualities.isNotEmpty
@@ -1139,7 +1141,7 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
   }
 
   /// The quality the download button should save: the one on screen when
-  /// something is playing, otherwise the best one this title has.
+  /// something is playing, otherwise a playable one for this title.
   MovieQualityLink? get _downloadQuality {
     if (widget.isLocal) return null;
     return _currentQuality ??
@@ -1149,10 +1151,14 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
   }
 
   /// When streaming failed at every quality, the offline copy should still be
-  /// the best one available.
+  /// the best one available (the player starts at the bottom, so the list's
+  /// first entry is no longer the biggest).
   MovieQualityLink? get _bestDownloadQuality {
     if (widget.isLocal) return null;
-    if (_availableQualities.isNotEmpty) return _availableQualities.first;
+    if (_availableQualities.isNotEmpty) {
+      return highestPlayableQuality(_availableQualities) ??
+          _availableQualities.last;
+    }
     return _currentQuality ?? widget.initialQuality;
   }
 
@@ -1646,7 +1652,7 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
                           title: 'Quality',
                         ),
                         for (final MovieQualityLink quality
-                            in _availableQualities)
+                            in playableQualitiesBestFirst(_availableQualities))
                           _settingsOptionTile(
                             t,
                             title: quality.displayQuality,
