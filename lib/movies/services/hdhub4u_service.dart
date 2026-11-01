@@ -658,8 +658,8 @@ class Hdhub4uService implements MovieSource {
     }
 
     final String combined = '$pageBody $vcloudBody';
-    final String pxl = _pxlTarget(combined);
-    if (pxl.isNotEmpty) {
+    final String? pxl = _pxlTarget(combined);
+    if (pxl != null && pxl.isNotEmpty) {
       result.add('Pixeldrain High-Speed', pxl);
     }
 
@@ -923,13 +923,13 @@ class Hdhub4uService implements MovieSource {
       if (res.statusCode >= 200 && res.statusCode < 400) return res;
       if (res.statusCode == 404 && !_mirrorChecked) {
         await _refreshMirror();
-        return _transport.get(_rewriteToMirror(url), headers: merged);
+        return await _transport.get(_rewriteToMirror(url), headers: merged);
       }
       return res;
     } catch (_) {
       if (!_mirrorChecked) {
         await _refreshMirror();
-        return _transport.get(_rewriteToMirror(url), headers: merged);
+        return await _transport.get(_rewriteToMirror(url), headers: merged);
       }
       rethrow;
     }

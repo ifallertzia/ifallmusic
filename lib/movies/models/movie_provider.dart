@@ -1,5 +1,3 @@
-import 'package:flutter/foundation.dart';
-
 /// Which catalog a movie / series result came from.
 ///
 /// Sidify Movies ships two catalogs at once:
@@ -11,7 +9,6 @@ import 'package:flutter/foundation.dart';
 /// The provider travels with every model object — post, detail, quality link,
 /// episode group and download item — so a link is always resolved by the
 /// service that produced it.
-@immutable
 enum MovieProvider {
   eonMovies(id: 'eon', label: 'EonMovies', premium: false),
   hdhub4u(id: 'hdhub', label: 'HDHub4U', premium: true);
