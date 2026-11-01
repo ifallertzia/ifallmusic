@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/theme/sidify_theme.dart';
 import '../models/movie_models.dart';
-import '../services/eon_movies_service.dart';
+import '../services/movies_repository.dart';
 import '../services/movie_catalog_filters.dart';
 import 'movie_detail_page.dart';
 import 'movie_settings_page.dart';
@@ -110,9 +110,9 @@ class _MoviesExplorePageState extends State<MoviesExplorePage> {
       _enriching = false;
     });
     try {
-      final EonMoviesService svc = context.read<EonMoviesService>();
+      final MoviesRepository repo = moviesRepositoryOf(context);
       final List<MoviePost> results =
-          await svc.fetchPosts(category: _category, page: 1);
+          await repo.fetchPosts(category: _category, page: 1);
       if (!mounted || token != _requestToken) return;
       setState(() {
         _posts = results;
@@ -135,9 +135,9 @@ class _MoviesExplorePageState extends State<MoviesExplorePage> {
     final int nextPage = _page + 1;
     final int token = _requestToken;
     try {
-      final EonMoviesService svc = context.read<EonMoviesService>();
+      final MoviesRepository repo = moviesRepositoryOf(context);
       final List<MoviePost> more =
-          await svc.fetchPosts(category: _category, page: nextPage);
+          await repo.fetchPosts(category: _category, page: nextPage);
       if (!mounted || token != _requestToken) return;
       final Set<String> existing = _posts.map((MoviePost p) => p.link).toSet();
       setState(() {
@@ -169,7 +169,7 @@ class _MoviesExplorePageState extends State<MoviesExplorePage> {
       return;
     }
     if (mounted) setState(() => _enriching = true);
-    final EonMoviesService svc = context.read<EonMoviesService>();
+    final MoviesRepository repo = moviesRepositoryOf(context);
     const int batchSize = 4;
     for (int i = 0; i < pending.length; i += batchSize) {
       if (!mounted || token != _enrichToken) return;
@@ -178,8 +178,11 @@ class _MoviesExplorePageState extends State<MoviesExplorePage> {
         for (final MoviePost post in batch)
           () async {
             try {
-              final MovieDetail detail =
-                  await svc.fetchDetail(post.link, autoExpandLimit: 0);
+              final MovieDetail detail = await repo.fetchDetail(
+                post.provider,
+                post.link,
+                autoExpandLimit: 0,
+              );
               _details[post.link] = detail;
             } catch (_) {
               _failedDetails.add(post.link);

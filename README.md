@@ -1,7 +1,7 @@
 # Sidify
 
 Sidify — *Stream beyond limits.* A premium, Apple-Music-style player built with
-Flutter, from `ifallertzia/ifallmusic`. Version **2.10.0** (Android build number is managed by CI).
+Flutter, from `ifallertzia/ifallmusic`. Version **2.11.0** (Android build number is managed by CI).
 
 ## What changed in 2.9
 

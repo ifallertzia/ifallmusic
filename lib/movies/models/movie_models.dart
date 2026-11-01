@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 
+import 'movie_provider.dart';
+
 enum MovieMediaType { movie, series }
 
 enum MovieCategory {
@@ -24,6 +26,7 @@ class MoviePost {
     this.fallbackImageUrl = '',
     this.badge = '',
     this.subtitle = '',
+    this.provider = MovieProvider.eonMovies,
   });
 
   final String title;
@@ -32,6 +35,29 @@ class MoviePost {
   final String fallbackImageUrl;
   final String badge;
   final String subtitle;
+
+  /// Catalog this post came from — decides which service opens it.
+  final MovieProvider provider;
+
+  MoviePost copyWith({
+    String? title,
+    String? link,
+    String? imageUrl,
+    String? fallbackImageUrl,
+    String? badge,
+    String? subtitle,
+    MovieProvider? provider,
+  }) {
+    return MoviePost(
+      title: title ?? this.title,
+      link: link ?? this.link,
+      imageUrl: imageUrl ?? this.imageUrl,
+      fallbackImageUrl: fallbackImageUrl ?? this.fallbackImageUrl,
+      badge: badge ?? this.badge,
+      subtitle: subtitle ?? this.subtitle,
+      provider: provider ?? this.provider,
+    );
+  }
 
   bool get isSeries =>
       badge.toLowerCase().contains('series') ||
@@ -53,6 +79,7 @@ class MovieQualityLink {
     this.seasonLabel = '',
     this.episodeLabel = '',
     this.zipEntryName = '',
+    this.provider = MovieProvider.eonMovies,
   });
 
   final String id;
@@ -74,6 +101,9 @@ class MovieQualityLink {
 
   bool get isZipEntryEpisode => zipEntryName.isNotEmpty;
 
+  /// Catalog that owns [dlUrl] — the resolver is picked from this.
+  final MovieProvider provider;
+
   String get displayQuality {
     if (codec.isNotEmpty &&
         !resolution.toUpperCase().contains(codec.toUpperCase())) {
@@ -94,6 +124,7 @@ class MovieQualityLink {
     String? seasonLabel,
     String? episodeLabel,
     String? zipEntryName,
+    MovieProvider? provider,
   }) {
     return MovieQualityLink(
       id: id ?? this.id,
@@ -107,6 +138,7 @@ class MovieQualityLink {
       seasonLabel: seasonLabel ?? this.seasonLabel,
       episodeLabel: episodeLabel ?? this.episodeLabel,
       zipEntryName: zipEntryName ?? this.zipEntryName,
+      provider: provider ?? this.provider,
     );
   }
 }
@@ -212,6 +244,7 @@ class MovieEpisodeGroup {
     this.qualities = const <MovieQualityLink>[],
     this.nestedGroups = const <MovieEpisodeGroup>[],
     this.isLoaded = false,
+    this.provider = MovieProvider.eonMovies,
   });
 
   final String id;
@@ -224,6 +257,9 @@ class MovieEpisodeGroup {
   final List<MovieQualityLink> qualities;
   final List<MovieEpisodeGroup> nestedGroups;
   final bool isLoaded;
+
+  /// Catalog this season / episode listing belongs to.
+  final MovieProvider provider;
 
   String get fullHeading {
     if (seasonLabel.isNotEmpty && episodeLabel.isNotEmpty) {
@@ -246,6 +282,7 @@ class MovieEpisodeGroup {
     List<MovieQualityLink>? qualities,
     List<MovieEpisodeGroup>? nestedGroups,
     bool? isLoaded,
+    MovieProvider? provider,
   }) {
     return MovieEpisodeGroup(
       id: id ?? this.id,
@@ -258,6 +295,7 @@ class MovieEpisodeGroup {
       qualities: qualities ?? this.qualities,
       nestedGroups: nestedGroups ?? this.nestedGroups,
       isLoaded: isLoaded ?? this.isLoaded,
+      provider: provider ?? this.provider,
     );
   }
 }
@@ -285,6 +323,7 @@ class MovieDetail {
     this.directQualities = const <MovieQualityLink>[],
     this.episodeGroups = const <MovieEpisodeGroup>[],
     this.relatedPosts = const <MoviePost>[],
+    this.provider = MovieProvider.eonMovies,
   });
 
   final String title;
@@ -308,7 +347,58 @@ class MovieDetail {
   final List<MovieEpisodeGroup> episodeGroups;
   final List<MoviePost> relatedPosts;
 
+  /// Catalog that served this title.
+  final MovieProvider provider;
+
   bool get isSeries => type == MovieMediaType.series;
+
+  MovieDetail copyWith({
+    String? title,
+    String? cleanTitle,
+    MovieMediaType? type,
+    String? webUrl,
+    String? year,
+    String? releaseDate,
+    String? backdropUrl,
+    String? fallbackBackdropUrl,
+    String? posterUrl,
+    String? fallbackPosterUrl,
+    String? languages,
+    List<String>? languageList,
+    List<String>? genres,
+    String? director,
+    List<String>? qualityBadges,
+    String? synopsis,
+    String? defaultSeasonLabel,
+    List<MovieQualityLink>? directQualities,
+    List<MovieEpisodeGroup>? episodeGroups,
+    List<MoviePost>? relatedPosts,
+    MovieProvider? provider,
+  }) {
+    return MovieDetail(
+      title: title ?? this.title,
+      cleanTitle: cleanTitle ?? this.cleanTitle,
+      type: type ?? this.type,
+      webUrl: webUrl ?? this.webUrl,
+      year: year ?? this.year,
+      releaseDate: releaseDate ?? this.releaseDate,
+      backdropUrl: backdropUrl ?? this.backdropUrl,
+      fallbackBackdropUrl: fallbackBackdropUrl ?? this.fallbackBackdropUrl,
+      posterUrl: posterUrl ?? this.posterUrl,
+      fallbackPosterUrl: fallbackPosterUrl ?? this.fallbackPosterUrl,
+      languages: languages ?? this.languages,
+      languageList: languageList ?? this.languageList,
+      genres: genres ?? this.genres,
+      director: director ?? this.director,
+      qualityBadges: qualityBadges ?? this.qualityBadges,
+      synopsis: synopsis ?? this.synopsis,
+      defaultSeasonLabel: defaultSeasonLabel ?? this.defaultSeasonLabel,
+      directQualities: directQualities ?? this.directQualities,
+      episodeGroups: episodeGroups ?? this.episodeGroups,
+      relatedPosts: relatedPosts ?? this.relatedPosts,
+      provider: provider ?? this.provider,
+    );
+  }
 }
 
 @immutable
@@ -380,6 +470,8 @@ class MovieDownloadItem {
     this.speedBytesPerSec = 0,
     this.errorMessage = '',
     this.completedAtMs = 0,
+    this.provider = MovieProvider.eonMovies,
+    this.attempts = 0,
   });
 
   final String id;
@@ -410,6 +502,13 @@ class MovieDownloadItem {
   final String errorMessage;
   final int createdAtMs;
   final int completedAtMs;
+
+  /// Catalog the [sourceDlUrl] came from — resume/retry resolves through it.
+  final MovieProvider provider;
+
+  /// How many automatic attempts this download has already used. Persisted so
+  /// a download that keeps failing does not retry forever.
+  final int attempts;
 
   bool get isActive =>
       status == MovieDownloadStatus.resolving ||
@@ -461,6 +560,8 @@ class MovieDownloadItem {
     String? errorMessage,
     int? createdAtMs,
     int? completedAtMs,
+    MovieProvider? provider,
+    int? attempts,
   }) {
     return MovieDownloadItem(
       id: id,
@@ -487,6 +588,8 @@ class MovieDownloadItem {
       errorMessage: errorMessage ?? this.errorMessage,
       createdAtMs: createdAtMs ?? this.createdAtMs,
       completedAtMs: completedAtMs ?? this.completedAtMs,
+      provider: provider ?? this.provider,
+      attempts: attempts ?? this.attempts,
     );
   }
 
@@ -514,6 +617,8 @@ class MovieDownloadItem {
         'errorMessage': errorMessage,
         'createdAtMs': createdAtMs,
         'completedAtMs': completedAtMs,
+        'provider': provider.id,
+        'attempts': attempts,
       };
 
   factory MovieDownloadItem.fromJson(Map<String, dynamic> json) {
@@ -552,6 +657,8 @@ class MovieDownloadItem {
       errorMessage: json['errorMessage']?.toString() ?? '',
       createdAtMs: (json['createdAtMs'] as num?)?.toInt() ?? 0,
       completedAtMs: (json['completedAtMs'] as num?)?.toInt() ?? 0,
+      provider: MovieProvider.fromId(json['provider']),
+      attempts: (json['attempts'] as num?)?.toInt() ?? 0,
     );
   }
 }

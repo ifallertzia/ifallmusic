@@ -13,6 +13,7 @@ import '../../core/services/app_feedback.dart';
 import '../../core/services/native_bridge.dart';
 import '../models/movie_models.dart';
 import 'eon_movies_service.dart';
+import 'movies_repository.dart';
 import 'remote_zip.dart';
 
 class OpenedByteStream {
@@ -42,19 +43,24 @@ typedef ByteStreamOpener = Future<OpenedByteStream> Function({
 class MovieDownloadService extends ChangeNotifier {
   MovieDownloadService._({
     required SharedPreferences prefs,
-    required EonMoviesService moviesService,
+    required MoviesRepository repository,
     Directory? customDirectory,
     ByteStreamOpener? streamOpener,
   })  : _prefs = prefs,
-        _moviesService = moviesService,
+        _repository = repository,
         _customDirectory = customDirectory,
         _streamOpener = streamOpener;
 
   static const String _storageKey = 'saxify.movie_downloads.v1';
   static const int maxConcurrentDownloads = 2;
 
+  /// How many automatic attempts one download may use before it is reported as
+  /// failed. Every attempt re-resolves the link, so a rotated mirror is picked
+  /// up instead of retried forever against the same dead host.
+  static const int maxAutoAttempts = 3;
+
   final SharedPreferences _prefs;
-  final EonMoviesService _moviesService;
+  final MoviesRepository _repository;
   final Directory? _customDirectory;
   final ByteStreamOpener? _streamOpener;
 
@@ -63,19 +69,28 @@ class MovieDownloadService extends ChangeNotifier {
   final Set<String> _runningIds = <String>{};
   final Set<String> _pausedExplicitly = <String>{};
   final Set<String> _canceledExplicitly = <String>{};
+  final Set<String> _retryPending = <String>{};
+  final Map<String, Timer> _retryTimers = <String, Timer>{};
 
   Timer? _persistDebounce;
   bool _disposed = false;
 
+  /// [movies] is the two-catalog repository. [moviesService] is kept as a
+  /// convenience for the widget tests, which only ever need EonMovies.
   static Future<MovieDownloadService> create(
     SharedPreferences prefs, {
-    required EonMoviesService moviesService,
+    MoviesRepository? movies,
+    EonMoviesService? moviesService,
     Directory? customDirectory,
     ByteStreamOpener? streamOpener,
   }) async {
     final MovieDownloadService svc = MovieDownloadService._(
       prefs: prefs,
-      moviesService: moviesService,
+      repository: movies ??
+          MoviesRepository(
+            eon: moviesService,
+            includePremiumProvider: false,
+          ),
       customDirectory: customDirectory,
       streamOpener: streamOpener,
     );
@@ -219,7 +234,7 @@ class MovieDownloadService extends ChangeNotifier {
     }
 
     final Response<ResponseBody> response =
-        await _moviesService.transport.streamDio.get<ResponseBody>(
+        await _repository.transport.streamDio.get<ResponseBody>(
       url,
       cancelToken: cancelToken,
       options: Options(
@@ -282,6 +297,7 @@ class MovieDownloadService extends ChangeNotifier {
           quality.languages.isNotEmpty ? quality.languages : detail.languages,
       sizeLabel: quality.sizeLabel,
       sourceDlUrl: quality.dlUrl,
+      provider: quality.provider,
       mimeType: quality.isZipEntryEpisode
           ? _videoMimeForName(quality.zipEntryName)
           : quality.isZipPack
@@ -300,6 +316,7 @@ class MovieDownloadService extends ChangeNotifier {
   Future<void> pause(String id) async {
     final MovieDownloadItem? current = itemById(id);
     if (current == null || !current.isActive) return;
+    _cancelRetry(id);
     _pausedExplicitly.add(id);
     _cancelTokens.remove(id)?.cancel('Paused by user');
     _runningIds.remove(id);
@@ -316,6 +333,7 @@ class MovieDownloadService extends ChangeNotifier {
   Future<void> resume(String id) async {
     final MovieDownloadItem? current = itemById(id);
     if (current == null) return;
+    _cancelRetry(id);
     _pausedExplicitly.remove(id);
     _canceledExplicitly.remove(id);
     _upsertItem(
@@ -332,6 +350,7 @@ class MovieDownloadService extends ChangeNotifier {
   Future<void> cancel(String id) async {
     final MovieDownloadItem? current = itemById(id);
     if (current == null) return;
+    _cancelRetry(id);
     _canceledExplicitly.add(id);
     _cancelTokens.remove(id)?.cancel('Canceled by user');
     _runningIds.remove(id);
@@ -358,6 +377,7 @@ class MovieDownloadService extends ChangeNotifier {
 
   Future<void> remove(String id, {bool deleteFile = true}) async {
     final MovieDownloadItem? current = itemById(id);
+    _cancelRetry(id);
     _canceledExplicitly.add(id);
     _cancelTokens.remove(id)?.cancel('Removed');
     _runningIds.remove(id);
@@ -423,7 +443,8 @@ class MovieDownloadService extends ChangeNotifier {
       MovieDownloadItem? next;
       for (final MovieDownloadItem item in _items) {
         if (item.status == MovieDownloadStatus.queued &&
-            !_runningIds.contains(item.id)) {
+            !_runningIds.contains(item.id) &&
+            !_retryPending.contains(item.id)) {
           next = item;
           break;
         }
@@ -453,30 +474,32 @@ class MovieDownloadService extends ChangeNotifier {
     );
 
     try {
+      final MovieDownloadItem snapshot = itemById(id) ?? current;
       final MovieQualityLink linkSpec = MovieQualityLink(
         id: id.replaceFirst('mdl_', ''),
-        rawLabel: current.qualityLabel,
-        resolution: current.qualityLabel,
-        sizeLabel: current.sizeLabel,
-        dlUrl: current.sourceDlUrl,
-        languages: current.languages,
-        isZipPack: current.isZip,
-        seasonLabel: current.seasonLabel,
-        episodeLabel: current.episodeLabel,
-        zipEntryName: current.zipEntryName,
+        rawLabel: snapshot.qualityLabel,
+        resolution: snapshot.qualityLabel,
+        sizeLabel: snapshot.sizeLabel,
+        dlUrl: snapshot.sourceDlUrl,
+        languages: snapshot.languages,
+        isZipPack: snapshot.isZip,
+        seasonLabel: snapshot.seasonLabel,
+        episodeLabel: snapshot.episodeLabel,
+        zipEntryName: snapshot.zipEntryName,
+        provider: snapshot.provider,
       );
 
       // Episode-wise download out of a season ZIP pack: fetch only this
       // episode's byte window from the remote ZIP, then extract it locally.
-      if (current.isZipEntryEpisode) {
+      if (snapshot.isZipEntryEpisode) {
         await _executeZipEntryDownload(id, linkSpec);
         return;
       }
 
       final ResolvedMovieStream resolved =
-          await _moviesService.resolveDownloadStream(
+          await _repository.resolveDownloadStream(
         linkSpec,
-        fallbackTitle: current.movieTitle,
+        fallbackTitle: snapshot.movieTitle,
       );
 
       if (_pausedExplicitly.contains(id) || _canceledExplicitly.contains(id)) {
@@ -494,9 +517,17 @@ class MovieDownloadService extends ChangeNotifier {
 
       final Directory dir = await _resolveMoviesDir();
       current = itemById(id)!;
-      final String finalName = _sanitizeFileName(
-        current.fileName.isNotEmpty ? current.fileName : resolved.filename,
+      // A resumable `.part` is only resumed when the file name did not change:
+      // leftover bytes from a different release would corrupt the result.
+      final String resolvedName = _sanitizeFileName(
+        current.fileName.isNotEmpty && current.savedPath.isNotEmpty
+            ? current.fileName
+            : resolved.filename,
       );
+      final String finalName = current.fileName.isNotEmpty &&
+              current.savedPath.isNotEmpty
+          ? current.fileName
+          : resolvedName;
       final String targetPath = '${dir.path}/$finalName';
       final File partFile = File('$targetPath.part');
 
@@ -512,27 +543,46 @@ class MovieDownloadService extends ChangeNotifier {
 
       Object? lastServerError;
       bool finished = false;
+      bool partialWritten = false;
 
       for (final MovieStreamCandidate candidate in resolved.candidates) {
         if (_pausedExplicitly.contains(id) || _canceledExplicitly.contains(id)) {
           break;
         }
-        try {
-          await _streamSingleCandidate(
-            id: id,
-            candidate: candidate,
-            partFile: partFile,
-            finalPath: targetPath,
-          );
-          finished = true;
-          break;
-        } catch (err) {
+        // Two different mirrors rarely carry byte-identical files. When the
+        // previous one already wrote a partial file, drop it instead of
+        // gluing half of one release to half of another.
+        if (partialWritten) {
+          await _discardPart(partFile);
+          partialWritten = false;
+        }
+        for (int attempt = 0; attempt < 2; attempt++) {
           if (_pausedExplicitly.contains(id) ||
               _canceledExplicitly.contains(id)) {
             break;
           }
-          lastServerError = err;
+          try {
+            await _streamSingleCandidate(
+              id: id,
+              candidate: candidate,
+              partFile: partFile,
+              finalPath: targetPath,
+            );
+            finished = true;
+            break;
+          } catch (err) {
+            if (_pausedExplicitly.contains(id) ||
+                _canceledExplicitly.contains(id)) {
+              break;
+            }
+            lastServerError = err;
+            partialWritten = partFile.existsSync() && partFile.lengthSync() > 0;
+            // Retrying the same mirror only makes sense while it kept some of
+            // the bytes: a plain 403/404 will not heal on a second attempt.
+            if (!partialWritten) break;
+          }
         }
+        if (finished) break;
       }
 
       if (!finished &&
@@ -541,29 +591,78 @@ class MovieDownloadService extends ChangeNotifier {
         throw lastServerError ??
             StateError('All download mirrors returned an error');
       }
-    } catch (_) {
+    } catch (err) {
       if (!_pausedExplicitly.contains(id) && !_canceledExplicitly.contains(id)) {
-        final MovieDownloadItem? latest = itemById(id);
-        if (latest != null) {
-          _upsertItem(
-            latest.copyWith(
-              status: MovieDownloadStatus.failed,
-              speedBytesPerSec: 0,
-              errorMessage: 'Download failed. Please try again.',
-            ),
-            persistImmediate: true,
-          );
-          showAppNotice(
-            'Download failed: ${latest.movieTitle} — please try again.',
-            duration: const Duration(seconds: 2),
-          );
-        }
+        _handleDownloadFailure(id, err);
       }
     } finally {
       _cancelTokens.remove(id);
       _runningIds.remove(id);
       _pumpQueue();
     }
+  }
+
+  /// Reports a failed attempt, or quietly queues the next automatic one.
+  ///
+  /// Most download failures are a rotated mirror or a host that refuses one
+  /// request, so the default is to try again — with a fresh link resolve — up
+  /// to [maxAutoAttempts] times before telling the person it failed.
+  void _handleDownloadFailure(String id, Object error) {
+    final MovieDownloadItem? latest = itemById(id);
+    if (latest == null) return;
+    final int attempts = latest.attempts + 1;
+    if (attempts < maxAutoAttempts) {
+      _upsertItem(
+        latest.copyWith(
+          status: MovieDownloadStatus.queued,
+          attempts: attempts,
+          errorMessage: '',
+          speedBytesPerSec: 0,
+        ),
+        persistImmediate: true,
+      );
+      _scheduleRetry(id, attempts);
+      return;
+    }
+    _upsertItem(
+      latest.copyWith(
+        status: MovieDownloadStatus.failed,
+        attempts: attempts,
+        speedBytesPerSec: 0,
+        errorMessage: 'Download failed. Tap retry to try again.',
+      ),
+      persistImmediate: true,
+    );
+    showAppNotice(
+      'Download failed: ${latest.movieTitle} — tap retry to try again.',
+      duration: const Duration(seconds: 3),
+    );
+  }
+
+  void _scheduleRetry(String id, int attempts) {
+    _cancelRetry(id);
+    _retryPending.add(id);
+    final Duration delay = Duration(seconds: attempts * 6);
+    _retryTimers[id] = Timer(delay, () {
+      _retryTimers.remove(id);
+      _retryPending.remove(id);
+      if (_disposed) return;
+      final MovieDownloadItem? item = itemById(id);
+      if (item == null) return;
+      if (item.status != MovieDownloadStatus.queued) return;
+      _pumpQueue();
+    });
+  }
+
+  void _cancelRetry(String id) {
+    _retryTimers.remove(id)?.cancel();
+    _retryPending.remove(id);
+  }
+
+  Future<void> _discardPart(File partFile) async {
+    try {
+      if (partFile.existsSync()) await partFile.delete();
+    } catch (_) {}
   }
 
   /// Episode-wise download from a season ZIP pack.
@@ -582,7 +681,7 @@ class MovieDownloadService extends ChangeNotifier {
     if (current == null) return;
 
     final ({MovieStreamCandidate candidate, MovieZipEpisode episode}) prep =
-        await _moviesService.prepareZipEpisodeDownload(
+        await _repository.prepareZipEpisodeDownload(
       linkSpec,
       fallbackTitle: current.movieTitle,
     );
@@ -912,6 +1011,14 @@ class MovieDownloadService extends ChangeNotifier {
     if (received < 1024 && totalBytes <= 0) {
       throw StateError('Downloaded file from ${candidate.server} was empty');
     }
+    // A truncated transfer used to be renamed into place and marked complete,
+    // which produced files that would not open. Refuse to finish short of the
+    // announced size so the retry ladder can resume from the `.part`.
+    if (totalBytes > 0 && received < totalBytes) {
+      throw StateError(
+        '${candidate.server} sent only $received of $totalBytes bytes',
+      );
+    }
 
     final File finalFile = File(finalPath);
     if (finalFile.existsSync()) {
@@ -940,6 +1047,11 @@ class MovieDownloadService extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _persistDebounce?.cancel();
+    for (final Timer timer in _retryTimers.values) {
+      timer.cancel();
+    }
+    _retryTimers.clear();
+    _retryPending.clear();
     for (final CancelToken token in _cancelTokens.values) {
       token.cancel('Service disposed');
     }

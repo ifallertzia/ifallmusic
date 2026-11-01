@@ -40,8 +40,10 @@ import 'ui/settings/update_dialog.dart';
 import 'ui/rooms/room_chat_launcher.dart';
 import 'core/theme/sidify_theme.dart';
 import 'movies/services/eon_movies_service.dart';
+import 'movies/services/hdhub4u_service.dart';
 import 'movies/services/movie_download_service.dart';
 import 'movies/services/movie_library_service.dart';
+import 'movies/services/movies_repository.dart';
 import 'services/lyrics_service.dart';
 import 'ui/onboarding/welcome_page.dart';
 import 'ui/boot/boot_screen.dart';
@@ -156,10 +158,17 @@ Future<AppBoot> _initializeApp() async {
     prefs: prefs,
   );
   final EonMoviesService moviesService = EonMoviesService();
+  // The premium Movies & Series catalog (HDHub4U) rides beside EonMovies.
+  // Search merges both; browsing stays on the catalog that has the sections.
+  final Hdhub4uService premiumMoviesService = Hdhub4uService();
+  final MoviesRepository moviesRepository = MoviesRepository(
+    eon: moviesService,
+    hdhub4u: premiumMoviesService,
+  );
   final MovieDownloadService movieDownloads =
       await MovieDownloadService.create(
     prefs,
-    moviesService: moviesService,
+    movies: moviesRepository,
   );
   final MovieLibraryService movieLibrary = MovieLibraryService(prefs);
 
@@ -254,6 +263,7 @@ Future<AppBoot> _initializeApp() async {
     artists: artists,
     musicDownloads: musicDownloads,
     moviesService: moviesService,
+    moviesRepository: moviesRepository,
     movieDownloads: movieDownloads,
     movieLibrary: movieLibrary,
     downloadNotifications: downloadNotifications,
@@ -308,6 +318,7 @@ class AppBoot {
     required this.artists,
     required this.musicDownloads,
     required this.moviesService,
+    required this.moviesRepository,
     required this.movieDownloads,
     required this.movieLibrary,
     required this.downloadNotifications,
@@ -329,6 +340,7 @@ class AppBoot {
   final ArtistService artists;
   final MusicDownloadService musicDownloads;
   final EonMoviesService moviesService;
+  final MoviesRepository moviesRepository;
   final MovieDownloadService movieDownloads;
   final MovieLibraryService movieLibrary;
 
@@ -715,6 +727,9 @@ class _SidifyAppState extends State<SidifyApp> with WidgetsBindingObserver {
         ),
         Provider<EonMoviesService>.value(
           value: boot.moviesService,
+        ),
+        Provider<MoviesRepository>.value(
+          value: boot.moviesRepository,
         ),
         ChangeNotifierProvider<HomeCatalog>(
           create: (_) => HomeCatalog(

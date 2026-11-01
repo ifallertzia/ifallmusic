@@ -1,5 +1,5 @@
 import '../models/movie_models.dart';
-import 'eon_movies_service.dart';
+import 'movie_source.dart';
 
 /// Numeric resolution rank (e.g. `720p` -> 720); unknown labels sort last.
 int movieQualityRank(MovieQualityLink quality) {
@@ -10,9 +10,7 @@ int movieQualityRank(MovieQualityLink quality) {
 }
 
 /// The numeric height alone, with unknown labels treated as "no idea" (0)
-/// instead of "enormous". Sorting *down* with [movieQualityRank] would put
-/// `WEB-DL` and other unlabelled rows above real 1080p, which is exactly the
-/// wrong pick for the first stream to try.
+/// instead of "enormous".
 int movieQualityHeight(MovieQualityLink quality) {
   return int.tryParse(
         RegExp(r'\d+').firstMatch(quality.resolution)?.group(0) ?? '',
@@ -21,10 +19,13 @@ int movieQualityHeight(MovieQualityLink quality) {
 }
 
 /// Deduplicated subset of [qualities] the online player can attempt.
+///
+/// The rule lives in [movieQualityCanStreamOnline] so both catalogs (EonMovies
+/// and the premium HDHub4U source) behave identically.
 List<MovieQualityLink> playableQualitiesOf(List<MovieQualityLink> qualities) {
   final Map<String, MovieQualityLink> byId = <String, MovieQualityLink>{};
   for (final MovieQualityLink item in qualities) {
-    if (EonMoviesService.canAttemptOnlinePlayback(item)) {
+    if (movieQualityCanStreamOnline(item)) {
       byId.putIfAbsent(item.id, () => item);
     }
   }
@@ -36,8 +37,7 @@ List<MovieQualityLink> playableQualitiesOf(List<MovieQualityLink> qualities) {
 List<MovieQualityLink> playableQualitiesBestFirst(
   List<MovieQualityLink> qualities,
 ) {
-  final List<MovieQualityLink> options =
-      playableQualitiesOf(qualities).toList();
+  final List<MovieQualityLink> options = playableQualitiesOf(qualities).toList();
   final List<MovieQualityLink> ordered = <MovieQualityLink>[];
   for (final MovieQualityLink quality in options) {
     int insertAt = ordered.length;
@@ -52,18 +52,27 @@ List<MovieQualityLink> playableQualitiesBestFirst(
   return List<MovieQualityLink>.unmodifiable(ordered);
 }
 
-/// Highest streamable quality — what playback starts on. Every fallback then
-/// walks *down* this list, so a dead 1080p mirror lands on 720p, not 480p.
+/// Playable qualities ordered smallest first: 360p → 480p → 720p → 1080p.
+///
+/// This is the order the player walks: playback *starts* on the lightest
+/// stream that is likely to open instantly and climbs to the next resolution
+/// up when that one is dead. Ties keep the catalog's own order.
+List<MovieQualityLink> playableQualitiesLowestFirst(
+  List<MovieQualityLink> qualities,
+) {
+  final List<MovieQualityLink> best = playableQualitiesBestFirst(qualities);
+  return List<MovieQualityLink>.unmodifiable(best.reversed.toList());
+}
+
+/// Highest streamable quality — the one a download button should save when the
+/// person did not pick a specific row.
 MovieQualityLink? highestPlayableQuality(List<MovieQualityLink> qualities) {
   final List<MovieQualityLink> ordered = playableQualitiesBestFirst(qualities);
   return ordered.isEmpty ? null : ordered.first;
 }
 
-/// Lowest streamable quality. Kept as the "is anything streamable here?"
-/// probe and for callers that deliberately want the smallest stream.
+/// Lowest streamable quality — what online playback starts on.
 MovieQualityLink? lowestPlayableQuality(List<MovieQualityLink> qualities) {
-  final List<MovieQualityLink> options = playableQualitiesOf(qualities).toList()
-    ..sort((MovieQualityLink a, MovieQualityLink b) =>
-        movieQualityRank(a).compareTo(movieQualityRank(b)));
-  return options.isEmpty ? null : options.first;
+  final List<MovieQualityLink> ordered = playableQualitiesLowestFirst(qualities);
+  return ordered.isEmpty ? null : ordered.first;
 }

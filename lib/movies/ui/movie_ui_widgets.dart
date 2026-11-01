@@ -5,9 +5,10 @@ import 'package:provider/provider.dart';
 import '../../core/services/app_feedback.dart';
 import '../../core/theme/sidify_theme.dart';
 import '../models/movie_models.dart';
-import '../services/eon_movies_service.dart';
 import '../services/movie_download_service.dart';
 import '../services/movie_quality_order.dart';
+import '../services/movie_source.dart';
+import '../services/movies_repository.dart';
 import 'movie_downloads_page.dart';
 import 'movie_player_page.dart';
 
@@ -184,6 +185,53 @@ class MovieDownloadsActionButton extends StatelessWidget {
 }
 
 /// Poster grid card shared by Movies Home, Explore and related shelves.
+/// The little gold *PREMIUM* chip shown under premium-catalog results.
+///
+/// Search lists both catalogs at once; the HDHub4U row is the premium one and
+/// says so, while the normal EonMovies row stays plain.
+class PremiumProviderBadge extends StatelessWidget {
+  const PremiumProviderBadge({super.key, this.compact = false});
+
+  final bool compact;
+
+  static const Color gold = Color(0xFFE7B84B);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 5 : 7,
+        vertical: compact ? 1.5 : 3,
+      ),
+      decoration: BoxDecoration(
+        color: gold.withValues(alpha: 0.16),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: gold.withValues(alpha: 0.55)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Icon(
+            Icons.workspace_premium_rounded,
+            size: compact ? 10 : 12,
+            color: gold,
+          ),
+          SizedBox(width: compact ? 3 : 4),
+          Text(
+            'PREMIUM',
+            style: TextStyle(
+              fontSize: compact ? 7.5 : 9,
+              letterSpacing: 0.6,
+              fontWeight: FontWeight.w800,
+              color: gold,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class MovieGridCard extends StatelessWidget {
   const MovieGridCard({super.key, required this.post, required this.onTap});
 
@@ -246,6 +294,15 @@ class MovieGridCard extends StatelessWidget {
               style: SidifyText.caption(t.text2),
             ),
           ],
+          // The premium catalog is marked on its own row; the normal catalog
+          // row above stays exactly as it was.
+          if (post.provider.premium) ...<Widget>[
+            const SizedBox(height: 4),
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: PremiumProviderBadge(compact: true),
+            ),
+          ],
         ],
       ),
     );
@@ -270,7 +327,7 @@ class MovieQualityDownloadTile extends StatelessWidget {
   /// should not be passed here.
   final List<MovieQualityLink> allQualities;
 
-  bool get _canWatch => EonMoviesService.canAttemptOnlinePlayback(quality);
+  bool get _canWatch => movieQualityCanStreamOnline(quality);
 
   List<MovieQualityLink> get _watchQualities {
     final List<MovieQualityLink> source = allQualities.isNotEmpty
@@ -1064,8 +1121,8 @@ class _ZipPackOptionsSheetState extends State<_ZipPackOptionsSheet> {
       _error = null;
     });
     try {
-      final EonMoviesService svc = context.read<EonMoviesService>();
-      final MovieZipPackListing listing = await svc.listZipPackEpisodes(
+      final MoviesRepository repo = moviesRepositoryOf(context);
+      final MovieZipPackListing listing = await repo.listZipPackEpisodes(
         widget.quality,
         fallbackTitle: widget.detail.cleanTitle,
       );
@@ -1102,8 +1159,8 @@ class _ZipPackOptionsSheetState extends State<_ZipPackOptionsSheet> {
   Future<void> _downloadEpisode(MovieZipEpisode episode) async {
     final MovieDownloadService dlService =
         context.read<MovieDownloadService>();
-    final MovieQualityLink epQuality =
-        EonMoviesService.qualityForZipEpisode(widget.quality, episode);
+    final MovieQualityLink epQuality = moviesRepositoryOf(context)
+        .qualityForZipEpisode(widget.quality, episode);
     await dlService.enqueueDownload(
       detail: widget.detail,
       quality: epQuality,
@@ -1289,8 +1346,8 @@ class _ZipPackOptionsSheetState extends State<_ZipPackOptionsSheet> {
     MovieZipEpisode episode,
     MovieDownloadService dlService,
   ) {
-    final MovieQualityLink epQuality =
-        EonMoviesService.qualityForZipEpisode(widget.quality, episode);
+    final MovieQualityLink epQuality = moviesRepositoryOf(context)
+        .qualityForZipEpisode(widget.quality, episode);
     final MovieDownloadItem? existing =
         dlService.itemById('mdl_${epQuality.id}');
 

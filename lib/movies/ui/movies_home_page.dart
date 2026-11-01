@@ -5,7 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/theme/sidify_theme.dart';
 import '../models/movie_models.dart';
-import '../services/eon_movies_service.dart';
+import '../services/movies_repository.dart';
 import 'movie_detail_page.dart';
 import 'movie_settings_page.dart';
 import 'movie_ui_widgets.dart';
@@ -45,6 +45,11 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
   bool _loadingMore = false;
   String? _error;
   List<MoviePost> _posts = <MoviePost>[];
+
+  /// Latest tiles from the premium HDHub4U catalog, shown as their own rail
+  /// above the main grid while browsing (not while searching — search mixes
+  /// both catalogs into one list instead).
+  List<MoviePost> _premiumPosts = <MoviePost>[];
   int _requestToken = 0;
 
   @override
@@ -113,10 +118,10 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
     });
 
     try {
-      final EonMoviesService svc = context.read<EonMoviesService>();
+      final MoviesRepository repo = moviesRepositoryOf(context);
       final List<MoviePost> results = _activeQuery.isNotEmpty
-          ? await svc.searchPosts(query: _activeQuery, page: 1)
-          : await svc.fetchPosts(category: _category, page: 1);
+          ? await repo.search(query: _activeQuery, page: 1)
+          : await repo.fetchPosts(category: _category, page: 1);
 
       if (!mounted || token != _requestToken) return;
       setState(() {
@@ -124,6 +129,11 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
         _hasMore = results.length >= 20;
         _loading = false;
       });
+      if (_activeQuery.isEmpty) {
+        unawaited(_loadPremium(category: _category, token: token));
+      } else if (_premiumPosts.isNotEmpty) {
+        setState(() => _premiumPosts = <MoviePost>[]);
+      }
     } catch (e) {
       if (!mounted || token != _requestToken) return;
       setState(() {
@@ -133,6 +143,21 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
     }
   }
 
+  /// Premium catalog rail. Failure is silent: the main EonMovies grid above it
+  /// is what the page is really about.
+  Future<void> _loadPremium({
+    required MovieCategory category,
+    required int token,
+  }) async {
+    try {
+      final MoviesRepository repo = moviesRepositoryOf(context);
+      final List<MoviePost> premium =
+          await repo.fetchPremiumPosts(category: category, page: 1);
+      if (!mounted || token != _requestToken) return;
+      setState(() => _premiumPosts = premium);
+    } catch (_) {}
+  }
+
   Future<void> _loadNextPage() async {
     if (_loading || _loadingMore || !_hasMore) return;
     setState(() => _loadingMore = true);
@@ -140,10 +165,10 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
     final int token = _requestToken;
 
     try {
-      final EonMoviesService svc = context.read<EonMoviesService>();
+      final MoviesRepository repo = moviesRepositoryOf(context);
       final List<MoviePost> more = _activeQuery.isNotEmpty
-          ? await svc.searchPosts(query: _activeQuery, page: nextPage)
-          : await svc.fetchPosts(category: _category, page: nextPage);
+          ? await repo.search(query: _activeQuery, page: nextPage)
+          : await repo.fetchPosts(category: _category, page: nextPage);
 
       if (!mounted || token != _requestToken) return;
       final Set<String> existingLinks =
@@ -323,6 +348,10 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
                 ),
               ),
             ),
+            if (_premiumPosts.isNotEmpty && _activeQuery.isEmpty)
+              SliverToBoxAdapter(
+                child: _PremiumRail(posts: _premiumPosts),
+              ),
             if (_loading)
               SliverFillRemaining(
                 hasScrollBody: false,
@@ -416,6 +445,93 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Horizontal rail of the newest premium-catalog titles, each card carrying
+/// the gold PREMIUM chip.
+class _PremiumRail extends StatelessWidget {
+  const _PremiumRail({required this.posts});
+
+  final List<MoviePost> posts;
+
+  @override
+  Widget build(BuildContext context) {
+    final SidifyTokens t = context.sidify;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
+          child: Row(
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  'Premium catalog',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: SidifyText.title(t.text),
+                ),
+              ),
+              const SizedBox(width: 8),
+              const PremiumProviderBadge(),
+            ],
+          ),
+        ),
+        SizedBox(
+          height: 232,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            itemCount: posts.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 11),
+            itemBuilder: (BuildContext context, int index) {
+              final MoviePost post = posts[index];
+              return GestureDetector(
+                onTap: () => openMovieDetailPage(context, post),
+                child: SizedBox(
+                  width: 124,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Expanded(
+                        child: MoviePosterImage(
+                          imageUrl: post.imageUrl,
+                          fallbackUrl: post.fallbackImageUrl,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        post.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: SidifyText.label(t.text),
+                      ),
+                      if (post.subtitle.isNotEmpty) ...<Widget>[
+                        const SizedBox(height: 2),
+                        Text(
+                          post.subtitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: SidifyText.caption(t.text2),
+                        ),
+                      ],
+                      const SizedBox(height: 4),
+                      const Align(
+                        alignment: Alignment.centerLeft,
+                        child: PremiumProviderBadge(compact: true),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 16),
+      ],
     );
   }
 }
