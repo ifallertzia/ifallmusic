@@ -99,7 +99,7 @@ class _LocalVideosPageState extends State<LocalVideosPage> {
         status: MovieDownloadStatus.completed,
         createdAtMs: video.dateAdded * 1000,
         savedPath: video.path,
-        fileName: video.path.split('/').last,
+        fileName: scrubSourceNames(video.path.split('/').last),
         mimeType: video.mimeType.isNotEmpty ? video.mimeType : 'video/mp4',
         totalBytes: video.size,
         downloadedBytes: video.size,

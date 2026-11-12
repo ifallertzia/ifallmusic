@@ -5,6 +5,7 @@ import 'package:html/parser.dart' as html_parser;
 
 import '../models/movie_models.dart';
 import '../models/movie_provider.dart';
+import 'movie_rating.dart';
 import 'movie_text_scrub.dart';
 
 /// One link found on an HDHub4U title page, already labelled with everything
@@ -708,6 +709,7 @@ abstract final class Hdhub4uHtmlParser {
       directQualities: directQualities,
       episodeGroups: groups,
       provider: MovieProvider.hdhub4u,
+      rating: extractMovieRatingFromText(bodyText),
     );
   }
 

@@ -1,10 +1,12 @@
 package com.ifallmusic.app
 
 import android.app.Activity
+import android.app.PictureInPictureParams
 import android.content.ClipData
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.media.audiofx.EnvironmentalReverb
 import android.media.audiofx.Equalizer
 import android.media.audiofx.Virtualizer
@@ -14,6 +16,7 @@ import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
 import android.speech.tts.TextToSpeech
+import android.util.Rational
 import androidx.core.content.FileProvider
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -91,6 +94,15 @@ class SaxifyBridge(private val activity: Activity) {
                     )
                     result.success(null)
                 }
+                "pipSupported" -> result.success(pipSupported())
+                "inPip" -> result.success(inPip())
+                "enterPip" -> result.success(
+                    enterPip(
+                        call.argument<Int>("width") ?: 16,
+                        call.argument<Int>("height") ?: 9,
+                    )
+                )
+                "openCastSettings" -> result.success(openCastSettings())
                 "takeDeepLink" -> result.success(DeepLinkInbox.take())
                 "openContent" -> {
                     openContent(
@@ -595,6 +607,66 @@ class SaxifyBridge(private val activity: Activity) {
             putExtra(Intent.EXTRA_SUBJECT, title)
         }
         activity.startActivity(Intent.createChooser(intent, title))
+    }
+
+    // ---- Movie player: picture-in-picture and the system Cast screen --------
+
+    private fun pipSupported(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
+        return try {
+            activity.packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun inPip(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return false
+        return try {
+            activity.isInPictureInPictureMode
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /// Shrinks the activity into a floating window shaped like the video.
+    /// Returns false when the device (or the user's settings) does not allow
+    /// it, so Dart can say so instead of showing a button that does nothing.
+    private fun enterPip(width: Int, height: Int): Boolean {
+        if (!pipSupported()) return false
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
+        return try {
+            val w = if (width > 0) width else 16
+            val h = if (height > 0) height else 9
+            // Android only accepts shapes between 1:2.39 and 2.39:1.
+            val ratio = (w.toDouble() / h.toDouble()).coerceIn(0.42, 2.38)
+            val params = PictureInPictureParams.Builder()
+                .setAspectRatio(Rational((ratio * 1000).toInt(), 1000))
+                .build()
+            activity.enterPictureInPictureMode(params)
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /// Opens Android's own "Cast" screen, where the phone's display — and so
+    /// the video playing on it — is mirrored to a TV or Chromecast.
+    private fun openCastSettings(): Boolean {
+        val actions = listOf(
+            "android.settings.CAST_SETTINGS",
+            "android.settings.WIFI_DISPLAY_SETTINGS",
+        )
+        for (action in actions) {
+            try {
+                activity.startActivity(
+                    Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+                return true
+            } catch (e: Exception) {
+                // This device names the screen differently: try the next one.
+            }
+        }
+        return false
     }
 
     private fun openContent(raw: String, mime: String) {

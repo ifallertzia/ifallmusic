@@ -7,15 +7,27 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:provider/provider.dart';
 
+import 'package:url_launcher/url_launcher.dart';
+
+import '../../config/branding.dart';
 import '../../core/services/app_feedback.dart';
+import '../../core/services/native_bridge.dart';
 import '../../core/services/playback_service.dart';
 import '../../core/theme/sidify_theme.dart';
 import '../../core/utils/track_labels.dart';
 import '../models/movie_models.dart';
 import '../services/movies_repository.dart';
 import '../services/movie_download_service.dart';
+import '../services/movie_library_service.dart';
 import '../services/movie_quality_order.dart';
+import '../services/movie_resume_store.dart';
 import '../services/movie_seek_runner.dart';
+import '../services/movie_text_scrub.dart';
+import 'movie_detail_page.dart';
+import 'player/movie_player_controls.dart';
+import 'player/movie_player_info.dart';
+import 'player/movie_player_sheets.dart';
+import 'player/movie_seek_bar.dart';
 
 /// Opens the in-app streaming player for a movie or per-episode quality.
 ///
@@ -81,8 +93,17 @@ class MoviePlayerPage extends StatefulWidget {
   State<MoviePlayerPage> createState() => _MoviePlayerPageState();
 }
 
-class _MoviePlayerPageState extends State<MoviePlayerPage> {
+/// The player page.
+///
+/// One [Player] and one [Video] live for as long as the page does. Portrait
+/// (video on top, the title's details below) and landscape (video edge to
+/// edge) are two arrangements of the same widgets, so turning the phone or
+/// pressing Fullscreen never reopens the stream: position, speed, quality,
+/// audio and subtitle choices all carry over untouched.
+class _MoviePlayerPageState extends State<MoviePlayerPage>
+    with WidgetsBindingObserver {
   static const List<double> _speeds = <double>[
+    0.25,
     0.5,
     0.75,
     1.0,
@@ -94,12 +115,56 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
 
   late final Player _player;
   late final VideoController _controller;
-  late final MaterialVideoControlsThemeData _controlsTheme;
 
   final GlobalKey<VideoState> _videoKey = GlobalKey<VideoState>();
   final ValueNotifier<String> _statusText =
       ValueNotifier<String>('Preparing player…');
   final ValueNotifier<bool> _buffering = ValueNotifier<bool>(false);
+
+  /// Controls locked: owned here so the system back button respects it too.
+  final ValueNotifier<bool> _locked = ValueNotifier<bool>(false);
+
+  /// Bumped when back is pressed while locked — the lock chip shows again.
+  final ValueNotifier<int> _lockPoke = ValueNotifier<int>(0);
+
+  /// A short message over the picture ("Fill"), cleared by [_toastTimer].
+  final ValueNotifier<String?> _toast = ValueNotifier<String?>(null);
+  Timer? _toastTimer;
+
+  /// Tells an open sheet that tracks / quality may have changed.
+  final ValueNotifier<int> _sheetRefresh = ValueNotifier<int>(0);
+
+  /// The aspect modes the aspect button walks through:
+  /// label, how the picture is fitted, and a forced shape (null = its own).
+  static const List<(String, BoxFit, double?)> _aspectModes =
+      <(String, BoxFit, double?)>[
+    ('Fit', BoxFit.contain, null),
+    ('Fill', BoxFit.cover, null),
+    ('Stretch', BoxFit.fill, null),
+    ('16:9', BoxFit.contain, 16 / 9),
+    ('4:3', BoxFit.contain, 4 / 3),
+  ];
+  int _aspectIndex = 0;
+
+  bool _pipSupported = false;
+
+  /// Which system-bar arrangement is applied (null until the first build).
+  bool? _chromeLandscape;
+
+  /// Playback was running when the person left for Android's Cast screen: it
+  /// picks up again when they come back.
+  bool _resumeAfterLeaving = false;
+
+  /// Where this title's "continue watching" position is kept.
+  String _resumeKey = '';
+  DateTime _lastResumeSave = DateTime.fromMillisecondsSinceEpoch(0);
+  Duration? _resumeNotice;
+
+  /// The audio track the person picked, remembered by what it *is* (track ids
+  /// change between mirrors and qualities) so a quality switch keeps it.
+  String _preferredAudioLanguage = '';
+  String _preferredAudioTitle = '';
+  bool _subtitlesOff = false;
 
   /// The timestamp a seek was asked for and has not been confirmed yet. The
   /// seek bar holds the thumb there instead of letting the position events
@@ -163,7 +228,6 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
   bool _ready = false;
   bool _candidateHealthy = false;
   bool _desiredPlaying = true;
-  bool _hasAutoEnteredFullscreen = false;
   String? _errorMessage;
 
   Duration _lastKnownPosition = Duration.zero;
@@ -176,17 +240,20 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
   DateTime? _candidateStartedAt;
 
   double _rate = 1.0;
-  BoxFit _fit = BoxFit.contain;
   Tracks _tracks = const Tracks();
   String _audioSelectionId = 'auto';
   String _subtitleSelectionId = 'auto';
 
   String get _displayTitle {
     final MovieDownloadItem? item = widget.localItem;
-    if (item != null) return item.movieTitle;
     final MovieDetail? detail = widget.detail;
-    if (detail == null) return 'Video Player';
-    return detail.cleanTitle.isNotEmpty ? detail.cleanTitle : detail.title;
+    final String raw = item != null
+        ? item.movieTitle
+        : detail == null
+            ? ''
+            : (detail.cleanTitle.isNotEmpty ? detail.cleanTitle : detail.title);
+    final String clean = scrubSourceNames(raw).trim();
+    return clean.isNotEmpty ? clean : 'Video Player';
   }
 
   String get _displaySubtitle {
@@ -240,8 +307,21 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
         : widget.initialQuality;
     _player = Player();
     _controller = VideoController(_player);
-    _controlsTheme = _buildControlsTheme();
     _listenToPlayer();
+    _resumeKey = MovieResumeStore.keyFor(
+      detail: widget.detail,
+      quality: _currentQuality ?? widget.initialQuality,
+      localItem: widget.localItem,
+    );
+    WidgetsBinding.instance.addObserver(this);
+    NativeBridge.pipMode.addListener(_onPipChanged);
+    // The rest of the app is portrait-only; the player follows the phone.
+    unawaited(_setOrientations(_anyOrientation));
+    unawaited(
+      NativeBridge.pictureInPictureSupported().then((bool supported) {
+        if (mounted && supported) setState(() => _pipSupported = true);
+      }),
+    );
     if (widget.isLocal) {
       _setStatus('Opening video…');
     } else {
@@ -313,8 +393,12 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
 
   @override
   void dispose() {
+    _saveResumePoint();
     _disposed = true;
     _generation++;
+    WidgetsBinding.instance.removeObserver(this);
+    NativeBridge.pipMode.removeListener(_onPipChanged);
+    _toastTimer?.cancel();
     _startupTimer?.cancel();
     _stallTimer?.cancel();
     _seekWatchdog?.cancel();
@@ -325,6 +409,10 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
     _statusText.dispose();
     _buffering.dispose();
     _pendingSeek.dispose();
+    _locked.dispose();
+    _lockPoke.dispose();
+    _toast.dispose();
+    _sheetRefresh.dispose();
     unawaited(_player.dispose());
     unawaited(_restorePortraitChrome());
     super.dispose();
@@ -338,152 +426,6 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
       if (initial != null) initial,
     ];
     return playableQualitiesLowestFirst(source);
-  }
-
-  MaterialVideoControlsThemeData _buildControlsTheme() {
-    // media_kit compares normal/fullscreen theme data by identity when
-    // deciding whether dependents should update. Build one instance once and
-    // reuse that exact object for both slots; dynamic text goes through the
-    // ValueNotifier below instead of rebuilding theme data.
-    return MaterialVideoControlsThemeData(
-      automaticallyImplySkipNextButton: false,
-      automaticallyImplySkipPreviousButton: false,
-      volumeGesture: true,
-      brightnessGesture: true,
-      seekGesture: true,
-      seekOnDoubleTap: true,
-      seekOnDoubleTapBackwardDuration: const Duration(seconds: 10),
-      seekOnDoubleTapForwardDuration: const Duration(seconds: 10),
-      visibleOnMount: true,
-      backdropColor: Colors.black.withValues(alpha: 0.45),
-      primaryButtonBar: <Widget>[
-        const Spacer(flex: 2),
-        MaterialCustomButton(
-          icon: const Icon(Icons.replay_10_rounded),
-          onPressed: () =>
-              unawaited(_seekRelative(const Duration(seconds: -10))),
-        ),
-        const Spacer(),
-        const MaterialPlayOrPauseButton(iconSize: 56),
-        const Spacer(),
-        MaterialCustomButton(
-          icon: const Icon(Icons.forward_10_rounded),
-          onPressed: () =>
-              unawaited(_seekRelative(const Duration(seconds: 10))),
-        ),
-        const Spacer(flex: 2),
-      ],
-      topButtonBar: <Widget>[
-        MaterialCustomButton(
-          icon: const Icon(Icons.arrow_back_rounded),
-          onPressed: () => unawaited(_closePlayer()),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: ValueListenableBuilder<String>(
-            valueListenable: _statusText,
-            builder: (_, String status, __) {
-              return Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(
-                    _displayTitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  Text(
-                    status,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Colors.white70,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              );
-            },
-          ),
-        ),
-        if (!widget.isLocal)
-          MaterialCustomButton(
-            icon: const Icon(Icons.download_rounded),
-            onPressed: () => unawaited(_downloadCurrentQuality()),
-          ),
-      ],
-      // The seek bar is ours, not media_kit's: it is mounted above the button
-      // row (clear of Android's bottom gesture strip), it seeks on a plain tap
-      // to where the finger landed, and a drag follows the finger live. The
-      // built-in bar only moved on a completed drag — a tap jumped at a stale
-      // value — which is why tapping or dragging it never landed on the frame
-      // people aimed at.
-      bottomButtonBar: <Widget>[
-        Expanded(
-          child: SizedBox(
-            height: 80,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                SizedBox(
-                  height: 32,
-                  child: _MovieSeekBar(
-                    player: _player,
-                    pendingSeek: _pendingSeek,
-                    onSeekStart: _handleSeekBarStart,
-                    onSeek: _handleSeekBarSeek,
-                    onSeekEnd: _handleSeekBarEnd,
-                  ),
-                ),
-                SizedBox(
-                  height: 48,
-                  child: Row(
-                    children: <Widget>[
-                      const MaterialPositionIndicator(
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const Spacer(),
-                      MaterialCustomButton(
-                        icon: const Icon(Icons.tune_rounded),
-                        onPressed: _showSettingsSheet,
-                      ),
-                      const MaterialFullscreenButton(),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
-      buttonBarButtonColor: Colors.white,
-      displaySeekBar: false,
-      buttonBarHeight: 80,
-      bottomButtonBarMargin:
-          const EdgeInsets.only(left: 12, right: 4, bottom: 16),
-      topButtonBarMargin: const EdgeInsets.only(left: 8, right: 8, top: 4),
-      controlsHoverDuration: const Duration(seconds: 5),
-      // The transient double-tap seek indicator keeps the same red as the
-      // player's own bar.
-      seekBarHeight: 3,
-      seekBarContainerHeight: 30,
-      seekBarThumbSize: 12,
-      seekBarColor: Colors.white24,
-      seekBarPositionColor: const Color(0xFFFA2D48),
-      seekBarBufferColor: Colors.white38,
-      seekBarThumbColor: const Color(0xFFFA2D48),
-      shiftSubtitlesOnControlsVisibilityChange: true,
-    );
   }
 
   void _listenToPlayer() {
@@ -508,18 +450,25 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
       _player.stream.playing.listen((bool playing) {
         _desiredPlaying = playing;
         _checkCandidateHealth();
+        // Pausing is the usual last thing done before leaving.
+        if (!playing) _saveResumePoint();
       }),
       _player.stream.rate.listen((double rate) {
         if (rate > 0) _rate = rate;
       }),
       _player.stream.tracks.listen((Tracks tracks) {
         _tracks = tracks;
+        if (_disposed) return;
+        if (_candidateHealthy) _reapplyTrackChoices();
+        _sheetRefresh.value++;
       }),
       _player.stream.completed.listen((bool completed) {
         if (!completed || _disposed) return;
         _desiredPlaying = false;
         _startupTimer?.cancel();
         _setStatus('Playback finished');
+        // A finished title starts from the beginning next time.
+        unawaited(MovieResumeStore.clear(_resumeKey));
         if (mounted) {
           setState(() {
             _loading = false;
@@ -550,8 +499,14 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
   }
 
   Future<void> _startInitialPlayback() async {
+    // Pick up where this title was left, if it was left part-way through.
+    final MovieResumePoint? point = await MovieResumeStore.load(_resumeKey);
+    if (_disposed) return;
+    final Duration start = point?.position ?? Duration.zero;
+    if (start > Duration.zero) _resumeNotice = start;
+
     if (widget.isLocal) {
-      await _openLocalFile(start: Duration.zero);
+      await _openLocalFile(start: start);
       return;
     }
 
@@ -560,7 +515,7 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
       _showFatalError('No playable quality was provided.');
       return;
     }
-    await _resolveAndOpenQuality(quality, start: Duration.zero);
+    await _resolveAndOpenQuality(quality, start: start);
   }
 
   Future<void> _openLocalFile({required Duration start}) async {
@@ -862,6 +817,13 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
         position >= _candidateStartPosition) {
       _lastKnownPosition = position;
     }
+    if (_candidateHealthy) {
+      final DateTime now = DateTime.now();
+      if (now.difference(_lastResumeSave) >= const Duration(seconds: 5)) {
+        _lastResumeSave = now;
+        _saveResumePoint();
+      }
+    }
     _checkCandidateHealth();
   }
 
@@ -905,13 +867,16 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
     }
     unawaited(_safeSetRate(_rate));
 
-    if (!_hasAutoEnteredFullscreen) {
-      _hasAutoEnteredFullscreen = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!_disposed) {
-          unawaited(_enterFullscreenSafely());
-        }
-      });
+    _reapplyTrackChoices();
+    _sheetRefresh.value++;
+
+    final Duration? resumed = _resumeNotice;
+    if (resumed != null) {
+      _resumeNotice = null;
+      _showToast(
+        'Resuming from ${movieClock(resumed)}',
+        duration: const Duration(seconds: 2),
+      );
     }
   }
 
@@ -921,7 +886,9 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
           ? 'Local playback • $_displaySubtitle'
           : 'Local playback';
     }
-    return 'Playing';
+    // Under the title once a picture is up: what is playing, not "Playing".
+    final String playing = _displaySubtitle;
+    return playing.isNotEmpty ? playing : 'Playing';
   }
 
   void _armStartupTimer(int generation) {
@@ -1110,7 +1077,8 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
         _errorMessage = message;
       });
     }
-    unawaited(_exitFullscreenSafely());
+    // An error screen must always be reachable: never leave it locked.
+    if (_locked.value) _locked.value = false;
   }
 
   /// The sentence shown when nothing at all could be streamed.
@@ -1137,7 +1105,8 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
         _errorMessage = _offlineLine;
       });
     }
-    unawaited(_exitFullscreenSafely());
+    // An error screen must always be reachable: never leave it locked.
+    if (_locked.value) _locked.value = false;
   }
 
   /// The quality the download button should save: the one on screen when
@@ -1194,7 +1163,9 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
   }
 
   Future<void> _seekRelative(Duration offset) async {
-    await _seekTo(_player.state.position + offset);
+    // Taps stack: a second +10 s lands 20 s on, even while the first one is
+    // still on its way.
+    await _seekTo((_pendingSeekTarget ?? _player.state.position) + offset);
   }
 
   /// mpv defaults that make an HTTP stream behave like a file: keep the
@@ -1295,7 +1266,7 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
   }
 
   /// `Jumping to 42:10…` — the status line while a seek is being recovered.
-  String _jumpingStatus(Duration target) => 'Jumping to ${_movieClock(target)}…';
+  String _jumpingStatus(Duration target) => 'Jumping to ${movieClock(target)}…';
 
   /// The stream did not move to [wanted]. Walk the ladder: the same mirror
   /// re-opened at that timestamp, then the other mirrors of this quality, then
@@ -1393,49 +1364,87 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
     unawaited(_seekTo(target));
   }
 
-  void _handleSeekBarEnd() {}
+  // ------------------------------------------------------ resume position
 
-  Future<void> _enterFullscreenSafely() async {
+  /// Remembers where this title is, so leaving and coming back continues from
+  /// here. A failed player keeps the position it had; nothing is written
+  /// until a real duration is known.
+  void _saveResumePoint() {
+    if (_resumeKey.isEmpty || !_ready) return;
+    final Duration duration = _player.state.duration;
+    if (duration <= Duration.zero) return;
+    unawaited(
+      MovieResumeStore.save(
+        _resumeKey,
+        position: _lastKnownPosition,
+        duration: duration,
+      ),
+    );
+  }
+
+  // ---------------------------------------------------- layout and chrome
+
+  static const List<DeviceOrientation> _anyOrientation = <DeviceOrientation>[
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.landscapeLeft,
+    DeviceOrientation.landscapeRight,
+  ];
+  static const List<DeviceOrientation> _portraitOnly = <DeviceOrientation>[
+    DeviceOrientation.portraitUp,
+  ];
+  static const List<DeviceOrientation> _landscapeOnly = <DeviceOrientation>[
+    DeviceOrientation.landscapeLeft,
+    DeviceOrientation.landscapeRight,
+  ];
+
+  Future<void> _setOrientations(List<DeviceOrientation> orientations) async {
     try {
-      final VideoState? state = _videoKey.currentState;
-      if (state != null && !state.isFullscreen()) {
-        await state.enterFullscreen();
-      }
+      await SystemChrome.setPreferredOrientations(orientations);
     } catch (_) {}
   }
 
-  Future<void> _exitFullscreenSafely() async {
-    try {
-      final VideoState? state = _videoKey.currentState;
-      if (state != null && state.isFullscreen()) {
-        await state.exitFullscreen();
-      }
-    } catch (_) {}
+  bool get _isLandscape =>
+      mounted && MediaQuery.orientationOf(context) == Orientation.landscape;
+
+  /// The Fullscreen button. It only turns the screen: the layout follows the
+  /// new orientation by itself and the video underneath is never touched.
+  void _toggleFullscreen() {
+    unawaited(_setOrientations(_isLandscape ? _portraitOnly : _landscapeOnly));
   }
 
-  Future<void> _closePlayer() async {
-    try {
-      final VideoState? state = _videoKey.currentState;
-      if (state != null && state.isFullscreen()) {
-        await state.exitFullscreen();
-        return;
-      }
-    } catch (_) {}
-    if (mounted) {
-      await Navigator.of(context, rootNavigator: true).maybePop();
+  /// Landscape hides the status and navigation bars; portrait brings them
+  /// back. Called from build, so it only acts when the layout really changed.
+  void _syncSystemChrome(bool landscape) {
+    if (_chromeLandscape == landscape) return;
+    _chromeLandscape = landscape;
+    unawaited(() async {
+      try {
+        await SystemChrome.setEnabledSystemUIMode(
+          landscape ? SystemUiMode.immersiveSticky : SystemUiMode.edgeToEdge,
+        );
+      } catch (_) {}
+    }());
+  }
+
+  /// Back — the on-screen arrow and the system button alike. Locked: nothing
+  /// happens except the lock chip coming back. Landscape: back to portrait.
+  /// Portrait: the player closes.
+  void _handleBack() {
+    if (_locked.value) {
+      _lockPoke.value++;
+      return;
     }
+    if (_isLandscape && !NativeBridge.pipMode.value) {
+      unawaited(_setOrientations(_portraitOnly));
+      return;
+    }
+    _closePlayer();
   }
 
-  Future<void> _enterFullscreenChrome() async {
-    try {
-      await SystemChrome.setEnabledSystemUIMode(
-        SystemUiMode.immersiveSticky,
-      );
-      await SystemChrome.setPreferredOrientations(<DeviceOrientation>[
-        DeviceOrientation.landscapeLeft,
-        DeviceOrientation.landscapeRight,
-      ]);
-    } catch (_) {}
+  void _closePlayer() {
+    _saveResumePoint();
+    if (!mounted) return;
+    Navigator.of(context, rootNavigator: true).pop();
   }
 
   Future<void> _restorePortraitChrome() async {
@@ -1455,6 +1464,219 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
         ),
       );
     } catch (_) {}
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (_disposed) return;
+    if (state == AppLifecycleState.resumed) {
+      unawaited(NativeBridge.refreshPictureInPictureState());
+      if (_resumeAfterLeaving) {
+        _resumeAfterLeaving = false;
+        unawaited(_player.play());
+      }
+    } else if (state == AppLifecycleState.paused) {
+      _saveResumePoint();
+    }
+  }
+
+  void _showToast(
+    String message, {
+    Duration duration = const Duration(seconds: 1),
+  }) {
+    if (_disposed) return;
+    _toastTimer?.cancel();
+    _toast.value = message;
+    _toastTimer = Timer(duration, () {
+      if (!_disposed) _toast.value = null;
+    });
+  }
+
+  /// Fit → Fill → Stretch → 16:9 → 4:3 → Fit. The picture changes at once and
+  /// the new mode's name is shown for a second.
+  void _cycleAspect() {
+    final int next = (_aspectIndex + 1) % _aspectModes.length;
+    setState(() => _aspectIndex = next);
+    _showToast(_aspectModes[next].$1);
+  }
+
+  // ------------------------------------------- picture-in-picture and TV
+
+  void _onPipChanged() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _enterPip() async {
+    final int width = _player.state.width ?? 0;
+    final int height = _player.state.height ?? 0;
+    final bool entered = await NativeBridge.enterPictureInPicture(
+      width: width > 0 ? width : 16,
+      height: height > 0 ? height : 9,
+    );
+    if (!entered && !_disposed) {
+      showAppNotice(
+        'Picture-in-picture could not start. Check that it is allowed for '
+        '${SidifyBranding.appName} in Android settings.',
+        duration: const Duration(seconds: 4),
+      );
+    }
+  }
+
+  /// "Play on TV": opens Android's own Cast screen, where the phone is
+  /// mirrored to a TV on the same Wi-Fi. Playback continues on return.
+  Future<void> _openCast() async {
+    final bool wasPlaying = _player.state.playing;
+    _resumeAfterLeaving = wasPlaying;
+    final bool opened = await NativeBridge.openCastSettings();
+    if (opened || _disposed) return;
+    _resumeAfterLeaving = false;
+    showAppNotice(
+      'This device has no screen-cast setting to open.',
+      duration: const Duration(seconds: 3),
+    );
+  }
+
+  // ------------------------------------------------------ share / report
+
+  String get _shareLine {
+    final String year = (widget.detail?.year ?? '').trim();
+    final String title = year.isNotEmpty && !_displayTitle.contains(year)
+        ? '$_displayTitle ($year)'
+        : _displayTitle;
+    return 'Watching "$title" on ${SidifyBranding.appName}.';
+  }
+
+  Future<void> _share() async {
+    final String text = _shareLine;
+    final bool shared = await NativeBridge.shareText(text: text);
+    if (shared || _disposed) return;
+    await Clipboard.setData(ClipboardData(text: text));
+    showAppNotice('Copied to clipboard');
+  }
+
+  static const List<MovieSheetOption> _reportReasons = <MovieSheetOption>[
+    MovieSheetOption(
+      id: 'Video does not play or keeps buffering',
+      title: 'Video does not play or keeps buffering',
+      icon: Icons.play_disabled_rounded,
+    ),
+    MovieSheetOption(
+      id: 'Wrong movie or episode',
+      title: 'Wrong movie or episode',
+      icon: Icons.movie_filter_outlined,
+    ),
+    MovieSheetOption(
+      id: 'Audio is missing, wrong or out of sync',
+      title: 'Audio is missing, wrong or out of sync',
+      icon: Icons.volume_off_outlined,
+    ),
+    MovieSheetOption(
+      id: 'Subtitles are missing or wrong',
+      title: 'Subtitles are missing or wrong',
+      icon: Icons.closed_caption_disabled_outlined,
+    ),
+    MovieSheetOption(
+      id: 'Poor picture quality',
+      title: 'Poor picture quality',
+      icon: Icons.blur_on_rounded,
+    ),
+    MovieSheetOption(
+      id: 'Something else',
+      title: 'Something else',
+      icon: Icons.more_horiz_rounded,
+    ),
+  ];
+
+  /// Report: pick what is wrong, and a ready-written mail opens in the
+  /// phone's mail app. Nothing is sent until the person presses Send, and no
+  /// stream address is included.
+  Future<void> _report() async {
+    final String? reason = await showMovieGlassSheet<String>(
+      context,
+      builder: (_) => MovieOptionsSheet(
+        title: 'Report a problem',
+        closeOnSelect: true,
+        showSelection: false,
+        read: () => _reportReasons,
+        note: () => 'Opens your mail app with the details filled in.',
+        onSelected: (_) async {},
+      ),
+    );
+    if (reason == null || _disposed) return;
+
+    final MovieDetail? detail = widget.detail;
+    final String body = <String>[
+      'Problem: $reason',
+      '',
+      'Title: $_displayTitle',
+      if (_displaySubtitle.isNotEmpty) 'Playing: $_displaySubtitle',
+      if (detail != null) 'Catalog: ${detail.provider.label}',
+      if (widget.isLocal)
+        'Source: downloaded file'
+      else if (_candidates.isNotEmpty)
+        'Server: ${_candidateIndex + 1} of ${_candidates.length}',
+      'Position: ${movieClock(_lastKnownPosition)}',
+      'App: ${SidifyBranding.appName} ${SidifyBranding.versionLabel}',
+      'Device: ${Platform.operatingSystem} ${Platform.operatingSystemVersion}',
+      '',
+      'Anything else we should know:',
+      '',
+    ].join('\n');
+    final String subject = Uri.encodeComponent(
+      'Video problem: $_displayTitle',
+    );
+    final String encodedBody = Uri.encodeComponent(body);
+    final Uri mail = Uri(
+      scheme: 'mailto',
+      path: SidifyBranding.contactEmail,
+      query: 'subject=$subject&body=$encodedBody',
+    );
+    bool opened = false;
+    try {
+      opened = await launchUrl(mail, mode: LaunchMode.externalApplication);
+    } catch (_) {}
+    if (!opened && !_disposed) {
+      showAppNotice(
+        'No mail app found. Write to ${SidifyBranding.contactEmail}',
+        duration: const Duration(seconds: 5),
+      );
+    }
+  }
+
+  // ---------------------------------------------------- list and related
+
+  /// This title as the library knows it (keyed by its page, exactly like the
+  /// bookmark on the details page), or null for a downloaded file.
+  MoviePost? get _libraryPost {
+    final MovieDetail? detail = widget.detail;
+    if (detail == null || detail.webUrl.trim().isEmpty) return null;
+    return MoviePost(
+      title: detail.title,
+      link: detail.webUrl,
+      imageUrl: detail.posterUrl,
+      fallbackImageUrl: detail.fallbackPosterUrl,
+      badge: detail.isSeries ? 'Series' : 'Movie',
+      subtitle: detail.year,
+      provider: detail.provider,
+    );
+  }
+
+  void _toggleMyList(MovieLibraryService library, MoviePost post) {
+    final bool wasSaved = library.contains(post);
+    unawaited(library.toggleWatchlist(post));
+    showAppNotice(wasSaved ? 'Removed from My List' : 'Added to My List');
+  }
+
+  /// A related title replaces the player with that title's page.
+  void _openRelated(MoviePost post) {
+    _saveResumePoint();
+    unawaited(_player.pause());
+    Navigator.of(context, rootNavigator: true).pushReplacement<void, void>(
+      MaterialPageRoute<void>(
+        builder: (_) => MovieDetailPage(initialPost: post),
+        settings: const RouteSettings(name: 'sidify/movie-detail'),
+      ),
+    );
   }
 
   List<AudioTrack> get _realAudioTracks {
@@ -1479,7 +1701,7 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
   /// codec and speaker layout all still say exactly what the file said.
   String _audioTrackLabel(AudioTrack track, int index) {
     return describeAudioTrack(
-      title: track.title,
+      title: scrubSourceNames(track.title ?? ''),
       language: track.language,
       codec: track.codec,
       channels: track.channelscount ?? 0,
@@ -1490,16 +1712,25 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
   /// The same treatment for subtitle tracks.
   String _subtitleTrackLabel(SubtitleTrack track, int index) {
     return describeSubtitleTrack(
-      title: track.title,
+      title: scrubSourceNames(track.title ?? ''),
       language: track.language,
       codec: track.codec,
       index: index,
     );
   }
 
-  Future<void> _setAudioTrack(AudioTrack track, String selectionId) async {
+  Future<void> _setAudioTrack(
+    AudioTrack track,
+    String selectionId, {
+    bool remember = true,
+  }) async {
     try {
       _audioSelectionId = selectionId;
+      if (remember) {
+        final bool auto = selectionId == 'auto';
+        _preferredAudioLanguage = auto ? '' : (track.language ?? '');
+        _preferredAudioTitle = auto ? '' : (track.title ?? '');
+      }
       await _player.setAudioTrack(track);
     } catch (_) {
       showAppNotice('Could not switch audio track.');
@@ -1508,13 +1739,44 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
 
   Future<void> _setSubtitleTrack(
     SubtitleTrack track,
-    String selectionId,
-  ) async {
+    String selectionId, {
+    bool remember = true,
+  }) async {
     try {
       _subtitleSelectionId = selectionId;
+      if (remember) _subtitlesOff = selectionId == 'no';
       await _player.setSubtitleTrack(track);
     } catch (_) {
       showAppNotice('Could not switch subtitles.');
+    }
+  }
+
+  /// A new stream (another quality, another mirror, a seek recovery) starts
+  /// on its default tracks. Put back what the person had chosen: the same
+  /// audio language, and subtitles off if they had turned them off.
+  void _reapplyTrackChoices() {
+    if (_disposed) return;
+    final String language = _preferredAudioLanguage;
+    final String title = _preferredAudioTitle;
+    if (_audioSelectionId == 'auto' &&
+        (language.isNotEmpty || title.isNotEmpty)) {
+      AudioTrack? match;
+      for (final AudioTrack track in _realAudioTracks) {
+        final bool sameLanguage =
+            language.isNotEmpty && (track.language ?? '') == language;
+        final bool sameTitle = title.isNotEmpty && (track.title ?? '') == title;
+        if (sameLanguage && sameTitle) {
+          match = track;
+          break;
+        }
+        if (match == null && (sameLanguage || sameTitle)) match = track;
+      }
+      if (match != null) {
+        unawaited(_setAudioTrack(match, match.id, remember: false));
+      }
+    }
+    if (_subtitlesOff && _subtitleSelectionId != 'no') {
+      unawaited(_setSubtitleTrack(SubtitleTrack.no(), 'no', remember: false));
     }
   }
 
@@ -1547,367 +1809,177 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
     }
   }
 
-  void _showSettingsSheet() {
-    // Refresh from the synchronous player state in case a track event has
-    // arrived since the last stream callback was processed.
+  /// What the Playback Settings sheet shows right now — read from the player
+  /// and from this title's real links, never invented.
+  MoviePlaybackSettings _readPlaybackSettings() {
     _tracks = _player.state.tracks;
+    final List<AudioTrack> audio = _realAudioTracks;
+    final MovieDownloadItem? item = widget.localItem;
 
-    showModalBottomSheet<void>(
-      context: context,
-      useRootNavigator: true,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (BuildContext sheetContext) {
-        return StatefulBuilder(
-          builder: (BuildContext context, StateSetter setSheetState) {
-            final SidifyTokens t = context.sidify;
-            final List<AudioTrack> audioTracks = _realAudioTracks;
-            final List<SubtitleTrack> subtitleTracks = _realSubtitleTracks;
+    final List<MovieSheetOption> qualities = <MovieSheetOption>[
+      if (item != null && item.qualityLabel.trim().isNotEmpty)
+        MovieSheetOption(
+          id: 'local',
+          title: item.qualityLabel,
+          subtitle: item.sizeLabel,
+          selected: true,
+        ),
+      if (!widget.isLocal)
+        for (final MovieQualityLink quality
+            in playableQualitiesBestFirst(_availableQualities))
+          MovieSheetOption(
+            id: quality.id,
+            title: quality.displayQuality,
+            subtitle: <String>[
+              if (quality.sizeLabel.isNotEmpty) quality.sizeLabel,
+              if (quality.languages.isNotEmpty) quality.languages,
+            ].join(' • '),
+            selected: quality.id == _currentQuality?.id,
+          ),
+    ];
 
-            return SafeArea(
-              child: Container(
-                constraints: BoxConstraints(
-                  maxHeight: MediaQuery.of(context).size.height * 0.84,
-                ),
-                margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                padding: const EdgeInsets.fromLTRB(18, 12, 18, 18),
-                decoration: BoxDecoration(
-                  color: t.bg,
-                  borderRadius: BorderRadius.circular(22),
-                  border: Border.all(color: t.edge),
-                ),
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Center(
-                        child: Container(
-                          width: 42,
-                          height: 4,
-                          decoration: BoxDecoration(
-                            color: t.fill3,
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      Row(
-                        children: <Widget>[
-                          Icon(Icons.tune_rounded, color: t.brand, size: 21),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: <Widget>[
-                                Text(
-                                  'Playback settings',
-                                  style: SidifyText.titleM(t.text),
-                                ),
-                                if (_displaySubtitle.isNotEmpty)
-                                  Text(
-                                    _displaySubtitle,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: SidifyText.caption(t.text2),
-                                  ),
-                              ],
-                            ),
-                          ),
-                          IconButton(
-                            tooltip: 'Close settings',
-                            onPressed: () =>
-                                Navigator.of(sheetContext).pop(),
-                            icon: Icon(Icons.close_rounded, color: t.text2),
-                          ),
-                        ],
-                      ),
-                      if (!widget.isLocal && _candidates.isNotEmpty) ...<Widget>[
-                        _settingsSectionHeader(
-                          t,
-                          icon: Icons.dns_rounded,
-                          title: 'Server / Mirror',
-                        ),
-                        for (int i = 0; i < _candidates.length; i++)
-                          _settingsOptionTile(
-                            t,
-                            title: 'Ifallertzia ${i + 1}',
-                            subtitle: i == _candidateIndex
-                                ? 'Current mirror'
-                                : _failedCandidates.contains(i)
-                                    ? 'Failed earlier — tap to retry'
-                                    : 'Tap to switch mirror',
-                            selected: i == _candidateIndex,
-                            onTap: () {
-                              Navigator.of(sheetContext).pop();
-                              unawaited(_switchToCandidate(i));
-                            },
-                          ),
-                      ],
-                      if (!widget.isLocal &&
-                          _availableQualities.isNotEmpty) ...<Widget>[
-                        _settingsSectionHeader(
-                          t,
-                          icon: Icons.high_quality_rounded,
-                          title: 'Quality',
-                        ),
-                        for (final MovieQualityLink quality
-                            in playableQualitiesBestFirst(_availableQualities))
-                          _settingsOptionTile(
-                            t,
-                            title: quality.displayQuality,
-                            subtitle: <String>[
-                              if (quality.sizeLabel.isNotEmpty)
-                                quality.sizeLabel,
-                              if (quality.languages.isNotEmpty)
-                                quality.languages,
-                            ].join(' • '),
-                            selected: quality.id == _currentQuality?.id,
-                            onTap: () {
-                              Navigator.of(sheetContext).pop();
-                              unawaited(_switchQuality(quality));
-                            },
-                          ),
-                      ],
-                      _settingsSectionHeader(
-                        t,
-                        icon: Icons.audiotrack_rounded,
-                        title: 'Audio Language',
-                      ),
-                      _settingsOptionTile(
-                        t,
-                        title: 'Auto',
-                        subtitle: 'Use the default audio track',
-                        selected: _audioSelectionId == 'auto',
-                        onTap: () async {
-                          await _setAudioTrack(AudioTrack.auto(), 'auto');
-                          if (context.mounted) setSheetState(() {});
-                        },
-                      ),
-                      for (int i = 0; i < audioTracks.length; i++)
-                        _settingsOptionTile(
-                          t,
-                          title: _audioTrackLabel(audioTracks[i], i),
-                          selected: _audioSelectionId == audioTracks[i].id,
-                          onTap: () async {
-                            await _setAudioTrack(
-                              audioTracks[i],
-                              audioTracks[i].id,
-                            );
-                            if (context.mounted) setSheetState(() {});
-                          },
-                        ),
-                      if (audioTracks.isEmpty)
-                        _settingsInfoText(
-                          t,
-                          'Alternate audio tracks will appear after the video loads.',
-                        ),
-                      _settingsSectionHeader(
-                        t,
-                        icon: Icons.subtitles_rounded,
-                        title: 'Subtitles',
-                      ),
-                      _settingsOptionTile(
-                        t,
-                        title: 'Off',
-                        selected: _subtitleSelectionId == 'no',
-                        onTap: () async {
-                          await _setSubtitleTrack(SubtitleTrack.no(), 'no');
-                          if (context.mounted) setSheetState(() {});
-                        },
-                      ),
-                      _settingsOptionTile(
-                        t,
-                        title: 'Auto',
-                        subtitle: 'Use the default subtitle track, if any',
-                        selected: _subtitleSelectionId == 'auto',
-                        onTap: () async {
-                          await _setSubtitleTrack(
-                            SubtitleTrack.auto(),
-                            'auto',
-                          );
-                          if (context.mounted) setSheetState(() {});
-                        },
-                      ),
-                      for (int i = 0; i < subtitleTracks.length; i++)
-                        _settingsOptionTile(
-                          t,
-                          title: _subtitleTrackLabel(subtitleTracks[i], i),
-                          selected:
-                              _subtitleSelectionId == subtitleTracks[i].id,
-                          onTap: () async {
-                            await _setSubtitleTrack(
-                              subtitleTracks[i],
-                              subtitleTracks[i].id,
-                            );
-                            if (context.mounted) setSheetState(() {});
-                          },
-                        ),
-                      if (subtitleTracks.isEmpty)
-                        _settingsInfoText(
-                          t,
-                          'No embedded subtitle tracks were found in this file.',
-                        ),
-                      _settingsSectionHeader(
-                        t,
-                        icon: Icons.speed_rounded,
-                        title: 'Playback Speed',
-                      ),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: <Widget>[
-                          for (final double speed in _speeds)
-                            ChoiceChip(
-                              label: Text(_formatSpeed(speed)),
-                              selected: (speed - _rate).abs() < 0.001,
-                              onSelected: (bool selected) async {
-                                if (!selected) return;
-                                await _setPlaybackRate(speed);
-                                if (context.mounted) setSheetState(() {});
-                              },
-                            ),
-                        ],
-                      ),
-                      _settingsSectionHeader(
-                        t,
-                        icon: Icons.aspect_ratio_rounded,
-                        title: 'Aspect ratio',
-                      ),
-                      for (final (BoxFit fit, String label, String hint) in <(BoxFit, String, String)>[
-                        (BoxFit.contain, 'Fit screen', 'Whole video visible'),
-                        (BoxFit.cover, 'Fill screen', 'Crop to fill the screen'),
-                        (BoxFit.fill, 'Stretch', 'Stretch to the screen'),
-                      ])
-                        _settingsOptionTile(
-                          t,
-                          title: label,
-                          subtitle: hint,
-                          selected: _fit == fit,
-                          onTap: () {
-                            if (mounted) {
-                              setState(() => _fit = fit);
-                            }
-                            setSheetState(() {});
-                          },
-                        ),
-                      if (!widget.isLocal) ...<Widget>[
-                        const SizedBox(height: 8),
-                        _settingsSectionHeader(
-                          t,
-                          icon: Icons.download_rounded,
-                          title: 'Download',
-                        ),
-                        _settingsOptionTile(
-                          t,
-                          title: 'Download current quality',
-                          subtitle: _currentQuality?.displayQuality ?? '',
-                          selected: false,
-                          leadingIcon: Icons.download_rounded,
-                          onTap: () {
-                            Navigator.of(sheetContext).pop();
-                            unawaited(_downloadCurrentQuality());
-                          },
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ),
-            );
+    return MoviePlaybackSettings(
+      speed: _rate,
+      speeds: _speeds,
+      qualities: qualities,
+      qualityNote: widget.isLocal
+          ? 'A downloaded file has the one quality it was saved in.'
+          : (qualities.length <= 1
+              ? 'This title is offered in a single quality.'
+              : 'Changing quality continues from the same moment.'),
+      audioTracks: <MovieSheetOption>[
+        MovieSheetOption(
+          id: 'auto',
+          title: 'Auto',
+          subtitle: "The video's default audio",
+          selected: _audioSelectionId == 'auto',
+        ),
+        for (int i = 0; i < audio.length; i++)
+          MovieSheetOption(
+            id: audio[i].id,
+            title: _audioTrackLabel(audio[i], i),
+            selected: _audioSelectionId == audio[i].id,
+          ),
+      ],
+      audioNote: audio.isEmpty
+          ? 'Audio tracks appear once the video has loaded.'
+          : (audio.length == 1 ? 'This video has one audio track.' : ''),
+    );
+  }
+
+  void _showSettingsSheet() {
+    unawaited(
+      showMovieGlassSheet<void>(
+        context,
+        builder: (_) => MoviePlaybackSettingsSheet(
+          read: _readPlaybackSettings,
+          refresh: _sheetRefresh,
+          onSpeed: _setPlaybackRate,
+          onQuality: (String id) {
+            for (final MovieQualityLink quality in _availableQualities) {
+              if (quality.id == id) {
+                unawaited(_switchQuality(quality));
+                return;
+              }
+            }
           },
-        );
-      },
-    );
-  }
-
-  String _formatSpeed(double speed) {
-    final String text = speed.toStringAsFixed(2)
-        .replaceFirst(RegExp(r'\.00$'), '')
-        .replaceFirst(RegExp(r'0$'), '');
-    return '${text}x';
-  }
-
-  Widget _settingsSectionHeader(
-    SidifyTokens t, {
-    required IconData icon,
-    required String title,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 18, bottom: 6),
-      child: Row(
-        children: <Widget>[
-          Icon(icon, size: 17, color: t.brand),
-          const SizedBox(width: 7),
-          Text(title, style: SidifyText.label(t.text)),
-        ],
+          onAudio: (String id) async {
+            if (id == 'auto') {
+              await _setAudioTrack(AudioTrack.auto(), 'auto');
+              return;
+            }
+            for (final AudioTrack track in _realAudioTracks) {
+              if (track.id == id) {
+                await _setAudioTrack(track, id);
+                return;
+              }
+            }
+          },
+        ),
       ),
     );
   }
 
-  Widget _settingsOptionTile(
-    SidifyTokens t, {
-    required String title,
-    String subtitle = '',
-    required bool selected,
-    required VoidCallback onTap,
-    IconData? leadingIcon,
-  }) {
-    return ListTile(
-      dense: true,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-      leading: Icon(
-        leadingIcon ??
-            (selected
-                ? Icons.check_circle_rounded
-                : Icons.radio_button_unchecked_rounded),
-        color: selected || leadingIcon != null ? t.brand : t.text3,
-        size: 21,
+  List<MovieSheetOption> _readSubtitleOptions() {
+    _tracks = _player.state.tracks;
+    final List<SubtitleTrack> subtitles = _realSubtitleTracks;
+    return <MovieSheetOption>[
+      MovieSheetOption(
+        id: 'no',
+        title: 'Off',
+        selected: _subtitleSelectionId == 'no',
       ),
-      title: Text(title, style: SidifyText.bodyS(t.text)),
-      subtitle: subtitle.isEmpty
-          ? null
-          : Text(subtitle, style: SidifyText.caption(t.text2)),
-      onTap: onTap,
+      MovieSheetOption(
+        id: 'auto',
+        title: 'Auto',
+        subtitle: "The video's default subtitles, if it has any",
+        selected: _subtitleSelectionId == 'auto',
+      ),
+      for (int i = 0; i < subtitles.length; i++)
+        MovieSheetOption(
+          id: subtitles[i].id,
+          title: _subtitleTrackLabel(subtitles[i], i),
+          selected: _subtitleSelectionId == subtitles[i].id,
+        ),
+    ];
+  }
+
+  void _showSubtitleSheet() {
+    unawaited(
+      showMovieGlassSheet<void>(
+        context,
+        builder: (_) => MovieOptionsSheet(
+          title: 'Subtitles',
+          refresh: _sheetRefresh,
+          read: _readSubtitleOptions,
+          note: () => _realSubtitleTracks.isEmpty
+              ? 'No subtitles were found inside this video.'
+              : '',
+          onSelected: (MovieSheetOption option) async {
+            if (option.id == 'no') {
+              await _setSubtitleTrack(SubtitleTrack.no(), 'no');
+              return;
+            }
+            if (option.id == 'auto') {
+              await _setSubtitleTrack(SubtitleTrack.auto(), 'auto');
+              return;
+            }
+            for (final SubtitleTrack track in _realSubtitleTracks) {
+              if (track.id == option.id) {
+                await _setSubtitleTrack(track, track.id);
+                return;
+              }
+            }
+          },
+        ),
+      ),
     );
   }
 
-  Widget _settingsInfoText(SidifyTokens t, String text) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 2, 8, 4),
-      child: Text(text, style: SidifyText.caption(t.text2)),
-    );
-  }
-
+  /// The "finding a stream" card over the picture. It scales down to fit the
+  /// small portrait player instead of overflowing it.
   Widget _buildLoadingOverlay(SidifyTokens t) {
     return Positioned.fill(
       child: IgnorePointer(
         child: Container(
           color: Colors.black.withValues(alpha: 0.38),
           alignment: Alignment.center,
-          child: Padding(
-            padding: const EdgeInsets.all(28),
+          padding: const EdgeInsets.fromLTRB(24, 48, 24, 14),
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
                 CircularProgressIndicator(color: t.brand),
-                const SizedBox(height: 18),
-                Text(
-                  _displayTitle,
-                  textAlign: TextAlign.center,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: SidifyText.titleM(Colors.white),
-                ),
+                const SizedBox(height: 16),
                 if (_loadingSubtitle.isNotEmpty) ...<Widget>[
-                  const SizedBox(height: 6),
                   Text(
                     _loadingSubtitle,
                     textAlign: TextAlign.center,
                     style: SidifyText.caption(Colors.white70),
                   ),
+                  const SizedBox(height: 6),
                 ],
-                const SizedBox(height: 10),
                 ValueListenableBuilder<String>(
                   valueListenable: _statusText,
                   builder: (_, String status, __) {
@@ -1997,7 +2069,7 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
                     ),
                   ),
                   OutlinedButton.icon(
-                    onPressed: () => unawaited(_closePlayer()),
+                    onPressed: _closePlayer,
                     icon: const Icon(Icons.arrow_back_rounded),
                     label: const Text('Back'),
                     style: OutlinedButton.styleFrom(
@@ -2014,295 +2086,202 @@ class _MoviePlayerPageState extends State<MoviePlayerPage> {
     );
   }
 
+  /// The portrait layout's lower half.
+  Widget _buildInfoPanel(MovieLibraryService? library) {
+    final MovieDetail? detail = widget.detail;
+    final MovieDownloadItem? item = widget.localItem;
+    final MovieQualityLink? quality = _currentQuality;
+    final MoviePost? post = _libraryPost;
+    final bool saved =
+        library != null && post != null && library.contains(post);
+
+    final List<String> meta = <String>[];
+    if (item != null) {
+      meta.add(item.subtitleSummary);
+    } else if (detail != null) {
+      meta.add(detail.year);
+      if (quality != null) {
+        final String season = quality.seasonLabel.isNotEmpty
+            ? quality.seasonLabel
+            : detail.defaultSeasonLabel;
+        if (detail.isSeries || quality.episodeLabel.isNotEmpty) {
+          meta.add(season);
+          meta.add(quality.episodeLabel);
+        }
+        // The resolution is only named once it is really on screen.
+        if (_ready) meta.add(quality.displayQuality);
+        meta.add(
+          quality.languages.isNotEmpty ? quality.languages : detail.languages,
+        );
+      }
+    }
+
+    return MoviePlayerInfoPanel(
+      title: _displayTitle,
+      meta: meta,
+      rating: detail?.rating ?? '',
+      genres: detail?.genres ?? const <String>[],
+      synopsis: detail?.synopsis ?? '',
+      actions: <MoviePlayerAction>[
+        if (library != null && post != null)
+          MoviePlayerAction(
+            icon: saved ? Icons.check_rounded : Icons.add_rounded,
+            label: 'My List',
+            active: saved,
+            onTap: () => _toggleMyList(library, post),
+          ),
+        if (!widget.isLocal)
+          MoviePlayerAction(
+            icon: Icons.download_rounded,
+            label: 'Download',
+            onTap: () => unawaited(_downloadCurrentQuality()),
+          ),
+        MoviePlayerAction(
+          icon: Icons.share_outlined,
+          label: 'Share',
+          onTap: () => unawaited(_share()),
+        ),
+        MoviePlayerAction(
+          icon: Icons.flag_outlined,
+          label: 'Report',
+          onTap: () => unawaited(_report()),
+        ),
+        if (Platform.isAndroid)
+          MoviePlayerAction(
+            icon: Icons.cast_rounded,
+            label: 'Play on TV',
+            onTap: () => unawaited(_openCast()),
+          ),
+      ],
+      serverCount: widget.isLocal ? 0 : _candidates.length,
+      currentServer: _candidateIndex,
+      failedServers: _failedCandidates,
+      onServer: (int index) => unawaited(_switchToCandidate(index)),
+      related: detail?.relatedPosts ?? const <MoviePost>[],
+      onRelated: _openRelated,
+      footnote: widget.isLocal
+          ? 'Playing from this device — no mobile data is used.'
+          : '',
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final SidifyTokens t = context.sidify;
     final String? error = _errorMessage;
+    final MovieLibraryService? library = context.watch<MovieLibraryService?>();
 
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: MaterialVideoControlsTheme(
-        normal: _controlsTheme,
-        fullscreen: _controlsTheme,
-        child: Stack(
-          fit: StackFit.expand,
-          children: <Widget>[
-            Video(
-              key: _videoKey,
-              controller: _controller,
-              controls: MaterialVideoControls,
-              fit: _fit,
-              fill: Colors.black,
-              wakelock: true,
-              pauseUponEnteringBackgroundMode: true,
-              resumeUponEnteringForegroundMode: false,
-              onEnterFullscreen: _enterFullscreenChrome,
-              onExitFullscreen: _restorePortraitChrome,
-            ),
-            if (_loading) _buildLoadingOverlay(t),
+    // Picture-in-picture is the whole app shrunk into a small window: show
+    // nothing in it but the video.
+    final bool pip = NativeBridge.pipMode.value;
+    final Size size = MediaQuery.sizeOf(context);
+    final bool landscape =
+        MediaQuery.orientationOf(context) == Orientation.landscape;
+    final bool immersive = landscape || pip;
+    if (!pip) _syncSystemChrome(landscape);
+
+    final (String aspectLabel, BoxFit fit, double? aspectRatio) =
+        _aspectModes[_aspectIndex];
+
+    // The one Video. Its GlobalKey moves it between the two layouts below
+    // without rebuilding it, so the stream is never reopened on rotation.
+    final Widget stage = ColoredBox(
+      color: Colors.black,
+      child: Stack(
+        fit: StackFit.expand,
+        children: <Widget>[
+          Video(
+            key: _videoKey,
+            controller: _controller,
+            // The controls are ours (MoviePlayerControls), drawn above.
+            controls: null,
+            fit: fit,
+            aspectRatio: aspectRatio,
+            fill: Colors.black,
+            wakelock: true,
+            pauseUponEnteringBackgroundMode: true,
+            resumeUponEnteringForegroundMode: false,
+          ),
+          if (_loading && !pip) _buildLoadingOverlay(t),
+          if (!pip && error == null)
             Positioned.fill(
-              child: ValueListenableBuilder<bool>(
-                valueListenable: _buffering,
-                builder: (_, bool buffering, __) {
-                  if (!buffering || _loading || error != null) {
-                    return const SizedBox.shrink();
-                  }
-                  return const IgnorePointer(
-                    child: Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: <Widget>[
-                          CircularProgressIndicator(color: Colors.white),
-                          SizedBox(height: 12),
-                          Text(
-                            'Buffering…',
-                            style: TextStyle(
-                              color: Colors.white70,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                },
+              child: MoviePlayerControls(
+                player: _player,
+                title: _displayTitle,
+                status: _statusText,
+                pendingSeek: _pendingSeek,
+                locked: _locked,
+                lockPoke: _lockPoke,
+                toast: _toast,
+                immersive: immersive,
+                interactive: _ready && !_loading,
+                showCast: Platform.isAndroid,
+                showPip: _pipSupported,
+                aspectLabel: aspectLabel,
+                onBack: _handleBack,
+                onSubtitles: _showSubtitleSheet,
+                onSettings: _showSettingsSheet,
+                onCast: () => unawaited(_openCast()),
+                onPip: () => unawaited(_enterPip()),
+                onToggleFullscreen: _toggleFullscreen,
+                onCycleAspect: _cycleAspect,
+                onSeekRelative: (Duration offset) =>
+                    unawaited(_seekRelative(offset)),
+                onSeekStart: _handleSeekBarStart,
+                onSeekTo: _handleSeekBarSeek,
+                onDownload: widget.isLocal
+                    ? null
+                    : () => unawaited(_downloadCurrentQuality()),
               ),
             ),
-            if (error != null) _buildErrorOverlay(t, error),
-          ],
-        ),
+        ],
       ),
     );
-  }
-}
 
-
-/// `1:02:03` / `42:10` — one formatter for the bar, the drag bubble and the
-/// status line.
-String _movieClock(Duration d) {
-  final int h = d.inHours;
-  final int m = d.inMinutes.remainder(60);
-  final String s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
-  return h > 0 ? '$h:${m.toString().padLeft(2, '0')}:$s' : '$m:$s';
-}
-
-/// The player's own seek bar.
-///
-/// The stock material bar was the reason seeking felt broken: it is only 30 px
-/// tall at the very bottom of the screen (over Android's gesture strip, where
-/// a drag is often taken by the system), and on a plain tap it seeks to the
-/// *previous* drag value instead of where the finger went down.
-///
-/// This one is a 32 px tall grab area mounted above the button row (well clear
-/// of the bottom gesture strip), with a 5 px track and a 16 px thumb. A tap
-/// lands exactly where the finger went down; a drag scrubs live and shows the
-/// target timestamp above the thumb while the finger is on the bar.
-class _MovieSeekBar extends StatefulWidget {
-  const _MovieSeekBar({
-    required this.player,
-    required this.pendingSeek,
-    required this.onSeekStart,
-    required this.onSeek,
-    required this.onSeekEnd,
-  });
-
-  final Player player;
-
-  /// The timestamp a seek was asked for and has not been confirmed yet. While
-  /// it is set the bar draws *that*, not the position events still arriving
-  /// from where the video used to be.
-  final ValueNotifier<Duration?> pendingSeek;
-
-  final VoidCallback onSeekStart;
-  final void Function(Duration target) onSeek;
-  final VoidCallback onSeekEnd;
-
-  @override
-  State<_MovieSeekBar> createState() => _MovieSeekBarState();
-}
-
-class _MovieSeekBarState extends State<_MovieSeekBar> {
-  static const Color _accent = Color(0xFFFA2D48);
-  static const double _track = 5;
-  static const double _height = 32;
-  static const double _thumb = 16;
-
-  final List<StreamSubscription<dynamic>> _subs =
-      <StreamSubscription<dynamic>>[];
-
-  Duration _position = Duration.zero;
-  Duration _duration = Duration.zero;
-  Duration _buffer = Duration.zero;
-
-  /// 0..1 while a finger is on the bar; null when it follows the video.
-  double? _drag;
-
-  @override
-  void initState() {
-    super.initState();
-    _position = widget.player.state.position;
-    _duration = widget.player.state.duration;
-    _buffer = widget.player.state.buffer;
-    widget.pendingSeek.addListener(_onPendingSeekChanged);
-    _subs.addAll(<StreamSubscription<dynamic>>[
-      widget.player.stream.position.listen((Duration value) {
-        if (!mounted) return;
-        setState(() => _position = value);
-      }),
-      widget.player.stream.duration.listen((Duration value) {
-        if (!mounted) return;
-        setState(() => _duration = value);
-      }),
-      widget.player.stream.buffer.listen((Duration value) {
-        if (!mounted) return;
-        setState(() => _buffer = value);
-      }),
-      widget.player.stream.completed.listen((bool done) {
-        if (!mounted || !done) return;
-        setState(() => _position = Duration.zero);
-      }),
-    ]);
-  }
-
-  @override
-  void dispose() {
-    widget.pendingSeek.removeListener(_onPendingSeekChanged);
-    for (final StreamSubscription<dynamic> sub in _subs) {
-      unawaited(sub.cancel());
-    }
-    super.dispose();
-  }
-
-  void _onPendingSeekChanged() {
-    if (mounted) setState(() {});
-  }
-
-  double get _played {
-    final double? drag = _drag;
-    if (drag != null) return drag;
-    final int total = _duration.inMilliseconds;
-    if (total <= 0) return 0;
-    // A drag that has been let go of but not landed yet stays under the
-    // finger's last position. Letting the stale position stream pull the thumb
-    // back is what made a long seek look like it never happened.
-    final Duration shown = widget.pendingSeek.value ?? _position;
-    return (shown.inMilliseconds / total).clamp(0.0, 1.0);
-  }
-
-  double get _buffered {
-    final int total = _duration.inMilliseconds;
-    if (total <= 0) return 0;
-    return (_buffer.inMilliseconds / total).clamp(0.0, 1.0);
-  }
-
-  void _seekToFraction(double fraction) {
-    if (_duration <= Duration.zero) return;
-    widget.onSeek(_duration * fraction.clamp(0.0, 1.0));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (BuildContext context, BoxConstraints constraints) {
-        final double width = constraints.maxWidth;
-        double fractionOf(Offset local) => width <= 0
-            ? 0
-            : (local.dx / width).clamp(0.0, 1.0);
-        final double played = _played;
-        final double buffered = _buffered;
-        final double maxThumbX = width > _thumb ? width - _thumb : 0;
-        final double thumbX = (played * width - _thumb / 2)
-            .clamp(0.0, maxThumbX);
-
-        Widget bar(double fraction, Color color) => Positioned(
-              left: 0,
-              width: width * fraction,
-              child: Container(
-                height: _track,
-                decoration: BoxDecoration(
-                  color: color,
-                  borderRadius: BorderRadius.circular(999),
-                ),
-              ),
-            );
-
-        return GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTapDown: (TapDownDetails details) {
-            final double fraction = fractionOf(details.localPosition);
-            widget.onSeekStart();
-            _seekToFraction(fraction);
-            widget.onSeekEnd();
-          },
-          onHorizontalDragStart: (DragStartDetails details) {
-            widget.onSeekStart();
-            setState(() => _drag = fractionOf(details.localPosition));
-          },
-          onHorizontalDragUpdate: (DragUpdateDetails details) {
-            setState(() => _drag = fractionOf(details.localPosition));
-          },
-          onHorizontalDragEnd: (DragEndDetails details) {
-            final double? fraction = _drag;
-            setState(() => _drag = null);
-            if (fraction != null) _seekToFraction(fraction);
-            widget.onSeekEnd();
-          },
-          onHorizontalDragCancel: () {
-            setState(() => _drag = null);
-            widget.onSeekEnd();
-          },
-          child: SizedBox(
-            height: _height,
-            child: Stack(
-              clipBehavior: Clip.none,
-              alignment: Alignment.centerLeft,
-              children: <Widget>[
-                bar(1, Colors.white24),
-                bar(buffered, Colors.white38),
-                bar(played, _accent),
-                Positioned(
-                  left: thumbX,
-                  child: Container(
-                    width: _thumb,
-                    height: _thumb,
-                    decoration: const BoxDecoration(
-                      color: _accent,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                ),
-                if (_drag != null)
-                  Positioned(
-                    left: (thumbX - 26).clamp(
-                      0.0,
-                      width > 52 ? width - 52 : 0.0,
-                    ),
-                    bottom: _height - 2,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 7,
-                        vertical: 3,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.78),
-                        borderRadius: BorderRadius.circular(7),
-                      ),
-                      child: Text(
-                        _movieClock(_duration * _drag!),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
+    final Widget body;
+    if (immersive) {
+      // Landscape: the video is the screen.
+      body = stage;
+    } else {
+      // Portrait: a 16:9 player on top (never more than half the screen, for
+      // tablets and unfolded phones), the title's details scrolling below.
+      final double wanted = size.width * 9 / 16;
+      final double limit = size.height * 0.5;
+      body = SafeArea(
+        bottom: false,
+        child: Column(
+          children: <Widget>[
+            SizedBox(
+              width: double.infinity,
+              height: wanted < limit ? wanted : limit,
+              child: stage,
             ),
-          ),
-        );
+            Expanded(child: _buildInfoPanel(library)),
+          ],
+        ),
+      );
+    }
+
+    return PopScope(
+      // Back is decided by the player: locked → nothing, landscape → portrait,
+      // portrait → close.
+      canPop: false,
+      onPopInvokedWithResult: (bool didPop, Object? _) {
+        if (!didPop) _handleBack();
       },
+      child: AnnotatedRegion<SystemUiOverlayStyle>(
+        value: SystemUiOverlayStyle.light,
+        child: Scaffold(
+          backgroundColor: Colors.black,
+          body: Stack(
+            fit: StackFit.expand,
+            children: <Widget>[
+              body,
+              if (error != null && !pip) _buildErrorOverlay(t, error),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

@@ -212,7 +212,8 @@ class MovieDownloadService extends ChangeNotifier {
   }
 
   static String _sanitizeFileName(String raw) {
-    final String cleaned = raw
+    // The source site's name never ends up in a file name on the phone.
+    final String cleaned = scrubSourceNames(raw)
         .replaceAll(RegExp(r'[<>:"/\\|?*\x00-\x1F]+'), '_')
         .replaceAll(RegExp(r'\s+'), ' ')
         .trim();
@@ -287,7 +288,9 @@ class MovieDownloadService extends ChangeNotifier {
 
     final MovieDownloadItem created = MovieDownloadItem(
       id: itemId,
-      movieTitle: detail.cleanTitle.isNotEmpty ? detail.cleanTitle : detail.title,
+      movieTitle: scrubSourceNames(
+        detail.cleanTitle.isNotEmpty ? detail.cleanTitle : detail.title,
+      ),
       posterUrl: detail.posterUrl.isNotEmpty ? detail.posterUrl : detail.backdropUrl,
       isSeries: detail.isSeries,
       seasonLabel: quality.seasonLabel.isNotEmpty
