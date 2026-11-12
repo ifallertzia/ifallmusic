@@ -448,8 +448,8 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
   }
 }
 
-/// Horizontal rail of the newest premium-catalog titles, each card carrying
-/// the gold PREMIUM chip.
+/// Horizontal rail of the newest titles of the second catalog, each card
+/// carrying the gold IMAX HD chip.
 class _PremiumRail extends StatelessWidget {
   const _PremiumRail({required this.posts});
 
@@ -467,14 +467,12 @@ class _PremiumRail extends StatelessWidget {
             children: <Widget>[
               Expanded(
                 child: Text(
-                  'Premium catalog',
+                  'IMAX HD catalog',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: SidifyText.title(t.text),
                 ),
               ),
-              const SizedBox(width: 8),
-              const PremiumProviderBadge(),
             ],
           ),
         ),
@@ -498,6 +496,7 @@ class _PremiumRail extends StatelessWidget {
                         child: MoviePosterImage(
                           imageUrl: post.imageUrl,
                           fallbackUrl: post.fallbackImageUrl,
+                          referer: post.link,
                           borderRadius: BorderRadius.circular(12),
                         ),
                       ),

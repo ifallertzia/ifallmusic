@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -5,9 +7,12 @@ import 'package:provider/provider.dart';
 import '../../core/services/app_feedback.dart';
 import '../../core/theme/sidify_theme.dart';
 import '../models/movie_models.dart';
+import '../models/movie_provider.dart';
 import '../services/movie_download_service.dart';
+import '../services/movie_image_loader.dart';
 import '../services/movie_quality_order.dart';
 import '../services/movie_source.dart';
+import '../services/movie_text_scrub.dart';
 import '../services/movies_repository.dart';
 import 'movie_downloads_page.dart';
 import 'movie_player_page.dart';
@@ -16,17 +21,31 @@ export '../services/movie_quality_order.dart';
 
 /// Resilient network poster/backdrop widget with automatic secondary URL
 /// failover and zero-network placeholder when [imageUrl] is empty.
+///
+/// A poster is tried three ways, in order, before the placeholder is left up:
+///
+///  1. [imageUrl] through the image cache,
+///  2. [fallbackUrl] through the image cache,
+///  3. both again through [MovieImageLoader] — the catalog's own transport,
+///     with a browser User-Agent, a `Referer` and DNS-over-HTTPS. This is the
+///     step that brings back the IMAX HD thumbnails on networks where the
+///     plain image cache cannot reach their host.
 class MoviePosterImage extends StatefulWidget {
   const MoviePosterImage({
     super.key,
     required this.imageUrl,
     this.fallbackUrl = '',
+    this.referer = '',
     this.fit = BoxFit.cover,
     this.borderRadius = BorderRadius.zero,
   });
 
   final String imageUrl;
   final String fallbackUrl;
+
+  /// The catalog page this poster belongs to. Only used by the last-resort
+  /// loader, for hosts that refuse hot-linked images.
+  final String referer;
   final BoxFit fit;
   final BorderRadius borderRadius;
 
@@ -37,12 +56,60 @@ class MoviePosterImage extends StatefulWidget {
 class _MoviePosterImageState extends State<MoviePosterImage> {
   bool _triedFallback = false;
 
+  /// Set once the image cache has given up: the bytes come from the loader.
+  bool _useLoader = false;
+  Future<Uint8List?>? _loaderFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _startOnLoaderIfKnown();
+  }
+
   @override
   void didUpdateWidget(covariant MoviePosterImage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.imageUrl != widget.imageUrl) {
+    if (oldWidget.imageUrl != widget.imageUrl ||
+        oldWidget.fallbackUrl != widget.fallbackUrl) {
       _triedFallback = false;
+      _useLoader = false;
+      _loaderFuture = null;
+      _startOnLoaderIfKnown();
     }
+  }
+
+  /// Posters from a host that already needed the loader skip the attempt that
+  /// is known to fail, so a scrolled list does not flash placeholders.
+  void _startOnLoaderIfKnown() {
+    final MovieImageLoader loader = MovieImageLoader.instance;
+    final String url = widget.imageUrl.trim();
+    if (url.isEmpty || !loader.isAvailable) return;
+    if (loader.peek(url) != null || loader.prefersLoader(url)) {
+      _useLoader = true;
+      _loaderFuture = _loadThroughLoader();
+    }
+  }
+
+  Future<Uint8List?> _loadThroughLoader() async {
+    final MovieImageLoader loader = MovieImageLoader.instance;
+    final String primary = widget.imageUrl.trim();
+    final String fallback = widget.fallbackUrl.trim();
+    final Uint8List? first =
+        await loader.load(primary, referer: widget.referer);
+    if (first != null) return first;
+    if (fallback.isEmpty || fallback == primary) return null;
+    return loader.load(fallback, referer: widget.referer);
+  }
+
+  void _switchToLoader() {
+    if (_useLoader || !MovieImageLoader.instance.isAvailable) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _useLoader) return;
+      setState(() {
+        _useLoader = true;
+        _loaderFuture = _loadThroughLoader();
+      });
+    });
   }
 
   Widget _placeholder(SidifyTokens t) {
@@ -77,6 +144,26 @@ class _MoviePosterImageState extends State<MoviePosterImage> {
       );
     }
 
+    if (_useLoader) {
+      return ClipRRect(
+        borderRadius: widget.borderRadius,
+        child: FutureBuilder<Uint8List?>(
+          future: _loaderFuture,
+          initialData: MovieImageLoader.instance.peek(widget.imageUrl.trim()),
+          builder: (BuildContext context, AsyncSnapshot<Uint8List?> snapshot) {
+            final Uint8List? bytes = snapshot.data;
+            if (bytes == null) return _placeholder(t);
+            return Image.memory(
+              bytes,
+              fit: widget.fit,
+              gaplessPlayback: true,
+              errorBuilder: (_, __, ___) => _placeholder(t),
+            );
+          },
+        ),
+      );
+    }
+
     return ClipRRect(
       borderRadius: widget.borderRadius,
       child: CachedNetworkImage(
@@ -92,6 +179,10 @@ class _MoviePosterImageState extends State<MoviePosterImage> {
                 setState(() => _triedFallback = true);
               }
             });
+          } else {
+            // The image cache is out of options: fetch it the way the catalog
+            // page itself was fetched.
+            _switchToLoader();
           }
           return _placeholder(t);
         },
@@ -185,10 +276,10 @@ class MovieDownloadsActionButton extends StatelessWidget {
 }
 
 /// Poster grid card shared by Movies Home, Explore and related shelves.
-/// The little gold *PREMIUM* chip shown under premium-catalog results.
+/// The little gold *IMAX HD* chip shown under results of the second catalog.
 ///
-/// Search lists both catalogs at once; the HDHub4U row is the premium one and
-/// says so, while the normal EonMovies row stays plain.
+/// Search lists both catalogs at once; that catalog's rows carry this chip
+/// (never the source's own name), while the normal rows stay plain.
 class PremiumProviderBadge extends StatelessWidget {
   const PremiumProviderBadge({super.key, this.compact = false});
 
@@ -212,13 +303,13 @@ class PremiumProviderBadge extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           Icon(
-            Icons.workspace_premium_rounded,
+            Icons.hd_rounded,
             size: compact ? 10 : 12,
             color: gold,
           ),
           SizedBox(width: compact ? 3 : 4),
           Text(
-            'PREMIUM',
+            MovieProvider.hdhub4u.badgeLabel,
             style: TextStyle(
               fontSize: compact ? 7.5 : 9,
               letterSpacing: 0.6,
@@ -253,6 +344,7 @@ class MovieGridCard extends StatelessWidget {
                 MoviePosterImage(
                   imageUrl: post.imageUrl,
                   fallbackUrl: post.fallbackImageUrl,
+                  referer: post.link,
                   borderRadius: BorderRadius.circular(12),
                 ),
                 if (post.badge.isNotEmpty || post.isSeries)
@@ -1166,7 +1258,7 @@ class _ZipPackOptionsSheetState extends State<_ZipPackOptionsSheet> {
       quality: epQuality,
     );
     showAppNotice(
-      'Download started: ${episode.episodeLabel.isNotEmpty ? episode.episodeLabel : episode.fileName} '
+      'Download started: ${episode.episodeLabel.isNotEmpty ? episode.episodeLabel : scrubSourceNames(episode.fileName)} '
       '(${widget.quality.displayQuality}) — this episode only',
     );
     if (!mounted) return;
@@ -1425,7 +1517,7 @@ class _ZipPackOptionsSheetState extends State<_ZipPackOptionsSheet> {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  '${episode.sizeLabel} • ${episode.fileName}',
+                  '${episode.sizeLabel} • ${scrubSourceNames(episode.fileName)}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: SidifyText.caption(t.text2),

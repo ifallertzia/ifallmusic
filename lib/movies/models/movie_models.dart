@@ -324,6 +324,7 @@ class MovieDetail {
     this.episodeGroups = const <MovieEpisodeGroup>[],
     this.relatedPosts = const <MoviePost>[],
     this.provider = MovieProvider.eonMovies,
+    this.rating = '',
   });
 
   final String title;
@@ -350,6 +351,10 @@ class MovieDetail {
   /// Catalog that served this title.
   final MovieProvider provider;
 
+  /// The score the title's own page states ("7.4"), out of ten. Empty when
+  /// the page does not state one — a rating is never made up.
+  final String rating;
+
   bool get isSeries => type == MovieMediaType.series;
 
   MovieDetail copyWith({
@@ -374,6 +379,7 @@ class MovieDetail {
     List<MovieEpisodeGroup>? episodeGroups,
     List<MoviePost>? relatedPosts,
     MovieProvider? provider,
+    String? rating,
   }) {
     return MovieDetail(
       title: title ?? this.title,
@@ -397,6 +403,7 @@ class MovieDetail {
       episodeGroups: episodeGroups ?? this.episodeGroups,
       relatedPosts: relatedPosts ?? this.relatedPosts,
       provider: provider ?? this.provider,
+      rating: rating ?? this.rating,
     );
   }
 }

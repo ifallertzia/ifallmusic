@@ -7,6 +7,7 @@ import '../../core/services/app_feedback.dart';
 import '../../core/services/native_bridge.dart';
 import '../../core/theme/sidify_theme.dart';
 import '../models/movie_models.dart';
+import '../services/movie_text_scrub.dart';
 import 'movie_player_page.dart';
 
 void openLocalVideosPage(BuildContext context) {
@@ -19,6 +20,13 @@ void openLocalVideosPage(BuildContext context) {
 }
 
 enum _LocalVideoState { loading, ready, permissionDenied, unsupported }
+
+/// The name shown for a video on the device. Files saved from the catalogs are
+/// stamped with their uploader's site name; that name is never displayed.
+String _videoTitle(LocalVideoFile video) {
+  final String title = scrubSourceNames(video.title);
+  return title.isNotEmpty ? title : 'Video';
+}
 
 class LocalVideosPage extends StatefulWidget {
   const LocalVideosPage({super.key});
@@ -85,13 +93,13 @@ class _LocalVideosPageState extends State<LocalVideosPage> {
       context,
       item: MovieDownloadItem(
         id: 'local_${video.id}',
-        movieTitle: video.title.isNotEmpty ? video.title : 'Video',
+        movieTitle: _videoTitle(video),
         qualityLabel: label,
         sourceDlUrl: '',
         status: MovieDownloadStatus.completed,
         createdAtMs: video.dateAdded * 1000,
         savedPath: video.path,
-        fileName: video.path.split('/').last,
+        fileName: scrubSourceNames(video.path.split('/').last),
         mimeType: video.mimeType.isNotEmpty ? video.mimeType : 'video/mp4',
         totalBytes: video.size,
         downloadedBytes: video.size,
@@ -201,7 +209,7 @@ class _LocalVideosPageState extends State<LocalVideosPage> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: <Widget>[
                             Text(
-                              video.title.isNotEmpty ? video.title : 'Video',
+                              _videoTitle(video),
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                               style: SidifyText.body(t.text),

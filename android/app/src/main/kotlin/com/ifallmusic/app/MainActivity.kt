@@ -2,6 +2,7 @@ package com.ifallmusic.app
 
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.os.Build
 import android.view.WindowManager
 import com.ryanheise.audioservice.AudioServiceActivity
@@ -49,6 +50,21 @@ class MainActivity : AudioServiceActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         intent.dataString?.let { DeepLinkInbox.offer(it) }
+    }
+
+    // The movie player can shrink into a picture-in-picture window. Dart is
+    // told when that starts and ends so the player hides its controls and
+    // details while the window is small, and brings them back afterwards.
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean,
+        newConfig: Configuration,
+    ) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        try {
+            DeepLinkInbox.channel?.invokeMethod("onPipChanged", isInPictureInPictureMode)
+        } catch (e: Exception) {
+            // The engine may be shutting down; Dart also asks via `inPip`.
+        }
     }
 
     // Flutter renders at whatever the panel offers. Phones that ship with a

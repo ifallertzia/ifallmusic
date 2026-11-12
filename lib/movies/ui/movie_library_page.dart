@@ -185,6 +185,7 @@ class MovieLibraryPage extends StatelessWidget {
               child: MoviePosterImage(
                 imageUrl: post.imageUrl,
                 fallbackUrl: post.fallbackImageUrl,
+                referer: post.link,
                 borderRadius: BorderRadius.circular(7),
               ),
             ),

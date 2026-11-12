@@ -108,18 +108,27 @@ class NativeBridge {
     return snap.sdk;
   }
 
+  /// Copies [sourcePath] into the phone's public `Download/IfallMusic` folder.
+  ///
+  /// [existingUri] is the public copy made by an earlier save, if any: when it
+  /// is still there the file is not copied a second time and the returned
+  /// [SavedFile.existing] is true. Throws a [PlatformException] carrying a
+  /// readable message when the copy fails (no space, no permission, …).
   static Future<SavedFile?> saveToDownloads({
     required String sourcePath,
     required String displayName,
     required String mime,
+    String? existingUri,
   }) async {
     if (kIsWeb || !Platform.isAndroid) return null;
     final Object? raw = await _channel.invokeMethod<Object>(
       'saveToDownloads',
-      <String, Object>{
+      <String, Object?>{
         'sourcePath': sourcePath,
         'displayName': displayName,
         'mime': mime,
+        if (existingUri != null && existingUri.isNotEmpty)
+          'existingUri': existingUri,
       },
     );
     if (raw is! Map) return null;
@@ -233,13 +242,86 @@ class NativeBridge {
     }
   }
 
-  /// Registers a handler for deep links arriving while the app runs.
-  static void onDeepLink(void Function(String link) handler) {
+  static void Function(String link)? _deepLinkHandler;
+  static bool _callHandlerInstalled = false;
+
+  /// The one handler for calls arriving *from* Android: deep links and
+  /// picture-in-picture changes share the channel, so they share the handler.
+  static void _ensureCallHandler() {
+    if (_callHandlerInstalled) return;
+    _callHandlerInstalled = true;
     _channel.setMethodCallHandler((MethodCall call) async {
       if (call.method == 'onDeepLink' && call.arguments is String) {
-        handler(call.arguments as String);
+        _deepLinkHandler?.call(call.arguments as String);
+      } else if (call.method == 'onPipChanged') {
+        pipMode.value = call.arguments == true;
       }
     });
+  }
+
+  /// Registers a handler for deep links arriving while the app runs.
+  static void onDeepLink(void Function(String link) handler) {
+    _deepLinkHandler = handler;
+    _ensureCallHandler();
+  }
+
+  // ---- Movie player: picture-in-picture and the system Cast screen ---------
+
+  /// True while the app is shown as a floating picture-in-picture window.
+  static final ValueNotifier<bool> pipMode = ValueNotifier<bool>(false);
+
+  /// Whether this device can show the player as a floating window.
+  static Future<bool> pictureInPictureSupported() async {
+    if (kIsWeb || !Platform.isAndroid) return false;
+    try {
+      return await _channel.invokeMethod<bool>('pipSupported') == true;
+    } catch (e) {
+      debugPrint('[IfallMusic][PiP] pipSupported failed: $e');
+      return false;
+    }
+  }
+
+  /// Shrinks the app into a floating window shaped [width]:[height]. Returns
+  /// false when the device or the user's settings do not allow it.
+  static Future<bool> enterPictureInPicture({
+    int width = 16,
+    int height = 9,
+  }) async {
+    if (kIsWeb || !Platform.isAndroid) return false;
+    _ensureCallHandler();
+    try {
+      final bool entered = await _channel.invokeMethod<bool>(
+            'enterPip',
+            <String, Object>{'width': width, 'height': height},
+          ) ==
+          true;
+      if (entered) pipMode.value = true;
+      return entered;
+    } catch (e) {
+      debugPrint('[IfallMusic][PiP] enterPip failed: $e');
+      return false;
+    }
+  }
+
+  /// Re-reads the picture-in-picture state from Android (used when the
+  /// player comes back to the foreground).
+  static Future<void> refreshPictureInPictureState() async {
+    if (kIsWeb || !Platform.isAndroid) return;
+    try {
+      pipMode.value = await _channel.invokeMethod<bool>('inPip') == true;
+    } catch (_) {}
+  }
+
+  /// Opens Android's "Cast" screen, where the phone's display is mirrored to
+  /// a TV. Returns false when the device has no such screen.
+  static Future<bool> openCastSettings() async {
+    if (kIsWeb || !Platform.isAndroid) return false;
+    try {
+      return await _channel.invokeMethod<bool>('openCastSettings') == true;
+    } catch (e) {
+      debugPrint('[IfallMusic][Cast] openCastSettings failed: $e');
+      return false;
+    }
   }
 
   static Future<void> openContent(String uri, String mime) async {
@@ -445,6 +527,7 @@ class SavedFile {
     this.path,
     this.size = 0,
     this.modifiedMs = 0,
+    this.existing = false,
   });
 
   final String displayName;
@@ -453,6 +536,9 @@ class SavedFile {
   final int size;
   final int modifiedMs;
 
+  /// True when the public copy was already there and nothing was copied.
+  final bool existing;
+
   factory SavedFile.fromMap(Map<Object?, Object?> raw) {
     return SavedFile(
       displayName: raw['displayName'] as String? ?? 'file',
@@ -460,6 +546,7 @@ class SavedFile {
       path: raw['path'] as String?,
       size: raw['size'] is int ? raw['size'] as int : 0,
       modifiedMs: raw['modifiedMs'] is int ? raw['modifiedMs'] as int : 0,
+      existing: raw['existing'] == true,
     );
   }
 }

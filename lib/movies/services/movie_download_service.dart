@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -13,6 +14,7 @@ import '../../core/services/app_feedback.dart';
 import '../../core/services/native_bridge.dart';
 import '../models/movie_models.dart';
 import 'eon_movies_service.dart';
+import 'movie_text_scrub.dart';
 import 'movies_repository.dart';
 import 'remote_zip.dart';
 
@@ -210,7 +212,8 @@ class MovieDownloadService extends ChangeNotifier {
   }
 
   static String _sanitizeFileName(String raw) {
-    final String cleaned = raw
+    // The source site's name never ends up in a file name on the phone.
+    final String cleaned = scrubSourceNames(raw)
         .replaceAll(RegExp(r'[<>:"/\\|?*\x00-\x1F]+'), '_')
         .replaceAll(RegExp(r'\s+'), ' ')
         .trim();
@@ -285,7 +288,9 @@ class MovieDownloadService extends ChangeNotifier {
 
     final MovieDownloadItem created = MovieDownloadItem(
       id: itemId,
-      movieTitle: detail.cleanTitle.isNotEmpty ? detail.cleanTitle : detail.title,
+      movieTitle: scrubSourceNames(
+        detail.cleanTitle.isNotEmpty ? detail.cleanTitle : detail.title,
+      ),
       posterUrl: detail.posterUrl.isNotEmpty ? detail.posterUrl : detail.backdropUrl,
       isSeries: detail.isSeries,
       seasonLabel: quality.seasonLabel.isNotEmpty
@@ -407,25 +412,70 @@ class MovieDownloadService extends ChangeNotifier {
     return OpenFilex.open(item.savedPath, type: item.mimeType);
   }
 
-  /// Copies the finished file into Android's public `Download/IfallMusic` folder.
-  Future<SavedFile?> saveToDeviceDownloads(MovieDownloadItem item) async {
+  /// Ids whose file is being copied to the phone's Downloads right now. A
+  /// movie is gigabytes, so the copy takes a while: the card shows "Saving…"
+  /// for it and a second tap does not start a second copy.
+  final Set<String> _savingToDevice = <String>{};
+
+  bool isSavingToDevice(String id) => _savingToDevice.contains(id);
+
+  /// Copies the finished file into Android's public `Download/IfallMusic`
+  /// folder and reports exactly what happened — a failure is never silent.
+  Future<MovieSaveOutcome> saveToPhoneDownloads(MovieDownloadItem item) async {
+    if (_savingToDevice.contains(item.id)) {
+      return const MovieSaveOutcome(MovieSaveStatus.busy);
+    }
     if (item.savedPath.isEmpty || !File(item.savedPath).existsSync()) {
-      return null;
+      return const MovieSaveOutcome(MovieSaveStatus.missingFile);
     }
-    final SavedFile? saved = await NativeBridge.saveToDownloads(
-      sourcePath: item.savedPath,
-      displayName: item.fileName.isNotEmpty
+    if (kIsWeb || !Platform.isAndroid) {
+      return const MovieSaveOutcome(MovieSaveStatus.unsupported);
+    }
+
+    _savingToDevice.add(item.id);
+    _notifySafe();
+    try {
+      final String rawName = item.fileName.isNotEmpty
           ? item.fileName
-          : '${item.movieTitle}.mkv',
-      mime: item.mimeType,
-    );
-    if (saved != null) {
-      _upsertItem(
-        item.copyWith(publicUri: saved.uri ?? ''),
-        persistImmediate: true,
+          : '${item.movieTitle}${item.isZip ? '.zip' : '.mkv'}';
+      // The public copy is what a file manager shows: it never carries the
+      // source site's name.
+      final String scrubbed = scrubSourceNames(rawName);
+      final SavedFile? saved = await NativeBridge.saveToDownloads(
+        sourcePath: item.savedPath,
+        displayName: scrubbed.isNotEmpty ? scrubbed : rawName,
+        mime: item.mimeType,
+        existingUri: item.publicUri,
       );
+      if (saved == null) {
+        return const MovieSaveOutcome(MovieSaveStatus.failed);
+      }
+      final MovieDownloadItem latest = itemById(item.id) ?? item;
+      final String uri = saved.uri ?? '';
+      if (uri.isNotEmpty && latest.publicUri != uri) {
+        _upsertItem(latest.copyWith(publicUri: uri), persistImmediate: true);
+      }
+      return MovieSaveOutcome(
+        saved.existing ? MovieSaveStatus.alreadySaved : MovieSaveStatus.saved,
+        file: saved,
+      );
+    } on PlatformException catch (error) {
+      return MovieSaveOutcome(
+        MovieSaveStatus.failed,
+        message: (error.message ?? '').trim(),
+      );
+    } catch (_) {
+      return const MovieSaveOutcome(MovieSaveStatus.failed);
+    } finally {
+      _savingToDevice.remove(item.id);
+      _notifySafe();
     }
-    return saved;
+  }
+
+  /// Kept for older callers: the saved file, or null when nothing was saved.
+  Future<SavedFile?> saveToDeviceDownloads(MovieDownloadItem item) async {
+    final MovieSaveOutcome outcome = await saveToPhoneDownloads(item);
+    return outcome.file;
   }
 
   Future<bool> openSharePageExternal(MovieDownloadItem item) async {
@@ -1058,4 +1108,38 @@ class MovieDownloadService extends ChangeNotifier {
     _cancelTokens.clear();
     super.dispose();
   }
+}
+
+/// What happened when a finished download was copied to the phone's Downloads.
+enum MovieSaveStatus {
+  /// Copied just now.
+  saved,
+
+  /// An earlier copy is still in Downloads; nothing was copied again.
+  alreadySaved,
+
+  /// A copy of this very file is still running.
+  busy,
+
+  /// The downloaded file is no longer where the app left it.
+  missingFile,
+
+  /// This platform has no public Downloads folder to copy into.
+  unsupported,
+
+  /// The copy failed; [MovieSaveOutcome.message] says why when known.
+  failed,
+}
+
+class MovieSaveOutcome {
+  const MovieSaveOutcome(this.status, {this.file, this.message = ''});
+
+  final MovieSaveStatus status;
+  final SavedFile? file;
+
+  /// The reason reported by the platform for a [MovieSaveStatus.failed] copy.
+  final String message;
+
+  bool get ok =>
+      status == MovieSaveStatus.saved || status == MovieSaveStatus.alreadySaved;
 }

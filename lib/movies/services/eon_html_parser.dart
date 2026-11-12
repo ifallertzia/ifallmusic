@@ -4,6 +4,7 @@ import 'package:html/dom.dart';
 import 'package:html/parser.dart' as html_parser;
 
 import '../models/movie_models.dart';
+import 'movie_rating.dart';
 
 class LinksBoxMirror {
   const LinksBoxMirror({required this.label, required this.url});
@@ -564,10 +565,14 @@ abstract final class EonHtmlParser {
 
     String releaseDate = '';
     String director = '';
+    String rating = '';
     final List<String> qualityBadges = <String>[];
     for (final String pill in metaPills) {
       if (RegExp(r'^\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4}$').hasMatch(pill)) {
         releaseDate = pill;
+      } else if (extractMovieRatingFromLabel(pill).isNotEmpty) {
+        // A score pill ("⭐ 7.4") is the rating, not the director's name.
+        if (rating.isEmpty) rating = extractMovieRatingFromLabel(pill);
       } else if (RegExp(
         r'^(?:4K|2160p|1440p|1080p|720p|540p|480p|WEB-DL|BluRay|HDTC|HDRip)$',
         caseSensitive: false,
@@ -725,6 +730,7 @@ abstract final class EonHtmlParser {
       directQualities: isSeries ? const <MovieQualityLink>[] : directQualities,
       episodeGroups: finalGroups,
       relatedPosts: relatedPosts,
+      rating: rating,
     );
   }
 

@@ -252,6 +252,7 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
                     fallbackUrl: detail?.fallbackBackdropUrl.isNotEmpty == true
                         ? detail!.fallbackBackdropUrl
                         : widget.initialPost.fallbackImageUrl,
+                    referer: widget.initialPost.link,
                   ),
                   DecoratedBox(
                     decoration: BoxDecoration(
@@ -284,6 +285,7 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
                                 detail?.fallbackPosterUrl.isNotEmpty == true
                                     ? detail!.fallbackPosterUrl
                                     : widget.initialPost.fallbackImageUrl,
+                            referer: widget.initialPost.link,
                             borderRadius: BorderRadius.circular(14),
                           ),
                         ),
@@ -441,13 +443,17 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
       ),
     );
 
-    if (detail.genres.isNotEmpty || detail.releaseDate.isNotEmpty) {
+    if (detail.genres.isNotEmpty ||
+        detail.releaseDate.isNotEmpty ||
+        detail.rating.isNotEmpty) {
       widgets.add(const SizedBox(height: 12));
       widgets.add(
         Wrap(
           spacing: 8,
           runSpacing: 8,
           children: <Widget>[
+            // The score the title's own page states; nothing when it has none.
+            if (detail.rating.isNotEmpty) _badge(t, '★ ${detail.rating}'),
             if (detail.releaseDate.isNotEmpty) _badge(t, detail.releaseDate),
             for (final String genre in detail.genres) _badge(t, genre),
           ],
@@ -560,6 +566,7 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
                         child: MoviePosterImage(
                           imageUrl: post.imageUrl,
                           fallbackUrl: post.fallbackImageUrl,
+                          referer: post.link,
                           borderRadius: BorderRadius.circular(12),
                         ),
                       ),

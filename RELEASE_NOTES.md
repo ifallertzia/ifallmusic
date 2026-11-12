@@ -1,3 +1,34 @@
+# Sidify 2.12.0
+
+## Movies — a new player, and the catalog cleaned up
+
+- **A redesigned video player.** Portrait shows the video on top with the
+  title, rating, genres, storyline, servers and related titles underneath;
+  turn the phone (or press Fullscreen) and the video fills the screen. Both
+  layouts share one player, so rotating never reloads the stream — position,
+  speed, quality, audio and subtitles all carry over.
+- **Playback Settings and Subtitles in glass sheets.** Speed, Quality and Audio
+  each open their own list of the options the title really has; subtitles have
+  their own CC button.
+- **Lock.** One tap hides every control and ignores touches until the lock chip
+  is tapped again — the back button included.
+- **Picture-in-picture, aspect ratio and Play on TV.** The player can shrink
+  into a floating window, cycle Fit / Fill / Stretch / 16:9 / 4:3 with a short
+  on-screen label, and open Android's Cast screen to mirror to a TV.
+- **Continue watching.** Leaving a movie, an episode or a downloaded file
+  part-way through and opening it again resumes from the same moment.
+- **Share and Report** from the player, plus **My List** and **Download** right
+  under the video.
+- **PREMIUM is now IMAX HD.** The second catalog's badge and home rail carry
+  the new name, and the source site's own name no longer appears in titles,
+  descriptions, track names or downloaded file names.
+- **Ratings.** When a title's page states a score it is shown on the details
+  page and in the player; when it does not, nothing is shown.
+- **Deleting a download asks first**, and **Save to Downloads** now shows
+  Saving / Saved and explains itself when it cannot save.
+- **Posters that failed to load** are retried over the catalog's own
+  connection, which brings back thumbnails on networks that blocked them.
+
 # Sidify 2.11.0
 
 ## Movies — HDHub4U joins EonMovies
