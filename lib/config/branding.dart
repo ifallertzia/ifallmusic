@@ -57,10 +57,10 @@ class SidifyBranding {
 
   /// Kept in step with pubspec.yaml by `scripts/sync_version.sh`, which CI runs
   /// on every version bump. Do not edit these three by hand.
-  static const String versionLabel = '2.11.0';
-  static const String buildLabel = '63';
+  static const String versionLabel = '2.12.0';
+  static const String buildLabel = '64';
   static const String tagline = 'Stream beyond limits';
-  static const String userAgent = 'Sidify/2.11.0 (Flutter)';
+  static const String userAgent = 'Sidify/2.12.0 (Flutter)';
 
   /// `versionLabel (build buildLabel)` — the string that tells releases apart.
   /// The build number is what Android compares when deciding whether an APK is
