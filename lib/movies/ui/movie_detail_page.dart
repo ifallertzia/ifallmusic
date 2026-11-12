@@ -252,6 +252,7 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
                     fallbackUrl: detail?.fallbackBackdropUrl.isNotEmpty == true
                         ? detail!.fallbackBackdropUrl
                         : widget.initialPost.fallbackImageUrl,
+                    referer: widget.initialPost.link,
                   ),
                   DecoratedBox(
                     decoration: BoxDecoration(
@@ -284,6 +285,7 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
                                 detail?.fallbackPosterUrl.isNotEmpty == true
                                     ? detail!.fallbackPosterUrl
                                     : widget.initialPost.fallbackImageUrl,
+                            referer: widget.initialPost.link,
                             borderRadius: BorderRadius.circular(14),
                           ),
                         ),
@@ -560,6 +562,7 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
                         child: MoviePosterImage(
                           imageUrl: post.imageUrl,
                           fallbackUrl: post.fallbackImageUrl,
+                          referer: post.link,
                           borderRadius: BorderRadius.circular(12),
                         ),
                       ),

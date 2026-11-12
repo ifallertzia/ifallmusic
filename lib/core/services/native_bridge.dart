@@ -108,18 +108,27 @@ class NativeBridge {
     return snap.sdk;
   }
 
+  /// Copies [sourcePath] into the phone's public `Download/IfallMusic` folder.
+  ///
+  /// [existingUri] is the public copy made by an earlier save, if any: when it
+  /// is still there the file is not copied a second time and the returned
+  /// [SavedFile.existing] is true. Throws a [PlatformException] carrying a
+  /// readable message when the copy fails (no space, no permission, …).
   static Future<SavedFile?> saveToDownloads({
     required String sourcePath,
     required String displayName,
     required String mime,
+    String? existingUri,
   }) async {
     if (kIsWeb || !Platform.isAndroid) return null;
     final Object? raw = await _channel.invokeMethod<Object>(
       'saveToDownloads',
-      <String, Object>{
+      <String, Object?>{
         'sourcePath': sourcePath,
         'displayName': displayName,
         'mime': mime,
+        if (existingUri != null && existingUri.isNotEmpty)
+          'existingUri': existingUri,
       },
     );
     if (raw is! Map) return null;
@@ -445,6 +454,7 @@ class SavedFile {
     this.path,
     this.size = 0,
     this.modifiedMs = 0,
+    this.existing = false,
   });
 
   final String displayName;
@@ -453,6 +463,9 @@ class SavedFile {
   final int size;
   final int modifiedMs;
 
+  /// True when the public copy was already there and nothing was copied.
+  final bool existing;
+
   factory SavedFile.fromMap(Map<Object?, Object?> raw) {
     return SavedFile(
       displayName: raw['displayName'] as String? ?? 'file',
@@ -460,6 +473,7 @@ class SavedFile {
       path: raw['path'] as String?,
       size: raw['size'] is int ? raw['size'] as int : 0,
       modifiedMs: raw['modifiedMs'] is int ? raw['modifiedMs'] as int : 0,
+      existing: raw['existing'] == true,
     );
   }
 }

@@ -66,6 +66,7 @@ class SaxifyBridge(private val activity: Activity) {
                         call.argument<String>("sourcePath") ?: "",
                         call.argument<String>("displayName") ?: "track_ifallmusic.mp3",
                         call.argument<String>("mime") ?: "audio/mpeg",
+                        call.argument<String>("existingUri"),
                     )
                 }
                 "deleteDownload" -> io(result) {
@@ -222,13 +223,127 @@ class SaxifyBridge(private val activity: Activity) {
         }
     }
 
-    private fun saveToDownloads(sourcePath: String, displayName: String, mime: String): Map<String, Any?> {
+    private fun saveToDownloads(
+        sourcePath: String,
+        displayName: String,
+        mime: String,
+        existingUri: String? = null,
+    ): Map<String, Any?> {
         val src = File(sourcePath)
-        if (!src.exists()) throw IllegalArgumentException("Source file is missing")
+        if (!src.exists()) throw IllegalArgumentException("The downloaded file is missing")
+        val safeName = safeDisplayName(displayName)
+        // Already copied once and the copy is still there: do not write a
+        // second multi-gigabyte duplicate, just report where it is.
+        if (publicCopyExists(existingUri)) {
+            return mapOf(
+                "displayName" to safeName,
+                "uri" to existingUri,
+                "path" to src.absolutePath,
+                "size" to src.length(),
+                "modifiedMs" to System.currentTimeMillis(),
+                "existing" to true,
+            )
+        }
+        ensureFreeSpace(src.length())
         return if (Build.VERSION.SDK_INT >= 29) {
-            saveMediaStore(src, displayName, mime)
+            saveMediaStore(src, safeName, safeMime(mime, safeName))
         } else {
-            saveLegacy(src, displayName)
+            saveLegacy(src, safeName)
+        }
+    }
+
+    /// A name MediaStore and every file manager accept: no path separators or
+    /// reserved characters, never empty, never longer than a file system takes.
+    private fun safeDisplayName(raw: String): String {
+        var name = raw.replace(Regex("[\\\\/:*?\"<>|\\u0000-\\u001F]+"), "_")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .trim('.')
+        if (name.isEmpty()) name = "download"
+        if (name.length > 150) {
+            val dot = name.lastIndexOf('.')
+            val ext = if (dot > 0 && name.length - dot <= 8) name.substring(dot) else ""
+            name = name.substring(0, 150 - ext.length).trim() + ext
+        }
+        return name
+    }
+
+    /// The MIME type MediaStore is told. A download keeps whatever its server
+    /// sent ("application/octet-stream", "video/x-matroska; charset=…", even
+    /// "text/html"), and MediaStore refuses or renames entries whose type does
+    /// not look like one — so anything vague is replaced by the type the file
+    /// extension stands for.
+    private fun safeMime(raw: String, name: String): String {
+        val cleaned = raw.substringBefore(';').trim().lowercase(Locale.US)
+        val vague = cleaned.isEmpty() ||
+            !Regex("^[a-z0-9][a-z0-9.+-]*/[a-z0-9][a-z0-9.+-]*$").matches(cleaned) ||
+            cleaned == "application/octet-stream" ||
+            cleaned == "binary/octet-stream" ||
+            cleaned == "application/force-download" ||
+            cleaned == "application/download" ||
+            cleaned.startsWith("text/")
+        if (!vague) return cleaned
+        val ext = name.substringAfterLast('.', "").lowercase(Locale.US)
+        val known = when (ext) {
+            "mkv" -> "video/x-matroska"
+            "mp4", "m4v" -> "video/mp4"
+            "webm" -> "video/webm"
+            "avi" -> "video/x-msvideo"
+            "mov" -> "video/quicktime"
+            "ts" -> "video/mp2t"
+            "zip" -> "application/zip"
+            "rar" -> "application/vnd.rar"
+            "mp3" -> "audio/mpeg"
+            "m4a" -> "audio/mp4"
+            "opus" -> "audio/opus"
+            "ogg" -> "audio/ogg"
+            "flac" -> "audio/flac"
+            "srt" -> "application/x-subrip"
+            else -> null
+        }
+        return known
+            ?: android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)
+            ?: "application/octet-stream"
+    }
+
+    private fun publicCopyExists(uri: String?): Boolean {
+        if (uri.isNullOrEmpty()) return false
+        return try {
+            when {
+                uri.startsWith("content:") -> activity.contentResolver.query(
+                    Uri.parse(uri),
+                    arrayOf(MediaStore.MediaColumns._ID),
+                    null,
+                    null,
+                    null,
+                )?.use { cursor -> cursor.moveToFirst() } ?: false
+                uri.startsWith("file:") -> {
+                    val path = Uri.parse(uri).path
+                    path != null && File(path).exists()
+                }
+                else -> false
+            }
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /// A movie is copied, not moved, so it needs its own size again in free
+    /// space. Failing here with a sentence beats a half-written file and a
+    /// bare "ENOSPC" a minute later.
+    @Suppress("DEPRECATION")
+    private fun ensureFreeSpace(bytes: Long) {
+        val free = try {
+            android.os.StatFs(Environment.getExternalStorageDirectory().path).availableBytes
+        } catch (e: Exception) {
+            return
+        }
+        val needed = bytes + 16L * 1024L * 1024L
+        if (free in 0 until needed) {
+            val needMb = (needed - free) / (1024L * 1024L) + 1L
+            throw IllegalStateException(
+                "Not enough free storage. Free up about $needMb MB and try again."
+            )
         }
     }
 
@@ -243,11 +358,21 @@ class SaxifyBridge(private val activity: Activity) {
         val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
         val uri = resolver.insert(collection, values)
             ?: throw IllegalStateException("Could not create a Downloads entry")
-        resolver.openOutputStream(uri)?.use { out ->
-            FileInputStream(src).use { input -> input.copyTo(out) }
-        } ?: throw IllegalStateException("Could not write the download")
-        val done = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }
-        resolver.update(uri, done, null, null)
+        try {
+            resolver.openOutputStream(uri)?.use { out ->
+                FileInputStream(src).use { input -> input.copyTo(out, 1024 * 1024) }
+            } ?: throw IllegalStateException("Could not write the download")
+            val done = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }
+            resolver.update(uri, done, null, null)
+        } catch (e: Exception) {
+            // Never leave a half-written, invisible "pending" entry eating
+            // storage behind a failed copy.
+            try {
+                resolver.delete(uri, null, null)
+            } catch (ignored: Exception) {
+            }
+            throw e
+        }
         return mapOf(
             "displayName" to displayName,
             "uri" to uri.toString(),

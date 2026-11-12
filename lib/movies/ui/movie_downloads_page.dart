@@ -1,5 +1,8 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:open_filex/open_filex.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/services/app_feedback.dart';
@@ -260,7 +263,7 @@ class _DownloadCard extends StatelessWidget {
               ),
               IconButton(
                 tooltip: 'Delete download',
-                onPressed: () => service.remove(item.id),
+                onPressed: () => _confirmAndDelete(context),
                 icon: Icon(
                   Icons.delete_outline_rounded,
                   size: 20,
@@ -341,6 +344,97 @@ class _DownloadCard extends StatelessWidget {
     }
   }
 
+  /// Deleting is permanent, so the bin never deletes on its own: it asks
+  /// first and only "Yes, delete" removes the download. "No", the back button
+  /// and a tap outside the dialog all leave everything exactly as it was.
+  Future<void> _confirmAndDelete(BuildContext context) async {
+    final bool confirmed = await showMovieDeleteConfirmation(
+      context,
+      title: item.movieTitle,
+      detail: item.subtitleSummary,
+      inProgress: item.status != MovieDownloadStatus.completed,
+    );
+    if (!confirmed) return;
+    await service.remove(item.id);
+    showAppNotice(
+      'Download deleted',
+      duration: const Duration(seconds: 2),
+    );
+  }
+
+  /// Copies the finished file to the phone's public Downloads folder.
+  Future<void> _saveToPhone() async {
+    if (service.isSavingToDevice(item.id)) {
+      showAppNotice(
+        'Still saving — large files take a moment.',
+        duration: const Duration(seconds: 2),
+      );
+      return;
+    }
+
+    // Android 9 and older write to shared storage through the classic storage
+    // permission; Android 10+ goes through MediaStore and needs none.
+    if (Platform.isAndroid) {
+      final int sdk = await NativeBridge.sdkInt();
+      if (sdk > 0 && sdk < 29) {
+        PermissionStatus status = await Permission.storage.status;
+        if (!status.isGranted) status = await Permission.storage.request();
+        if (!status.isGranted) {
+          showAppNotice(
+            status.isPermanentlyDenied
+                ? 'Allow storage access for Sidify in Settings to save files.'
+                : 'Storage permission is needed to save to Downloads.',
+            duration: const Duration(seconds: 3),
+          );
+          if (status.isPermanentlyDenied) await openAppSettings();
+          return;
+        }
+      }
+    }
+
+    if (item.publicUri.isEmpty) {
+      showAppNotice(
+        'Saving to Downloads… keep the app open.',
+        duration: const Duration(seconds: 2),
+      );
+    }
+    final MovieSaveOutcome outcome = await service.saveToPhoneDownloads(item);
+    switch (outcome.status) {
+      case MovieSaveStatus.saved:
+        showAppNotice(
+          'Saved to phone storage: Download/IfallMusic',
+          duration: const Duration(seconds: 3),
+        );
+      case MovieSaveStatus.alreadySaved:
+        showAppNotice(
+          'Already saved in Download/IfallMusic',
+          duration: const Duration(seconds: 2),
+        );
+      case MovieSaveStatus.busy:
+        showAppNotice(
+          'Still saving — large files take a moment.',
+          duration: const Duration(seconds: 2),
+        );
+      case MovieSaveStatus.missingFile:
+        showAppNotice(
+          'The downloaded file was moved or deleted. Download it again.',
+          duration: const Duration(seconds: 3),
+        );
+      case MovieSaveStatus.unsupported:
+        showAppNotice(
+          'Saving to Downloads is available on Android only.',
+          duration: const Duration(seconds: 3),
+        );
+      case MovieSaveStatus.failed:
+        showAppNotice(
+          outcome.message.isNotEmpty
+              ? 'Could not save to Downloads. ${outcome.message}'
+              : 'Could not save to Downloads. Please try again.',
+          duration: const Duration(seconds: 4),
+        );
+    }
+  }
+
   List<Widget> _buildActions(BuildContext context, SidifyTokens t) {
     final List<Widget> buttons = <Widget>[];
 
@@ -408,22 +502,22 @@ class _DownloadCard extends StatelessWidget {
           },
         ),
       );
+      final bool saving = service.isSavingToDevice(item.id);
       buttons.add(
         _actionPill(
           t,
-          icon: Icons.save_alt_rounded,
-          label: item.publicUri.isNotEmpty
-              ? 'Saved in Downloads'
-              : 'Save to Downloads',
-          onTap: () async {
-            final SavedFile? saved = await service.saveToDeviceDownloads(item);
-            showAppNotice(
-              saved != null
-                  ? 'Saved to phone Downloads/IfallMusic folder'
-                  : 'Kept in the app downloads folder',
-              duration: const Duration(seconds: 2),
-            );
-          },
+          icon: saving
+              ? Icons.hourglass_top_rounded
+              : item.publicUri.isNotEmpty
+                  ? Icons.download_done_rounded
+                  : Icons.save_alt_rounded,
+          label: saving
+              ? 'Saving…'
+              : item.publicUri.isNotEmpty
+                  ? 'Saved in Downloads'
+                  : 'Save to Downloads',
+          busy: saving,
+          onTap: _saveToPhone,
         ),
       );
     }
@@ -437,6 +531,7 @@ class _DownloadCard extends StatelessWidget {
     required String label,
     required VoidCallback onTap,
     bool primary = false,
+    bool busy = false,
   }) {
     return Material(
       color: primary ? t.primary : t.fill2,
@@ -449,11 +544,21 @@ class _DownloadCard extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              Icon(
-                icon,
-                size: 16,
-                color: primary ? t.onPrimary : t.text,
-              ),
+              if (busy)
+                SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: primary ? t.onPrimary : t.text,
+                  ),
+                )
+              else
+                Icon(
+                  icon,
+                  size: 16,
+                  color: primary ? t.onPrimary : t.text,
+                ),
               const SizedBox(width: 5),
               Text(
                 label,
@@ -465,4 +570,127 @@ class _DownloadCard extends StatelessWidget {
       ),
     );
   }
+}
+
+/// The "are you sure?" dialog shown before a download is deleted.
+///
+/// Resolves to true only when "Yes, delete" is tapped. "No", the system back
+/// button and a tap outside the dialog all resolve to false, and the caller
+/// then does nothing.
+Future<bool> showMovieDeleteConfirmation(
+  BuildContext context, {
+  required String title,
+  String detail = '',
+  bool inProgress = false,
+}) async {
+  final bool? confirmed = await showDialog<bool>(
+    context: context,
+    barrierDismissible: true,
+    barrierColor: Colors.black.withValues(alpha: 0.6),
+    builder: (BuildContext dialogContext) {
+      final SidifyTokens t = dialogContext.sidify;
+      return Dialog(
+        backgroundColor: t.raised,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(24),
+          side: BorderSide(color: t.edge),
+        ),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 380),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(22, 24, 22, 18),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Container(
+                  width: 56,
+                  height: 56,
+                  decoration: BoxDecoration(
+                    color: t.danger.withValues(alpha: 0.14),
+                    shape: BoxShape.circle,
+                  ),
+                  alignment: Alignment.center,
+                  child: Icon(
+                    Icons.delete_outline_rounded,
+                    color: t.danger,
+                    size: 28,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Are you sure you want to delete?',
+                  textAlign: TextAlign.center,
+                  style: SidifyText.titleM(t.text),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  title,
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: SidifyText.label(t.text),
+                ),
+                if (detail.isNotEmpty) ...<Widget>[
+                  const SizedBox(height: 2),
+                  Text(
+                    detail,
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: SidifyText.caption(t.text2),
+                  ),
+                ],
+                const SizedBox(height: 10),
+                Text(
+                  inProgress
+                      ? 'The download will be stopped and removed from this '
+                          'device. This action cannot be undone.'
+                      : 'The file will be removed from this device. This '
+                          'action cannot be undone.',
+                  textAlign: TextAlign.center,
+                  style: SidifyText.bodyS(t.text2),
+                ),
+                const SizedBox(height: 22),
+                Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.of(dialogContext).pop(false),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: t.text,
+                          side: BorderSide(color: t.edge),
+                          minimumSize: const Size.fromHeight(46),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        child: const Text('No'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: () => Navigator.of(dialogContext).pop(true),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: t.danger,
+                          foregroundColor: Colors.white,
+                          minimumSize: const Size.fromHeight(46),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        child: const Text('Yes, delete'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    },
+  );
+  return confirmed == true;
 }

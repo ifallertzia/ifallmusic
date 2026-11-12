@@ -246,6 +246,144 @@ class DioMovieHttpTransport implements MovieHttpTransport {
     );
   }
 
+  /// Fetches a small binary resource — a poster — with the same reach as the
+  /// catalog pages themselves.
+  ///
+  /// Posters are normally loaded by the image cache through the system
+  /// resolver, which is exactly what fails on networks that poison DNS for the
+  /// catalog's hosts: the page arrives (through the DNS-over-HTTPS fallback
+  /// here) while every thumbnail on it stays blank. This goes direct first and
+  /// then over DNS-over-HTTPS, with a browser User-Agent, and only returns
+  /// bytes that really are an image — an ISP block page answered with 200 is
+  /// not mistaken for one.
+  Future<Uint8List?> getBytes(
+    String url, {
+    Map<String, String> headers = const <String, String>{},
+    int maxBytes = 8 * 1024 * 1024,
+  }) async {
+    final Uri? uri = Uri.tryParse(url.trim());
+    if (uri == null ||
+        !(uri.scheme == 'http' || uri.scheme == 'https') ||
+        uri.host.isEmpty) {
+      return null;
+    }
+    try {
+      final Response<List<int>> res = await _dio.get<List<int>>(
+        uri.toString(),
+        options: Options(
+          headers: headers,
+          followRedirects: true,
+          maxRedirects: 5,
+          responseType: ResponseType.bytes,
+          receiveTimeout: const Duration(seconds: 20),
+          validateStatus: (int? s) => s != null && s < 600,
+        ),
+      );
+      final int status = res.statusCode ?? 0;
+      final List<int> data = res.data ?? const <int>[];
+      if (status >= 200 &&
+          status < 300 &&
+          data.length <= maxBytes &&
+          looksLikeImage(data)) {
+        return data is Uint8List ? data : Uint8List.fromList(data);
+      }
+    } on DioException catch (_) {
+      // Fall through to DNS-over-HTTPS below.
+    } catch (_) {
+      return null;
+    }
+    return _bytesOverDoh(uri, headers: headers, maxBytes: maxBytes);
+  }
+
+  /// True when [data] starts like a JPEG, PNG, GIF, WebP, BMP or AVIF/HEIF.
+  static bool looksLikeImage(List<int> data) {
+    if (data.length < 12) return false;
+    bool starts(List<int> magic, [int offset = 0]) {
+      for (int i = 0; i < magic.length; i++) {
+        if (data[offset + i] != magic[i]) return false;
+      }
+      return true;
+    }
+
+    if (starts(const <int>[0xFF, 0xD8, 0xFF])) return true; // JPEG
+    if (starts(const <int>[0x89, 0x50, 0x4E, 0x47])) return true; // PNG
+    if (starts(const <int>[0x47, 0x49, 0x46, 0x38])) return true; // GIF
+    if (starts(const <int>[0x42, 0x4D])) return true; // BMP
+    if (starts(const <int>[0x52, 0x49, 0x46, 0x46]) &&
+        starts(const <int>[0x57, 0x45, 0x42, 0x50], 8)) {
+      return true; // WebP
+    }
+    if (starts(const <int>[0x66, 0x74, 0x79, 0x70], 4)) return true; // AVIF
+    return false;
+  }
+
+  Future<Uint8List?> _bytesOverDoh(
+    Uri uri, {
+    required Map<String, String> headers,
+    required int maxBytes,
+  }) async {
+    final InternetAddress? addr = await _resolveViaDoh(uri.host);
+    if (addr == null) return null;
+
+    HttpClient? client;
+    try {
+      final int port =
+          uri.hasPort ? uri.port : (uri.scheme == 'https' ? 443 : 80);
+      client = HttpClient(context: SecurityContext.defaultContext)
+        ..connectionTimeout = const Duration(seconds: 10)
+        ..connectionFactory =
+            (Uri target, String? proxyHost, int? proxyPort) async {
+          if (target.host == uri.host) {
+            final Socket sock = await Socket.connect(
+              addr,
+              port,
+              timeout: const Duration(seconds: 10),
+            );
+            if (target.scheme == 'https') {
+              final SecureSocket secure = await SecureSocket.secure(
+                sock,
+                host: uri.host,
+              );
+              return ConnectionTask.fromSocket(
+                Future<Socket>.value(secure),
+                () {
+                  secure.destroy();
+                },
+              );
+            }
+            return ConnectionTask.fromSocket(Future<Socket>.value(sock), () {
+              sock.destroy();
+            });
+          }
+          return Socket.startConnect(target.host, target.port);
+        };
+
+      final HttpClientRequest req = await client.getUrl(uri);
+      req.followRedirects = true;
+      req.maxRedirects = 5;
+      req.headers.set('User-Agent', browserUserAgent);
+      headers.forEach(req.headers.set);
+      final HttpClientResponse resp =
+          await req.close().timeout(const Duration(seconds: 20));
+      if (resp.statusCode < 200 || resp.statusCode >= 300) {
+        await resp.drain<void>().timeout(const Duration(seconds: 5));
+        return null;
+      }
+      final BytesBuilder builder = BytesBuilder(copy: false);
+      await for (final List<int> chunk
+          in resp.timeout(const Duration(seconds: 20))) {
+        builder.add(chunk);
+        if (builder.length > maxBytes) return null;
+      }
+      final Uint8List bytes = builder.takeBytes();
+      return looksLikeImage(bytes) ? bytes : null;
+    } catch (_) {
+      return null;
+    } finally {
+      client?.close(force: true);
+    }
+  }
+
   bool _isDnsOrConnectionFailure(DioException e) {
     return e.type == DioExceptionType.connectionError ||
         e.type == DioExceptionType.connectionTimeout ||

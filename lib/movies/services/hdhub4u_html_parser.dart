@@ -5,6 +5,7 @@ import 'package:html/parser.dart' as html_parser;
 
 import '../models/movie_models.dart';
 import '../models/movie_provider.dart';
+import 'movie_text_scrub.dart';
 
 /// One link found on an HDHub4U title page, already labelled with everything
 /// the UI needs (resolution, codec, size, language, season / episode).
@@ -231,7 +232,63 @@ abstract final class Hdhub4uHtmlParser {
     if (cut != null && cut.start > 0) {
       text = text.substring(0, cut.start).trim();
     }
+    // The site stamps its own name on titles; a person never sees it.
+    text = scrubSourceNames(text);
     return text.replaceAll(RegExp(r'[\s\-:]+$'), '').trim();
+  }
+
+  /// The site's own chrome — its logo, a "home" link, a banner — rather than a
+  /// title. The layout fallback in [parsePosts] looks at every linked image on
+  /// the page, and without this check the site logo became a result named
+  /// after the site at the top of the list.
+  static bool _isSiteChrome({
+    required String link,
+    required String rawTitle,
+    required String cleanedTitle,
+    required String imageSource,
+    required String baseUrl,
+  }) {
+    final Uri? uri = Uri.tryParse(link);
+    if (uri == null) return true;
+    final String path = uri.path.replaceAll(RegExp(r'/+$'), '');
+    // The home page itself (or a bare "?s=" style link) is never a title.
+    if (path.isEmpty) return true;
+    final String lowerPath = path.toLowerCase();
+    // Whole path segments only: a title slug such as `/tag-team-2024/` or
+    // `/about-time-2013/` is a movie, `/tag/…` and `/about/` are site pages.
+    if (RegExp(
+      r'^/(?:page|tag|author|feed|category|genre|year|search|contact|'
+      r'contact-us|about|about-us|dmca|disclaimer|privacy-policy|sitemap)'
+      r'(?:/|$)',
+    ).hasMatch(lowerPath)) {
+      return true;
+    }
+    if (RegExp(r'^/wp-(?:content|admin|includes|json|login)').hasMatch(lowerPath)) {
+      return true;
+    }
+    // Nothing left once the site's name is taken out: it was the logo.
+    if (cleanedTitle.trim().length < 2) return true;
+    final String compactTitle =
+        rawTitle.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
+    final String host = (Uri.tryParse(baseUrl)?.host ?? '')
+        .toLowerCase()
+        .replaceAll(RegExp(r'^www\.'), '');
+    final String hostLabel = host.split('.').first;
+    if (compactTitle.isNotEmpty &&
+        (compactTitle == host.replaceAll(RegExp(r'[^a-z0-9]+'), '') ||
+            compactTitle == hostLabel ||
+            compactTitle == 'logo' ||
+            compactTitle == 'home' ||
+            compactTitle == 'homepage')) {
+      return true;
+    }
+    // An image file that is literally the logo / favicon.
+    if (RegExp(
+      r'(?:^|/)(?:logo|favicon|site-icon|site-logo)\.[a-z0-9]+(?:\?.*)?$',
+    ).hasMatch(imageSource.toLowerCase())) {
+      return true;
+    }
+    return false;
   }
 
   static ({String primary, String fallback}) _imageUrls(
@@ -293,17 +350,26 @@ abstract final class Hdhub4uHtmlParser {
             anchor.text,
       );
       if (title.isEmpty) return;
+      final String cleanedTitle = cleanTitleText(title);
+      final String rawImage = image == null ? '' : (imgSource(image) ?? '');
+      if (_isSiteChrome(
+        link: link,
+        rawTitle: title,
+        cleanedTitle: cleanedTitle,
+        imageSource: rawImage,
+        baseUrl: baseUrl,
+      )) {
+        return;
+      }
 
-      final ({String primary, String fallback}) imageUrls = _imageUrls(
-        image == null ? '' : (imgSource(image) ?? ''),
-        baseUrl,
-      );
+      final ({String primary, String fallback}) imageUrls =
+          _imageUrls(rawImage, baseUrl);
       seen.add(link);
 
       final String cardContext = collapse(anchor.parent?.text ?? anchor.text);
       posts.add(
         MoviePost(
-          title: cleanTitleText(title),
+          title: cleanedTitle,
           link: link,
           imageUrl: imageUrls.primary,
           fallbackImageUrl: imageUrls.fallback,
@@ -366,9 +432,12 @@ abstract final class Hdhub4uHtmlParser {
       );
       final String year =
           RegExp(r'\b(19|20)\d{2}\b').firstMatch(title)?.group(0) ?? '';
+      final String cleanedTitle = cleanTitleText(title);
+      // A hit that is only the site's own name is not a title.
+      if (cleanedTitle.trim().length < 2) continue;
       posts.add(
         MoviePost(
-          title: cleanTitleText(title),
+          title: cleanedTitle,
           link: link,
           imageUrl: imageUrls.primary,
           fallbackImageUrl: imageUrls.fallback,
@@ -466,7 +535,7 @@ abstract final class Hdhub4uHtmlParser {
       specs.add(
         HdhubLinkSpec(
           url: url,
-          label: ownText,
+          label: scrubSourceNames(ownText),
           resolution: resolution,
           codec: codec,
           sizeLabel: sizeLabel,
@@ -578,6 +647,7 @@ abstract final class Hdhub4uHtmlParser {
       }
     }
     if (synopsis.isEmpty) synopsis = collapse(metaDescription);
+    synopsis = scrubSourceNames(synopsis);
 
     final String languages = extractLanguages(bodyText);
     final List<HdhubLinkSpec> links = specs ??
@@ -618,8 +688,8 @@ abstract final class Hdhub4uHtmlParser {
     };
 
     return MovieDetail(
-      title: title.isNotEmpty ? title : 'HDHub4U title',
-      cleanTitle: title.isNotEmpty ? title : 'HDHub4U title',
+      title: title.isNotEmpty ? title : 'Untitled',
+      cleanTitle: title.isNotEmpty ? title : 'Untitled',
       type: isSeries ? MovieMediaType.series : MovieMediaType.movie,
       webUrl: pageUrl,
       year: year,
