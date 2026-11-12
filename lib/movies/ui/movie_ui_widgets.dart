@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import '../../core/services/app_feedback.dart';
 import '../../core/theme/sidify_theme.dart';
 import '../models/movie_models.dart';
+import '../models/movie_provider.dart';
 import '../services/movie_download_service.dart';
 import '../services/movie_image_loader.dart';
 import '../services/movie_quality_order.dart';
