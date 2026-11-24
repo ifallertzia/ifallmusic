@@ -26,6 +26,7 @@ class MoviePost {
     this.fallbackImageUrl = '',
     this.badge = '',
     this.subtitle = '',
+    this.isAdult = false,
     this.provider = MovieProvider.eonMovies,
   });
 
@@ -35,6 +36,7 @@ class MoviePost {
   final String fallbackImageUrl;
   final String badge;
   final String subtitle;
+  final bool isAdult;
 
   /// Catalog this post came from — decides which service opens it.
   final MovieProvider provider;
@@ -46,6 +48,7 @@ class MoviePost {
     String? fallbackImageUrl,
     String? badge,
     String? subtitle,
+    bool? isAdult,
     MovieProvider? provider,
   }) {
     return MoviePost(
@@ -55,6 +58,7 @@ class MoviePost {
       fallbackImageUrl: fallbackImageUrl ?? this.fallbackImageUrl,
       badge: badge ?? this.badge,
       subtitle: subtitle ?? this.subtitle,
+      isAdult: isAdult ?? this.isAdult,
       provider: provider ?? this.provider,
     );
   }

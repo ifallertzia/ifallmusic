@@ -2,7 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../core/services/settings_service.dart';
 import '../../core/theme/sidify_theme.dart';
+import '../services/movie_content_filter.dart';
 import '../models/movie_models.dart';
 import '../models/movie_provider.dart';
 import '../services/movies_repository.dart';
@@ -22,12 +24,16 @@ class MoviesHomePage extends StatefulWidget {
     this.initialCategory = MovieCategory.recommended,
     this.autofocusSearch = false,
     this.initialQuery = '',
+    this.initialProvider,
+    this.initialPosts,
   });
 
   final VoidCallback? onBackToChooser;
   final MovieCategory initialCategory;
   final bool autofocusSearch;
   final String initialQuery;
+  final MovieProvider? initialProvider;
+  final List<MoviePost>? initialPosts;
 
   @override
   State<MoviesHomePage> createState() => _MoviesHomePageState();
@@ -61,11 +67,18 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
   void initState() {
     super.initState();
     _category = widget.initialCategory;
+    _selectedSearchProvider = widget.initialProvider;
     if (widget.initialQuery.trim().isNotEmpty) {
       _activeQuery = widget.initialQuery.trim();
       _searchController.text = _activeQuery;
     }
-    _fetchFirstPage();
+    if (widget.initialPosts != null) {
+      _posts = List<MoviePost>.from(widget.initialPosts!);
+      _loading = false;
+      _hasMore = _posts.length >= 20;
+    } else {
+      _fetchFirstPage();
+    }
   }
 
   @override
@@ -212,14 +225,28 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
   @override
   Widget build(BuildContext context) {
     final SidifyTokens t = context.sidify;
+    final SettingsService? settings = context.watch<SettingsService?>();
+    final bool adultContentUnlocked = settings?.adultContentUnlocked ?? false;
+    final List<MoviePost> visiblePosts = filterMoviePosts(
+      _posts,
+      adultContentUnlocked: adultContentUnlocked,
+    );
+    final List<MoviePost> visiblePremiumPosts = filterMoviePosts(
+      _premiumPosts,
+      adultContentUnlocked: adultContentUnlocked,
+    );
+    final List<MoviePost> visibleIfallhubPosts = filterMoviePosts(
+      _ifallhubPosts,
+      adultContentUnlocked: adultContentUnlocked,
+    );
     final double width = MediaQuery.sizeOf(context).width;
     final int crossAxisCount = width >= 900 ? 5 : (width >= 600 ? 4 : 3);
     final List<MoviePost> displayPosts = _activeQuery.isNotEmpty &&
             _selectedSearchProvider != null
-        ? _posts
+        ? visiblePosts
             .where((MoviePost p) => p.provider == _selectedSearchProvider)
             .toList()
-        : _posts;
+        : visiblePosts;
 
     return SafeArea(
       bottom: false,
@@ -239,13 +266,15 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
                   children: <Widget>[
                     Row(
                       children: <Widget>[
-                        if (widget.onBackToChooser != null) ...<Widget>[
+                        if (widget.onBackToChooser != null ||
+                            widget.initialProvider != null) ...<Widget>[
                           Material(
                             color: t.raised,
                             shape: const CircleBorder(),
                             child: InkWell(
                               customBorder: const CircleBorder(),
-                              onTap: widget.onBackToChooser,
+                              onTap: widget.onBackToChooser ??
+                                  () => Navigator.of(context).maybePop(),
                               child: Padding(
                                 padding: const EdgeInsets.all(9),
                                 child: Icon(
@@ -387,18 +416,18 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
                 ),
               ),
             ),
-            if (_premiumPosts.isNotEmpty && _activeQuery.isEmpty)
+            if (visiblePremiumPosts.isNotEmpty && _activeQuery.isEmpty)
               SliverToBoxAdapter(
                 child: _CatalogRail(
                   title: 'IMAX HD catalog',
-                  posts: _premiumPosts,
+                  posts: visiblePremiumPosts,
                 ),
               ),
-            if (_ifallhubPosts.isNotEmpty && _activeQuery.isEmpty)
+            if (visibleIfallhubPosts.isNotEmpty && _activeQuery.isEmpty)
               SliverToBoxAdapter(
                 child: _CatalogRail(
                   title: 'ifallhub catalog',
-                  posts: _ifallhubPosts,
+                  posts: visibleIfallhubPosts,
                 ),
               ),
             if (_loading)
@@ -440,7 +469,7 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
               )
             else if (_activeQuery.isNotEmpty &&
                 _selectedSearchProvider == null &&
-                _posts.isNotEmpty)
+                visiblePosts.isNotEmpty)
               SliverToBoxAdapter(
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 190),
@@ -451,7 +480,7 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
                         MovieProvider.hdhub4u,
                         MovieProvider.eonMovies,
                       ])
-                        _searchServerRow(t, provider),
+                        _searchServerRow(t, provider, visiblePosts),
                     ],
                   ),
                 ),
@@ -522,8 +551,24 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
         MovieProvider.eonMovies => 'Sidify server',
       };
 
-  Widget _searchServerRow(SidifyTokens t, MovieProvider provider) {
-    final List<MoviePost> providerPosts = _posts
+  void _openSearchProviderPage(MovieProvider provider) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => MoviesHomePage(
+          initialQuery: _activeQuery,
+          initialProvider: provider,
+          initialPosts: _posts,
+        ),
+      ),
+    );
+  }
+
+  Widget _searchServerRow(
+    SidifyTokens t,
+    MovieProvider provider,
+    List<MoviePost> visiblePosts,
+  ) {
+    final List<MoviePost> providerPosts = visiblePosts
         .where((MoviePost post) => post.provider == provider)
         .toList();
     final Color accent = switch (provider) {
@@ -538,7 +583,7 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
         borderRadius: BorderRadius.circular(15),
         child: InkWell(
           borderRadius: BorderRadius.circular(15),
-          onTap: () => setState(() => _selectedSearchProvider = provider),
+          onTap: () => _openSearchProviderPage(provider),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 16),
             decoration: BoxDecoration(
