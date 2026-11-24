@@ -555,10 +555,12 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
   void _openSearchProviderPage(MovieProvider provider) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => MoviesHomePage(
-          initialQuery: _activeQuery,
-          initialProvider: provider,
-          initialPosts: _posts,
+        builder: (_) => Scaffold(
+          body: MoviesHomePage(
+            initialQuery: _activeQuery,
+            initialProvider: provider,
+            initialPosts: _posts,
+          ),
         ),
       ),
     );
