@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../../core/services/app_feedback.dart';
 import '../../core/theme/sidify_theme.dart';
 import '../models/movie_models.dart';
+import '../models/movie_provider.dart';
 import '../services/movie_download_service.dart';
 import '../services/movie_library_service.dart';
 import '../services/movies_repository.dart';
@@ -77,6 +78,9 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
       if (!mounted) return;
       setState(() {
         _detail = detail;
+        _selectedSeason = detail.episodeGroups
+            .map((MovieEpisodeGroup group) => group.seasonLabel)
+            .firstWhere((String season) => season.isNotEmpty, orElse: () => '');
         _loading = false;
       });
     } catch (e) {
@@ -514,7 +518,6 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
             spacing: 8,
             runSpacing: 8,
             children: <Widget>[
-              _seasonChip(t, label: 'All Seasons', value: ''),
               for (final String s in seasons) _seasonChip(t, label: s, value: s),
             ],
           ),
@@ -646,6 +649,18 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
                   heading: 'Download',
                 ),
               ),
+            if (detail.isSeries &&
+                detail.provider == MovieProvider.ifallhub)
+              _primaryButton(
+                t,
+                icon: Icons.download_rounded,
+                label: 'Download episodes',
+                filled: true,
+                onTap: () => showIfallhubSeriesDownloadDialog(
+                  context,
+                  detail: detail,
+                ),
+              ),
             Builder(
               builder: (BuildContext context) {
                 final MovieLibraryService? library =
@@ -714,8 +729,6 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
     final bool loading = _loadingGroupIds.contains(group.id);
     final bool expanded =
         group.isLoaded && !_collapsedGroupIds.contains(group.id);
-    final String langs =
-        group.languages.isNotEmpty ? group.languages : detail.languages;
     final bool hasNested = group.nestedGroups.isNotEmpty;
     final bool isContainer = hasNested || !group.isLoaded;
     final MovieQualityLink? best =
@@ -723,6 +736,20 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
     final bool zipOnly = group.isLoaded &&
         best == null &&
         group.qualities.any((MovieQualityLink q) => q.isZipPack);
+    final String groupTitle = group.seasonLabel.isEmpty
+        ? group.title
+        : group.title
+            .replaceFirst(
+              RegExp(
+                '^${RegExp.escape(group.seasonLabel)}\s*[•·:/-]?\s*',
+                caseSensitive: false,
+              ),
+              '',
+            )
+            .trim();
+    final String groupHeading = group.episodeLabel.isNotEmpty
+        ? group.episodeLabel
+        : (groupTitle.isNotEmpty ? groupTitle : group.fullHeading);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -751,19 +778,13 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
                       Text(
-                        group.fullHeading,
+                        groupHeading,
                         style: SidifyText.titleM(t.text),
                       ),
                       if (zipOnly) ...<Widget>[
                         const SizedBox(height: 2),
                         Text(
-                          _offlineLine(group.fullHeading),
-                          style: SidifyText.caption(t.text2),
-                        ),
-                      ] else if (langs.isNotEmpty) ...<Widget>[
-                        const SizedBox(height: 2),
-                        Text(
-                          'Audio: $langs',
+                          _offlineLine(groupHeading),
                           style: SidifyText.caption(t.text2),
                         ),
                       ],

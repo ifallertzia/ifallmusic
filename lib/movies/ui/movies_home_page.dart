@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme/sidify_theme.dart';
 import '../models/movie_models.dart';
+import '../models/movie_provider.dart';
 import '../services/movies_repository.dart';
 import 'movie_detail_page.dart';
 import 'movie_settings_page.dart';
@@ -44,6 +45,7 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
   bool _loadingMore = false;
   String? _error;
   List<MoviePost> _posts = <MoviePost>[];
+  MovieProvider? _selectedSearchProvider;
 
   /// Latest tiles from the premium HDHub4U catalog, shown as their own rail
   /// above the main grid while browsing (not while searching — search mixes
@@ -90,6 +92,7 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
       final String trimmed = raw.trim();
       if (trimmed == _activeQuery) return;
       _activeQuery = trimmed;
+      _selectedSearchProvider = null;
       _fetchFirstPage();
     });
   }
@@ -97,6 +100,7 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
   void _submitSearch(String raw) {
     _debounce?.cancel();
     _activeQuery = raw.trim();
+    _selectedSearchProvider = null;
     _fetchFirstPage();
   }
 
@@ -108,6 +112,7 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
       return;
     }
     _activeQuery = '';
+    _selectedSearchProvider = null;
     _fetchFirstPage();
   }
 
@@ -209,6 +214,12 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
     final SidifyTokens t = context.sidify;
     final double width = MediaQuery.sizeOf(context).width;
     final int crossAxisCount = width >= 900 ? 5 : (width >= 600 ? 4 : 3);
+    final List<MoviePost> displayPosts = _activeQuery.isNotEmpty &&
+            _selectedSearchProvider != null
+        ? _posts
+            .where((MoviePost p) => p.provider == _selectedSearchProvider)
+            .toList()
+        : _posts;
 
     return SafeArea(
       bottom: false,
@@ -353,10 +364,24 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
                     const SizedBox(height: 16),
                     Text(
                       _activeQuery.isNotEmpty
-                          ? 'Search Results for "$_activeQuery"'
+                          ? (_selectedSearchProvider == null
+                              ? 'Search Results for "$_activeQuery"'
+                              : '${_searchServerLabel(_selectedSearchProvider!)} results')
                           : '${_category.label} Movies & Series',
                       style: SidifyText.title(t.text),
                     ),
+                    if (_activeQuery.isNotEmpty &&
+                        _selectedSearchProvider != null) ...<Widget>[
+                      const SizedBox(height: 6),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton.icon(
+                          onPressed: () => setState(() => _selectedSearchProvider = null),
+                          icon: const Icon(Icons.arrow_back_rounded, size: 17),
+                          label: const Text('All servers'),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 12),
                   ],
                 ),
@@ -413,7 +438,25 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
                   ),
                 ),
               )
-            else if (_posts.isEmpty)
+            else if (_activeQuery.isNotEmpty &&
+                _selectedSearchProvider == null &&
+                _posts.isNotEmpty)
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 190),
+                  child: Column(
+                    children: <Widget>[
+                      for (final MovieProvider provider in <MovieProvider>[
+                        MovieProvider.ifallhub,
+                        MovieProvider.hdhub4u,
+                        MovieProvider.eonMovies,
+                      ])
+                        _searchServerRow(t, provider),
+                    ],
+                  ),
+                ),
+              )
+            else if (displayPosts.isEmpty)
               SliverFillRemaining(
                 hasScrollBody: false,
                 child: Center(
@@ -439,13 +482,14 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
                   ),
                   delegate: SliverChildBuilderDelegate(
                     (BuildContext context, int index) {
-                      final MoviePost post = _posts[index];
+                      final MoviePost post = displayPosts[index];
                       return MovieGridCard(
                         post: post,
+                        showTitle: post.provider != MovieProvider.hdhub4u,
                         onTap: () => openMovieDetailPage(context, post),
                       );
                     },
-                    childCount: _posts.length,
+                    childCount: displayPosts.length,
                   ),
                 ),
               ),
@@ -467,6 +511,74 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
               ),
             ],
           ],
+        ),
+      ),
+    );
+  }
+
+  String _searchServerLabel(MovieProvider provider) => switch (provider) {
+        MovieProvider.ifallhub => 'Ifallhub server',
+        MovieProvider.hdhub4u => 'IMAX HD',
+        MovieProvider.eonMovies => 'Sidify server',
+      };
+
+  Widget _searchServerRow(SidifyTokens t, MovieProvider provider) {
+    final List<MoviePost> providerPosts = _posts
+        .where((MoviePost post) => post.provider == provider)
+        .toList();
+    final Color accent = switch (provider) {
+      MovieProvider.ifallhub => const Color(0xFF8B6DFF),
+      MovieProvider.hdhub4u => const Color(0xFFE2B85A),
+      MovieProvider.eonMovies => t.brand,
+    };
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Material(
+        color: t.raised,
+        borderRadius: BorderRadius.circular(15),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(15),
+          onTap: () => setState(() => _selectedSearchProvider = provider),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 16),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(15),
+              border: Border.all(color: t.edge),
+            ),
+            child: Row(
+              children: <Widget>[
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: .14),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(Icons.dns_rounded, color: accent, size: 20),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    _searchServerLabel(provider),
+                    style: SidifyText.titleM(t.text),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: .12),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    '${providerPosts.length} results',
+                    style: SidifyText.label(accent),
+                  ),
+                ),
+                const SizedBox(width: 5),
+                Icon(Icons.chevron_right_rounded, color: t.text2),
+              ],
+            ),
+          ),
         ),
       ),
     );

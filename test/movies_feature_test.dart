@@ -758,6 +758,11 @@ void main() {
       await tester.testTextInput.receiveAction(TextInputAction.search);
       await tester.pumpAndSettle();
       expect(find.text('Search Results for "vision"'), findsOneWidget);
+      expect(find.text('Sidify server'), findsOneWidget);
+      expect(find.text('1 results'), findsOneWidget);
+      expect(find.text('VisionQuest - Season 1'), findsNothing);
+      await tester.tap(find.text('Sidify server'));
+      await tester.pumpAndSettle();
 
       // 4. Open Series detail -> languages, season/episode rows with Play +
       // Download actions; raw quality links stay hidden until Download.
@@ -765,7 +770,8 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Hindi, English'), findsWidgets);
-      expect(find.text('Season 1 • Episode 1'), findsOneWidget);
+      expect(find.text('Episode 1'), findsOneWidget);
+      expect(find.text('Season 1 • Episode 1'), findsNothing);
       expect(find.text('480p HEVC'), findsNothing);
       // Play is available for normal episode links. Do not tap it here:
       // the native media_kit player is intentionally not mounted in tests.

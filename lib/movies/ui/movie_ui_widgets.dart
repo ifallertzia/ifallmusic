@@ -341,10 +341,16 @@ class PremiumProviderBadge extends StatelessWidget {
 }
 
 class MovieGridCard extends StatelessWidget {
-  const MovieGridCard({super.key, required this.post, required this.onTap});
+  const MovieGridCard({
+    super.key,
+    required this.post,
+    required this.onTap,
+    this.showTitle = true,
+  });
 
   final MoviePost post;
   final VoidCallback onTap;
+  final bool showTitle;
 
   @override
   Widget build(BuildContext context) {
@@ -388,13 +394,14 @@ class MovieGridCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 6),
-          Text(
-            post.title,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: SidifyText.label(t.text),
-          ),
-          if (post.subtitle.isNotEmpty) ...<Widget>[
+          if (showTitle)
+            Text(
+              post.title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: SidifyText.label(t.text),
+            ),
+          if (showTitle && post.subtitle.isNotEmpty) ...<Widget>[
             const SizedBox(height: 2),
             Text(
               post.subtitle,
@@ -1176,6 +1183,349 @@ class _SeriesDownloadDialogState extends State<_SeriesDownloadDialog> {
       ),
     );
   }
+}
+
+/// Opens the Ifallhub episode downloader. It keeps season, audio and quality
+/// selected once, then queues every checked episode with those same choices.
+Future<void> showIfallhubSeriesDownloadDialog(
+  BuildContext context, {
+  required MovieDetail detail,
+}) {
+  return showDialog<void>(
+    context: context,
+    builder: (BuildContext dialogContext) =>
+        _IfallhubSeriesDownloadDialog(detail: detail),
+  );
+}
+
+class _IfallhubSeriesDownloadDialog extends StatefulWidget {
+  const _IfallhubSeriesDownloadDialog({required this.detail});
+
+  final MovieDetail detail;
+
+  @override
+  State<_IfallhubSeriesDownloadDialog> createState() =>
+      _IfallhubSeriesDownloadDialogState();
+}
+
+class _IfallhubSeriesDownloadDialogState
+    extends State<_IfallhubSeriesDownloadDialog> {
+  late String _selectedSeason;
+  final Map<String, MovieEpisodeGroup> _loadedEpisodes =
+      <String, MovieEpisodeGroup>{};
+  final Set<String> _selectedEpisodeIds = <String>{};
+  String _selectedAudio = '';
+  String _selectedQuality = '';
+  bool _loading = false;
+
+  List<MovieEpisodeGroup> get _seasons => widget.detail.episodeGroups
+      .where((MovieEpisodeGroup group) => group.seasonLabel.isNotEmpty)
+      .toList();
+
+  MovieEpisodeGroup? get _activeSeason {
+    for (final MovieEpisodeGroup season in _seasons) {
+      if (season.seasonLabel == _selectedSeason) return season;
+    }
+    return _seasons.isEmpty ? null : _seasons.first;
+  }
+
+  List<MovieEpisodeGroup> get _episodes =>
+      _activeSeason?.nestedGroups ?? const <MovieEpisodeGroup>[];
+
+  String _audioOf(MovieQualityLink quality) =>
+      quality.languages.trim().isNotEmpty
+          ? quality.languages.trim()
+          : widget.detail.languages;
+
+  List<MovieQualityLink> get _availableQualities => _episodes
+      .map((MovieEpisodeGroup episode) => _loadedEpisodes[episode.id])
+      .whereType<MovieEpisodeGroup>()
+      .expand((MovieEpisodeGroup episode) => episode.qualities)
+      .where((MovieQualityLink quality) => !quality.isZipPack)
+      .toList();
+
+  List<String> get _audioOptions => _availableQualities
+      .map(_audioOf)
+      .where((String audio) => audio.isNotEmpty)
+      .toSet()
+      .toList();
+
+  List<String> get _qualityOptions => _availableQualities
+      .where((MovieQualityLink quality) =>
+          _selectedAudio.isEmpty || _audioOf(quality) == _selectedAudio)
+      .map((MovieQualityLink quality) => quality.displayQuality)
+      .where((String quality) => quality.isNotEmpty)
+      .toSet()
+      .toList();
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedSeason = _seasons.isEmpty ? '' : _seasons.first.seasonLabel;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadSeason());
+  }
+
+  Future<void> _loadSeason() async {
+    final MovieEpisodeGroup? season = _activeSeason;
+    if (season == null || _loading) return;
+    setState(() => _loading = true);
+    final MoviesRepository repo = moviesRepositoryOf(context);
+    final List<MovieEpisodeGroup> expanded = <MovieEpisodeGroup>[];
+    for (final MovieEpisodeGroup episode in season.nestedGroups) {
+      try {
+        expanded.add(episode.isLoaded
+            ? episode
+            : await repo.expandEpisodeGroup(episode));
+      } catch (_) {
+        expanded.add(episode.copyWith(isLoaded: true));
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      for (final MovieEpisodeGroup episode in expanded) {
+        _loadedEpisodes[episode.id] = episode;
+      }
+      _selectedEpisodeIds
+        ..clear()
+        ..addAll(expanded.where((MovieEpisodeGroup e) => e.qualities.isNotEmpty)
+            .map((MovieEpisodeGroup e) => e.id));
+      final List<String> audios = _audioOptions;
+      if (!audios.contains(_selectedAudio)) {
+        _selectedAudio = audios.isEmpty ? '' : audios.first;
+      }
+      final List<String> qualities = _qualityOptions;
+      if (!qualities.contains(_selectedQuality)) {
+        _selectedQuality = qualities.isEmpty ? '' : qualities.first;
+      }
+      _loading = false;
+    });
+  }
+
+  Future<void> _selectSeason(String season) async {
+    if (season == _selectedSeason || _loading) return;
+    setState(() {
+      _selectedSeason = season;
+      _selectedEpisodeIds.clear();
+      _selectedAudio = '';
+      _selectedQuality = '';
+    });
+    await _loadSeason();
+  }
+
+  MovieQualityLink? _matchingQuality(MovieEpisodeGroup episode) {
+    final MovieEpisodeGroup? loaded = _loadedEpisodes[episode.id];
+    if (loaded == null) return null;
+    for (final MovieQualityLink quality in loaded.qualities) {
+      if (!quality.isZipPack &&
+          quality.displayQuality == _selectedQuality &&
+          _audioOf(quality) == _selectedAudio) {
+        return quality;
+      }
+    }
+    return null;
+  }
+
+  Future<void> _downloadSelected() async {
+    final List<MovieQualityLink> picks = <MovieQualityLink>[];
+    for (final MovieEpisodeGroup episode in _episodes) {
+      if (!_selectedEpisodeIds.contains(episode.id)) continue;
+      final MovieQualityLink? quality = _matchingQuality(episode);
+      if (quality != null) picks.add(quality);
+    }
+    if (picks.isEmpty) return;
+    setState(() => _loading = true);
+    final MovieDownloadService service = context.read<MovieDownloadService>();
+    for (final MovieQualityLink quality in picks) {
+      await service.enqueueDownload(detail: widget.detail, quality: quality);
+    }
+    if (!mounted) return;
+    Navigator.of(context).pop();
+    showAppNotice(
+      'Queued ${picks.length} episode${picks.length == 1 ? '' : 's'} for download.',
+      duration: const Duration(seconds: 3),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final SidifyTokens t = context.sidify;
+    final int matchingCount = _episodes
+        .where((MovieEpisodeGroup e) =>
+            _selectedEpisodeIds.contains(e.id) && _matchingQuality(e) != null)
+        .length;
+    return Dialog(
+      backgroundColor: t.bg,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: 540,
+          maxHeight: MediaQuery.sizeOf(context).height * .86,
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(18, 14, 18, 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Row(children: <Widget>[
+                Expanded(
+                  child: Text('Download episodes', style: SidifyText.titleM(t.text)),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: Icon(Icons.close_rounded, color: t.text2),
+                ),
+              ]),
+              if (_seasons.length > 1) ...<Widget>[
+                Text('Season', style: SidifyText.label(t.text2)),
+                const SizedBox(height: 7),
+                Wrap(
+                  spacing: 7,
+                  runSpacing: 7,
+                  children: <Widget>[
+                    for (final MovieEpisodeGroup season in _seasons)
+                      _downloadChoiceChip(
+                        t,
+                        season.seasonLabel,
+                        _selectedSeason == season.seasonLabel,
+                        () => _selectSeason(season.seasonLabel),
+                      ),
+                  ],
+                ),
+              ],
+              const SizedBox(height: 12),
+              if (_loading)
+                const LinearProgressIndicator()
+              else ...<Widget>[
+                Text('Audio', style: SidifyText.label(t.text2)),
+                const SizedBox(height: 6),
+                if (_audioOptions.isEmpty)
+                  Text('No audio options available yet.', style: SidifyText.caption(t.text2))
+                else
+                  Wrap(
+                    spacing: 7,
+                    runSpacing: 7,
+                    children: <Widget>[
+                      for (final String audio in _audioOptions)
+                        _downloadChoiceChip(
+                          t,
+                          audio,
+                          _selectedAudio == audio,
+                          () => setState(() {
+                            _selectedAudio = audio;
+                            if (!_qualityOptions.contains(_selectedQuality)) {
+                              _selectedQuality = _qualityOptions.isEmpty
+                                  ? ''
+                                  : _qualityOptions.first;
+                            }
+                          }),
+                        ),
+                    ],
+                  ),
+                const SizedBox(height: 10),
+                Text('Quality', style: SidifyText.label(t.text2)),
+                const SizedBox(height: 6),
+                if (_qualityOptions.isEmpty)
+                  Text('No quality options available yet.', style: SidifyText.caption(t.text2))
+                else
+                  Wrap(
+                    spacing: 7,
+                    runSpacing: 7,
+                    children: <Widget>[
+                      for (final String quality in _qualityOptions)
+                        _downloadChoiceChip(
+                          t,
+                          quality,
+                          _selectedQuality == quality,
+                          () => setState(() => _selectedQuality = quality),
+                        ),
+                    ],
+                  ),
+                const SizedBox(height: 10),
+                Row(
+                  children: <Widget>[
+                    Expanded(child: Text('Episodes', style: SidifyText.label(t.text2))),
+                    TextButton(
+                      onPressed: () => setState(() {
+                        final Set<String> available = _episodes
+                            .where((MovieEpisodeGroup e) => _matchingQuality(e) != null)
+                            .map((MovieEpisodeGroup e) => e.id)
+                            .toSet();
+                        if (available.difference(_selectedEpisodeIds).isEmpty) {
+                          _selectedEpisodeIds.removeAll(available);
+                        } else {
+                          _selectedEpisodeIds.addAll(available);
+                        }
+                      }),
+                      child: Text('Select all'),
+                    ),
+                  ],
+                ),
+              ],
+              if (!_loading)
+                Expanded(
+                  child: ListView(
+                    shrinkWrap: true,
+                    children: <Widget>[
+                      for (final MovieEpisodeGroup episode in _episodes)
+                        CheckboxListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          value: _selectedEpisodeIds.contains(episode.id),
+                          onChanged: _matchingQuality(episode) == null
+                              ? null
+                              : (bool? checked) => setState(() {
+                                    if (checked == true) {
+                                      _selectedEpisodeIds.add(episode.id);
+                                    } else {
+                                      _selectedEpisodeIds.remove(episode.id);
+                                    }
+                                  }),
+                          title: Text(
+                            episode.episodeLabel.isNotEmpty
+                                ? episode.episodeLabel
+                                : episode.title,
+                            style: SidifyText.bodyS(t.text),
+                          ),
+                          subtitle: _matchingQuality(episode) == null
+                              ? Text('Selected audio / quality unavailable', style: SidifyText.caption(t.text2))
+                              : null,
+                          activeColor: t.brand,
+                        ),
+                    ],
+                  ),
+                )
+              else
+                const Expanded(child: Center(child: CircularProgressIndicator())),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: matchingCount == 0 || _loading ? null : _downloadSelected,
+                  icon: const Icon(Icons.download_rounded),
+                  label: Text('Download selected ($matchingCount)'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _downloadChoiceChip(
+    SidifyTokens t,
+    String label,
+    bool selected,
+    VoidCallback onTap,
+  ) =>
+      ChoiceChip(
+        label: Text(label),
+        selected: selected,
+        onSelected: (_) => onTap(),
+        selectedColor: t.brand.withValues(alpha: .2),
+        labelStyle: SidifyText.label(selected ? t.brand : t.text),
+        side: BorderSide(color: selected ? t.brand : t.edge),
+      );
 }
 
 /// Download choice for a season ZIP pack: episode-wise (only the selected
