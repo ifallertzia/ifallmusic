@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../../core/services/settings_service.dart';
 import '../../core/theme/sidify_theme.dart';
