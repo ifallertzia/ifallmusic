@@ -1,23 +1,42 @@
 /// Which catalog a movie / series result came from.
 ///
-/// Sidify Movies ships two catalogs at once:
+/// Sidify Movies ships three catalogs at once:
 ///
 /// * [eonMovies] — the original EonMovies catalog (normal rows),
 /// * [hdhub4u]   — the second catalog, badged *IMAX HD* wherever both catalogs
 ///   are shown together. Its source name is internal only and is never shown
 ///   to a person: every visible label says "IMAX HD".
+/// * [ifallhub]  — the catalog powered by the Ifallhub server. Its rows carry
+///   the *ifallhub* chip, the same way the second catalog carries *IMAX HD*.
 ///
 /// The provider travels with every model object — post, detail, quality link,
 /// episode group and download item — so a link is always resolved by the
 /// service that produced it.
 enum MovieProvider {
-  eonMovies(id: 'eon', label: 'EonMovies', premium: false),
-  hdhub4u(id: 'hdhub', label: 'IMAX HD', premium: true);
+  eonMovies(
+    id: 'eon',
+    label: 'EonMovies',
+    premium: false,
+    badgeLabel: '',
+  ),
+  hdhub4u(
+    id: 'hdhub',
+    label: 'IMAX HD',
+    premium: true,
+    badgeLabel: 'IMAX HD',
+  ),
+  ifallhub(
+    id: 'ifallhub',
+    label: 'ifallhub',
+    premium: true,
+    badgeLabel: 'ifallhub',
+  );
 
   const MovieProvider({
     required this.id,
     required this.label,
     required this.premium,
+    required this.badgeLabel,
   });
 
   /// Stable short id — persisted in download records, never renamed.
@@ -31,7 +50,7 @@ enum MovieProvider {
   final bool premium;
 
   /// The words shown on the badge for [premium] rows.
-  String get badgeLabel => 'IMAX HD';
+  final String badgeLabel;
 
   static MovieProvider fromId(Object? value) {
     final String raw = value?.toString().trim() ?? '';

@@ -47,8 +47,12 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
 
   /// Latest tiles from the premium HDHub4U catalog, shown as their own rail
   /// above the main grid while browsing (not while searching — search mixes
-  /// both catalogs into one list instead).
+  /// every catalog into one list instead).
   List<MoviePost> _premiumPosts = <MoviePost>[];
+
+  /// Latest tiles from the Ifallhub-powered catalog, on their own rail right
+  /// under the IMAX HD one, every card badged *ifallhub*.
+  List<MoviePost> _ifallhubPosts = <MoviePost>[];
   int _requestToken = 0;
 
   @override
@@ -130,8 +134,11 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
       });
       if (_activeQuery.isEmpty) {
         unawaited(_loadPremium(category: _category, token: token));
-      } else if (_premiumPosts.isNotEmpty) {
-        setState(() => _premiumPosts = <MoviePost>[]);
+      } else if (_premiumPosts.isNotEmpty || _ifallhubPosts.isNotEmpty) {
+        setState(() {
+          _premiumPosts = <MoviePost>[];
+          _ifallhubPosts = <MoviePost>[];
+        });
       }
     } catch (e) {
       if (!mounted || token != _requestToken) return;
@@ -142,8 +149,8 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
     }
   }
 
-  /// Premium catalog rail. Failure is silent: the main EonMovies grid above it
-  /// is what the page is really about.
+  /// Premium catalog rails. Failure is silent: the main EonMovies grid above
+  /// them is what the page is really about.
   Future<void> _loadPremium({
     required MovieCategory category,
     required int token,
@@ -154,6 +161,14 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
           await repo.fetchPremiumPosts(category: category, page: 1);
       if (!mounted || token != _requestToken) return;
       setState(() => _premiumPosts = premium);
+    } catch (_) {}
+
+    try {
+      final MoviesRepository repo = moviesRepositoryOf(context);
+      final List<MoviePost> hub =
+          await repo.fetchIfallhubPosts(category: category, page: 1);
+      if (!mounted || token != _requestToken) return;
+      setState(() => _ifallhubPosts = hub);
     } catch (_) {}
   }
 
@@ -349,7 +364,17 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
             ),
             if (_premiumPosts.isNotEmpty && _activeQuery.isEmpty)
               SliverToBoxAdapter(
-                child: _PremiumRail(posts: _premiumPosts),
+                child: _CatalogRail(
+                  title: 'IMAX HD catalog',
+                  posts: _premiumPosts,
+                ),
+              ),
+            if (_ifallhubPosts.isNotEmpty && _activeQuery.isEmpty)
+              SliverToBoxAdapter(
+                child: _CatalogRail(
+                  title: 'ifallhub catalog',
+                  posts: _ifallhubPosts,
+                ),
               ),
             if (_loading)
               SliverFillRemaining(
@@ -448,11 +473,12 @@ class _MoviesHomePageState extends State<MoviesHomePage> {
   }
 }
 
-/// Horizontal rail of the newest titles of the second catalog, each card
-/// carrying the gold IMAX HD chip.
-class _PremiumRail extends StatelessWidget {
-  const _PremiumRail({required this.posts});
+/// Horizontal rail of the newest titles of one of the extra catalogs, each
+/// card carrying that catalog's own chip (gold *IMAX HD* or violet *ifallhub*).
+class _CatalogRail extends StatelessWidget {
+  const _CatalogRail({required this.title, required this.posts});
 
+  final String title;
   final List<MoviePost> posts;
 
   @override
@@ -467,7 +493,7 @@ class _PremiumRail extends StatelessWidget {
             children: <Widget>[
               Expanded(
                 child: Text(
-                  'IMAX HD catalog',
+                  title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: SidifyText.title(t.text),
@@ -517,9 +543,12 @@ class _PremiumRail extends StatelessWidget {
                         ),
                       ],
                       const SizedBox(height: 4),
-                      const Align(
+                      Align(
                         alignment: Alignment.centerLeft,
-                        child: PremiumProviderBadge(compact: true),
+                        child: PremiumProviderBadge(
+                          compact: true,
+                          provider: post.provider,
+                        ),
                       ),
                     ],
                   ),

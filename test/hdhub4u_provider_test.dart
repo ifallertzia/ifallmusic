@@ -8,6 +8,7 @@ import 'package:ifallmusic/movies/models/movie_provider.dart';
 import 'package:ifallmusic/movies/services/eon_movies_service.dart';
 import 'package:ifallmusic/movies/services/hdhub4u_html_parser.dart';
 import 'package:ifallmusic/movies/services/hdhub4u_service.dart';
+import 'package:ifallmusic/movies/services/ifallhub_service.dart';
 import 'package:ifallmusic/movies/services/movie_http_client.dart';
 import 'package:ifallmusic/movies/services/movie_quality_order.dart';
 import 'package:ifallmusic/movies/services/movie_source.dart';
@@ -382,6 +383,7 @@ void main() {
           transport: _FakeTransport(),
           initialBaseUrl: _base,
         ),
+        ifallhub: IfallhubService(transport: _FakeTransport()),
         includePremiumProvider: false,
       );
       addTearDown(repository.dispose);
@@ -392,6 +394,27 @@ void main() {
       expect(
         repository.sourceFor(MovieProvider.hdhub4u).provider,
         MovieProvider.hdhub4u,
+      );
+      expect(
+        repository.sourceFor(MovieProvider.ifallhub).provider,
+        MovieProvider.ifallhub,
+      );
+    });
+
+    test('a repository built without the ifallhub catalog says so', () {
+      final MoviesRepository repository = MoviesRepository(
+        eon: EonMoviesService(transport: _FakeTransport()),
+        hdhub4u: Hdhub4uService(
+          transport: _FakeTransport(),
+          initialBaseUrl: _base,
+        ),
+        includePremiumProvider: false,
+      );
+      addTearDown(repository.dispose);
+      expect(repository.includesIfallhub, isFalse);
+      expect(
+        () => repository.sourceFor(MovieProvider.ifallhub),
+        throwsStateError,
       );
     });
 

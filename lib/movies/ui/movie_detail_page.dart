@@ -309,6 +309,14 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
                                   ),
                                   if ((detail?.year ?? '').isNotEmpty)
                                     _badge(t, detail!.year),
+                                  // The catalog a title came from is said on
+                                  // the page too, the same chip the result
+                                  // card carried.
+                                  if (detail?.provider.premium ?? false)
+                                    PremiumProviderBadge(
+                                      compact: true,
+                                      provider: detail!.provider,
+                                    ),
                                 ],
                               ),
                               const SizedBox(height: 8),

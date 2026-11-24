@@ -12,6 +12,11 @@ class BackendConfig {
   static const String playlistBase =
       'https://saxifyappbackend-for-playlist.onrender.com';
 
+  /// The Ifallhub server that powers the third Movies & Series catalog
+  /// (`MovieProvider.ifallhub`): search, title pages and playback all go
+  /// through its `/api/*` routes.
+  static const String ifallhubBaseUrl = 'https://ifallhub.vercel.app';
+
   static const String clientHeader = 'X-IfallMusic-Client';
   static const String clientValue = 'flutter';
 

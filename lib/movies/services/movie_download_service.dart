@@ -14,6 +14,7 @@ import '../../core/services/app_feedback.dart';
 import '../../core/services/native_bridge.dart';
 import '../models/movie_models.dart';
 import 'eon_movies_service.dart';
+import 'ifallhub_service.dart';
 import 'movie_text_scrub.dart';
 import 'movies_repository.dart';
 import 'remote_zip.dart';
@@ -77,12 +78,13 @@ class MovieDownloadService extends ChangeNotifier {
   Timer? _persistDebounce;
   bool _disposed = false;
 
-  /// [movies] is the two-catalog repository. [moviesService] is kept as a
+  /// [movies] is the three-catalog repository. [moviesService] is kept as a
   /// convenience for the widget tests, which only ever need EonMovies.
   static Future<MovieDownloadService> create(
     SharedPreferences prefs, {
     MoviesRepository? movies,
     EonMoviesService? moviesService,
+    IfallhubService? ifallhub,
     Directory? customDirectory,
     ByteStreamOpener? streamOpener,
   }) async {
@@ -91,6 +93,7 @@ class MovieDownloadService extends ChangeNotifier {
       repository: movies ??
           MoviesRepository(
             eon: moviesService,
+            ifallhub: ifallhub,
             includePremiumProvider: false,
           ),
       customDirectory: customDirectory,

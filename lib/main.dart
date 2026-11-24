@@ -41,6 +41,7 @@ import 'ui/rooms/room_chat_launcher.dart';
 import 'core/theme/sidify_theme.dart';
 import 'movies/services/eon_movies_service.dart';
 import 'movies/services/hdhub4u_service.dart';
+import 'movies/services/ifallhub_service.dart';
 import 'movies/services/movie_download_service.dart';
 import 'movies/services/movie_library_service.dart';
 import 'movies/services/movies_repository.dart';
@@ -161,9 +162,13 @@ Future<AppBoot> _initializeApp() async {
   // The premium Movies & Series catalog (HDHub4U) rides beside EonMovies.
   // Search merges both; browsing stays on the catalog that has the sections.
   final Hdhub4uService premiumMoviesService = Hdhub4uService();
+  // The third catalog is powered by the Ifallhub server: search, title pages
+  // and playback all go through its API, and every row is badged "ifallhub".
+  final IfallhubService ifallhubMoviesService = IfallhubService();
   final MoviesRepository moviesRepository = MoviesRepository(
     eon: moviesService,
     hdhub4u: premiumMoviesService,
+    ifallhub: ifallhubMoviesService,
   );
   final MovieDownloadService movieDownloads =
       await MovieDownloadService.create(
