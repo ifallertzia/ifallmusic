@@ -4,9 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/services/app_feedback.dart';
+import '../../core/services/settings_service.dart';
 import '../../core/theme/sidify_theme.dart';
 import '../models/movie_models.dart';
 import '../models/movie_provider.dart';
+import '../services/movie_content_filter.dart';
 import '../services/movie_download_service.dart';
 import '../services/movie_library_service.dart';
 import '../services/movies_repository.dart';
@@ -15,6 +17,10 @@ import 'movie_player_page.dart';
 import 'movie_ui_widgets.dart';
 
 void openMovieDetailPage(BuildContext context, MoviePost post) {
+  final SettingsService? settings = context.read<SettingsService?>();
+  if (!(settings?.adultContentUnlocked ?? false) && moviePostLooksAdult(post)) {
+    return;
+  }
   Navigator.of(context).push(
     MaterialPageRoute<void>(
       builder: (_) => MovieDetailPage(initialPost: post),
@@ -58,13 +64,12 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
       fallbackImageUrl: detail.fallbackPosterUrl,
       badge: detail.isSeries ? 'Series' : 'Movie',
       subtitle: detail.year,
+      isAdult: widget.initialPost.isAdult || movieDetailLooksAdult(detail),
       provider: detail.provider,
     );
   }
 
   Future<void> _load() async {
-    final MovieLibraryService? library = context.read<MovieLibraryService?>();
-    if (library != null) unawaited(library.recordOpened(widget.initialPost));
     setState(() {
       _loading = true;
       _error = null;
@@ -76,6 +81,12 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
         widget.initialPost.link,
       );
       if (!mounted) return;
+      final SettingsService? settings = context.read<SettingsService?>();
+      if (!(settings?.adultContentUnlocked ?? false) &&
+          movieDetailLooksAdult(detail)) {
+        Navigator.of(context).maybePop();
+        return;
+      }
       setState(() {
         _detail = detail;
         _selectedSeason = detail.episodeGroups
@@ -83,6 +94,9 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
             .firstWhere((String season) => season.isNotEmpty, orElse: () => '');
         _loading = false;
       });
+      final MovieLibraryService? library =
+          context.read<MovieLibraryService?>();
+      if (library != null) unawaited(library.recordOpened(_currentPost));
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -407,6 +421,11 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
     MovieDetail detail,
   ) {
     final List<Widget> widgets = <Widget>[];
+    final SettingsService? settings = context.watch<SettingsService?>();
+    final List<MoviePost> relatedPosts = filterMoviePosts(
+      detail.relatedPosts,
+      adultContentUnlocked: settings?.adultContentUnlocked ?? false,
+    );
 
     // Prominent Audio / Download Languages banner
     widgets.add(
@@ -551,7 +570,7 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
       );
     }
 
-    if (detail.relatedPosts.isNotEmpty) {
+    if (relatedPosts.isNotEmpty) {
       widgets.add(const SizedBox(height: 24));
       widgets.add(
         Text('Recommended For You', style: SidifyText.section(t.text)),
@@ -562,10 +581,10 @@ class _MovieDetailPageState extends State<MovieDetailPage> {
           height: 215,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
-            itemCount: detail.relatedPosts.length,
+            itemCount: relatedPosts.length,
             separatorBuilder: (_, __) => const SizedBox(width: 12),
             itemBuilder: (BuildContext context, int i) {
-              final MoviePost post = detail.relatedPosts[i];
+              final MoviePost post = relatedPosts[i];
               return GestureDetector(
                 onTap: () => openMovieDetailPage(context, post),
                 child: SizedBox(

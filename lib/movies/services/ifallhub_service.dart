@@ -3,6 +3,7 @@ import 'dart:convert';
 import '../../config/backend_config.dart';
 import '../models/movie_models.dart';
 import '../models/movie_provider.dart';
+import 'movie_content_filter.dart';
 import 'movie_http_client.dart';
 import 'movie_source.dart';
 
@@ -149,10 +150,14 @@ class IfallhubService implements MovieSource {
       throw StateError('This title is not part of the ifallhub catalog.');
     }
 
-    final dynamic data = await _getJson('/api/details', <String, String>{
-      'provider': ref.provider,
-      'id': ref.id,
-    });
+    final dynamic data = await _getJson(
+      '/api/details',
+      <String, String>{
+        'provider': ref.provider,
+        'id': ref.id,
+      },
+      timeout: const Duration(seconds: 40),
+    );
     if (data is! Map) {
       throw StateError('ifallhub did not return this title.');
     }
@@ -710,6 +715,20 @@ class IfallhubService implements MovieSource {
       if (title.isEmpty) continue;
       final String type = _stringOf(item['media_type']);
       final String year = _stringOf(item['year']).trim();
+      final bool explicitlyAdult =
+          item['adult'] == true ||
+          item['is_adult'] == true ||
+          _stringOf(item['adult']).toLowerCase() == 'true' ||
+          _stringOf(item['is_adult']).toLowerCase() == 'true';
+      final String adultHints = <String>[
+        title,
+        _stringOf(item['content_rating']),
+        _stringOf(item['certification']),
+        _stringOf(item['classification']),
+        _stringOf(item['description']),
+        _stringsOf(item['genres']).join(' '),
+        _stringsOf(item['tags']).join(' '),
+      ].join(' ');
       out.add(
         MoviePost(
           title: title,
@@ -723,6 +742,7 @@ class IfallhubService implements MovieSource {
           imageUrl: _stringOf(item['poster_url']).trim(),
           badge: type == 'series' ? 'Series' : 'Movie',
           subtitle: year,
+          isAdult: explicitlyAdult || containsAdultContentSignal(adultHints),
           provider: MovieProvider.ifallhub,
         ),
       );

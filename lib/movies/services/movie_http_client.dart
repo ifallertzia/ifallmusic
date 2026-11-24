@@ -101,7 +101,7 @@ class DioMovieHttpTransport implements MovieHttpTransport {
       '(KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36';
 
   final Map<String, InternetAddress> _dohCache = <String, InternetAddress>{};
-  late final Dio _dio;
+  late Dio _dio;
 
   @override
   Dio get streamDio => _dio;
@@ -126,6 +126,7 @@ class DioMovieHttpTransport implements MovieHttpTransport {
       createHttpClient: () {
         final HttpClient client = HttpClient();
         client.connectionTimeout = const Duration(seconds: 15);
+        client.idleTimeout = const Duration(seconds: 20);
         client.userAgent = browserUserAgent;
         return client;
       },
@@ -148,24 +149,39 @@ class DioMovieHttpTransport implements MovieHttpTransport {
     bool followRedirects = true,
   }) async {
     try {
-      final Response<String> res = await _dio.get<String>(
+      return await _getOnce(
         url,
-        options: Options(
-          headers: headers,
-          followRedirects: followRedirects,
-          maxRedirects: followRedirects ? 5 : 0,
-          responseType: ResponseType.plain,
-          validateStatus: (int? s) => s != null && s < 500,
-        ),
+        headers: headers,
+        followRedirects: followRedirects,
       );
-      return MovieHttpResponse(
-        statusCode: res.statusCode ?? 0,
-        body: res.data ?? '',
-        headers: _flattenHeaders(res.headers),
-        effectiveUrl: res.realUri.toString(),
-      );
-    } on DioException catch (e) {
-      if (_isDnsOrConnectionFailure(e)) {
+    } on DioException catch (error) {
+      if (_isTransientGetFailure(error)) {
+        // A socket kept alive by the OS/proxy can go stale while the app sits
+        // in the background. Rebuild the client pool and replay this safe GET
+        // once instead of surfacing a false "could not load details" error.
+        final Dio staleDio = _dio;
+        _dio = _buildDio();
+        staleDio.close(force: false);
+        try {
+          return await _getOnce(
+            url,
+            headers: headers,
+            followRedirects: followRedirects,
+          );
+        } on DioException catch (retryError) {
+          if (_isDnsOrConnectionFailure(retryError)) {
+            final MovieHttpResponse? fallback = await _retryOverDoh(
+              url,
+              method: 'GET',
+              headers: headers,
+              followRedirects: followRedirects,
+            );
+            if (fallback != null) return fallback;
+          }
+          rethrow;
+        }
+      }
+      if (_isDnsOrConnectionFailure(error)) {
         final MovieHttpResponse? fallback = await _retryOverDoh(
           url,
           method: 'GET',
@@ -176,6 +192,42 @@ class DioMovieHttpTransport implements MovieHttpTransport {
       }
       rethrow;
     }
+  }
+
+  Future<MovieHttpResponse> _getOnce(
+    String url, {
+    required Map<String, String> headers,
+    required bool followRedirects,
+  }) async {
+    final Response<String> response = await _dio.get<String>(
+      url,
+      options: Options(
+        headers: headers,
+        followRedirects: followRedirects,
+        maxRedirects: followRedirects ? 5 : 0,
+        responseType: ResponseType.plain,
+        validateStatus: (int? status) => status != null && status < 500,
+      ),
+    );
+    return MovieHttpResponse(
+      statusCode: response.statusCode ?? 0,
+      body: response.data ?? '',
+      headers: _flattenHeaders(response.headers),
+      effectiveUrl: response.realUri.toString(),
+    );
+  }
+
+  bool _isTransientGetFailure(DioException error) {
+    final int? status = error.response?.statusCode;
+    return error.type == DioExceptionType.connectionError ||
+        error.type == DioExceptionType.connectionTimeout ||
+        error.type == DioExceptionType.receiveTimeout ||
+        error.error is SocketException ||
+        error.error is HandshakeException ||
+        status == 500 ||
+        status == 502 ||
+        status == 503 ||
+        status == 504;
   }
 
   @override

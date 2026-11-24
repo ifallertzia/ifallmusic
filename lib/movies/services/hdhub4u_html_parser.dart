@@ -5,6 +5,7 @@ import 'package:html/parser.dart' as html_parser;
 
 import '../models/movie_models.dart';
 import '../models/movie_provider.dart';
+import 'movie_content_filter.dart';
 import 'movie_rating.dart';
 import 'movie_text_scrub.dart';
 
@@ -377,6 +378,7 @@ abstract final class Hdhub4uHtmlParser {
           badge: _seasonRe.hasMatch('$title $cardContext') ? 'Series' : 'Movie',
           subtitle: RegExp(r'\b(19|20)\d{2}\b').firstMatch(cardContext)?.group(0) ??
               '',
+          isAdult: containsAdultContentSignal('$title $cardContext'),
           provider: MovieProvider.hdhub4u,
         ),
       );
@@ -444,6 +446,9 @@ abstract final class Hdhub4uHtmlParser {
           fallbackImageUrl: imageUrls.fallback,
           badge: _seasonRe.hasMatch(title) ? 'Series' : 'Movie',
           subtitle: year,
+          isAdult: containsAdultContentSignal(
+            '$title ${document['category'] ?? ''} ${document['categories'] ?? ''} ${document['content_rating'] ?? ''} ${document['genre'] ?? ''}',
+          ),
           provider: MovieProvider.hdhub4u,
         ),
       );

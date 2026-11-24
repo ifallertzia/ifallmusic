@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
+import '../../core/services/settings_service.dart';
 import '../../core/theme/sidify_theme.dart';
 import '../models/movie_models.dart';
+import '../services/movie_content_filter.dart' as content_filter;
 import '../services/movies_repository.dart';
 import '../services/movie_catalog_filters.dart';
 import 'movie_detail_page.dart';
@@ -85,18 +88,15 @@ class _MoviesExplorePageState extends State<MoviesExplorePage> {
     super.dispose();
   }
 
-  List<MoviePost> get _baseFiltered =>
-      filterMoviePosts(_posts, type: _type, year: _year);
-
-  List<MoviePost> get _visiblePosts {
-    final List<MoviePost> base = _baseFiltered;
-    if (!_detailFilterActive) return base;
-    return base.where((MoviePost post) {
-      final MovieDetail? detail = _details[post.link];
-      return detail != null &&
-          movieDetailMatchesExplore(detail, language: _language, genre: _genre);
-    }).toList();
-  }
+  List<MoviePost> get _baseFiltered => filterMoviePosts(
+        content_filter.filterMoviePosts(
+          _posts,
+          adultContentUnlocked:
+              context.read<SettingsService?>()?.adultContentUnlocked ?? false,
+        ),
+        type: _type,
+        year: _year,
+      );
 
   Future<void> _fetchFirstPage() async {
     final int token = ++_requestToken;
@@ -204,10 +204,29 @@ class _MoviesExplorePageState extends State<MoviesExplorePage> {
   @override
   Widget build(BuildContext context) {
     final SidifyTokens t = context.sidify;
+    final SettingsService? settings = context.watch<SettingsService?>();
+    final List<MoviePost> base = filterMoviePosts(
+      content_filter.filterMoviePosts(
+        _posts,
+        adultContentUnlocked: settings?.adultContentUnlocked ?? false,
+      ),
+      type: _type,
+      year: _year,
+    );
+    final List<MoviePost> visible = !_detailFilterActive
+        ? base
+        : base.where((MoviePost post) {
+            final MovieDetail? detail = _details[post.link];
+            return detail != null &&
+                movieDetailMatchesExplore(
+                  detail,
+                  language: _language,
+                  genre: _genre,
+                );
+          }).toList();
     final double width = MediaQuery.sizeOf(context).width;
     final int crossAxisCount = width >= 900 ? 5 : (width >= 600 ? 4 : 3);
-    final List<MoviePost> visible = _visiblePosts;
-    final List<int> years = moviePostYears(_posts);
+    final List<int> years = moviePostYears(base);
 
     return SafeArea(
       bottom: false,

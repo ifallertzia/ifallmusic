@@ -93,6 +93,7 @@ class SettingsService extends ChangeNotifier {
   static const String kRememberPosition = 'saxify.remember_position';
   static const String kPlaybackSpeed = 'saxify.playback_speed';
   static const String kExplicitFilter = 'saxify.explicit_filter';
+  static const String kAdultContentUnlocked = 'movies.adult_content_unlocked.v1';
   static const String kLastPositions = 'saxify.last_positions';
   static const String kCustomAccentPrimary = 'saxify.custom_accent_primary';
   static const String kCustomAccentSecondary = 'saxify.custom_accent_secondary';
@@ -299,6 +300,14 @@ class SettingsService extends ChangeNotifier {
   bool get explicitFilter => _prefs.getBool(kExplicitFilter) ?? false;
   Future<void> setExplicitFilter(bool v) =>
       _prefs.setBool(kExplicitFilter, v).then((_) => notifyListeners());
+
+  /// Adult catalog results stay hidden until a user unlocks them in Movies
+  /// Settings. Only the unlock state is saved; the entered passphrase is not.
+  bool get adultContentUnlocked =>
+      _prefs.getBool(kAdultContentUnlocked) ?? false;
+  Future<void> setAdultContentUnlocked(bool unlocked) => _prefs
+      .setBool(kAdultContentUnlocked, unlocked)
+      .then((_) => notifyListeners());
 
   // --------------------------------------------------- appearance / display
   /// `system` follows the phone, `light` and `dark` pin it.

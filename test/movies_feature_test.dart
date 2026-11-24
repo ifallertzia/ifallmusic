@@ -763,6 +763,12 @@ void main() {
       expect(find.text('VisionQuest - Season 1'), findsNothing);
       await tester.tap(find.text('Sidify server'));
       await tester.pumpAndSettle();
+      expect(find.text('Sidify server results'), findsOneWidget);
+      await tester.tap(find.byIcon(Icons.arrow_back_ios_new_rounded).first);
+      await tester.pumpAndSettle();
+      expect(find.text('Sidify server'), findsOneWidget);
+      await tester.tap(find.text('Sidify server'));
+      await tester.pumpAndSettle();
 
       // 4. Open Series detail -> languages, season/episode rows with Play +
       // Download actions; raw quality links stay hidden until Download.

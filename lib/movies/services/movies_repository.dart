@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart';
@@ -158,11 +159,23 @@ class MoviesRepository {
     MovieProvider provider,
     String link, {
     int autoExpandLimit = 8,
-  }) {
-    return sourceFor(provider).fetchDetail(
-      link,
-      autoExpandLimit: autoExpandLimit,
-    );
+  }) async {
+    final MovieSource source = sourceFor(provider);
+    try {
+      return await source.fetchDetail(
+        link,
+        autoExpandLimit: autoExpandLimit,
+      );
+    } catch (_) {
+      // Catalog endpoints occasionally wake up slowly or return a transient
+      // gateway error while the app has been left open. Retry the idempotent
+      // title request once, rather than making a relaunch the recovery path.
+      await Future<void>.delayed(const Duration(milliseconds: 450));
+      return source.fetchDetail(
+        link,
+        autoExpandLimit: autoExpandLimit,
+      );
+    }
   }
 
   Future<MovieEpisodeGroup> expandEpisodeGroup(MovieEpisodeGroup group) {

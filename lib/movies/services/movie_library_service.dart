@@ -74,6 +74,7 @@ class MovieLibraryService extends ChangeNotifier {
                 fallbackImageUrl: item['fallbackImageUrl'] as String? ?? '',
                 badge: item['badge'] as String? ?? '',
                 subtitle: item['subtitle'] as String? ?? '',
+                isAdult: item['isAdult'] as bool? ?? false,
                 provider: MovieProvider.fromId(item['provider']),
               ))
           .where((MoviePost post) => post.link.isNotEmpty)
@@ -87,13 +88,14 @@ class MovieLibraryService extends ChangeNotifier {
     await _prefs.setString(
       key,
       jsonEncode(posts
-          .map((MoviePost post) => <String, String>{
+          .map((MoviePost post) => <String, Object>{
                 'title': post.title,
                 'link': post.link,
                 'imageUrl': post.imageUrl,
                 'fallbackImageUrl': post.fallbackImageUrl,
                 'badge': post.badge,
                 'subtitle': post.subtitle,
+                'isAdult': post.isAdult,
                 'provider': post.provider.id,
               })
           .toList()),

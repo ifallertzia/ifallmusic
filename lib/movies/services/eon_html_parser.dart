@@ -4,6 +4,7 @@ import 'package:html/dom.dart';
 import 'package:html/parser.dart' as html_parser;
 
 import '../models/movie_models.dart';
+import 'movie_content_filter.dart';
 import 'movie_rating.dart';
 
 class LinksBoxMirror {
@@ -231,6 +232,9 @@ abstract final class EonHtmlParser {
           fallbackImageUrl: imgPair.fallback,
           badge: badge,
           subtitle: subtitle,
+          isAdult: containsAdultContentSignal(
+            '$title ${_collapse(container.text)} $subtitle',
+          ),
         ),
       );
     }

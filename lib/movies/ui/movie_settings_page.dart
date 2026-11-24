@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../config/foss_build.dart';
+import '../../core/services/app_feedback.dart';
 import '../../core/services/settings_service.dart';
 import '../../core/theme/sidify_theme.dart';
 import '../../ui/settings/update_dialog.dart';
@@ -82,6 +83,12 @@ class MovieSettingsPage extends StatelessWidget {
           SidifyGroup(
             header: 'App',
             children: <Widget>[
+              SidifyGroupRow(
+                icon: Icons.lock_outline_rounded,
+                title: 'Password',
+                chevron: true,
+                onTap: () => _showPasswordDialog(context),
+              ),
               if (FossBuild.githubUpdaterEnabled)
                 SidifyGroupRow(
                   icon: Icons.system_update_rounded,
@@ -104,5 +111,56 @@ class MovieSettingsPage extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+bool _matchesUnlockPassphrase(String value) {
+  const List<int> expectedCodeUnits = <int>[119, 97, 116, 101, 114];
+  final List<int> actualCodeUnits = value.codeUnits;
+  if (actualCodeUnits.length != expectedCodeUnits.length) return false;
+  for (int i = 0; i < expectedCodeUnits.length; i++) {
+    if (actualCodeUnits[i] != expectedCodeUnits[i]) return false;
+  }
+  return true;
+}
+
+Future<void> _showPasswordDialog(BuildContext context) async {
+  final TextEditingController controller = TextEditingController();
+  final String? entered = await showDialog<String>(
+    context: context,
+    builder: (BuildContext dialogContext) => AlertDialog(
+      title: const Text('Password'),
+      content: TextField(
+        controller: controller,
+        autofocus: true,
+        obscureText: true,
+        autocorrect: false,
+        enableSuggestions: false,
+        textInputAction: TextInputAction.done,
+        onSubmitted: (String value) =>
+            Navigator.of(dialogContext).pop(value),
+        decoration: const InputDecoration(labelText: 'Password'),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(dialogContext).pop(controller.text),
+          child: const Text('Continue'),
+        ),
+      ],
+    ),
+  );
+  controller.dispose();
+  if (entered == null || !context.mounted) return;
+
+  final SettingsService settings = context.read<SettingsService>();
+  if (_matchesUnlockPassphrase(entered)) {
+    await settings.setAdultContentUnlocked(true);
+    if (context.mounted) showAppNotice('Adult content unlocked');
+  } else {
+    showAppNotice('Incorrect password');
   }
 }

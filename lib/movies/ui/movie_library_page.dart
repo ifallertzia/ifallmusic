@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/services/app_feedback.dart';
+import '../../core/services/settings_service.dart';
 import '../../core/theme/sidify_theme.dart';
 import '../models/movie_models.dart';
+import '../services/movie_content_filter.dart';
 import '../services/movie_library_service.dart';
 import 'local_videos_page.dart';
 import 'movie_detail_page.dart';
@@ -18,6 +20,16 @@ class MovieLibraryPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final SidifyTokens t = context.sidify;
     final MovieLibraryService library = context.watch<MovieLibraryService>();
+    final SettingsService? settings = context.watch<SettingsService?>();
+    final bool unlocked = settings?.adultContentUnlocked ?? false;
+    final List<MoviePost> watchlist = filterMoviePosts(
+      library.watchlist,
+      adultContentUnlocked: unlocked,
+    );
+    final List<MoviePost> history = filterMoviePosts(
+      library.history,
+      adultContentUnlocked: unlocked,
+    );
     return SafeArea(
       bottom: false,
       child: ListView(
@@ -56,7 +68,7 @@ class MovieLibraryPage extends StatelessWidget {
             context,
             t,
             'Watchlist',
-            library.watchlist,
+            watchlist,
             emptyText: 'Saved movies and series will appear here.',
             removeIcon: Icons.bookmark_remove_rounded,
             removeTooltip: 'Remove from watchlist',
@@ -69,12 +81,12 @@ class MovieLibraryPage extends StatelessWidget {
             context,
             t,
             'Recently watched',
-            library.history,
+            history,
             emptyText: 'Your viewing history will appear here.',
             removeIcon: Icons.delete_outline_rounded,
             removeTooltip: 'Remove from recently watched',
             onRemove: (MoviePost post) => _removeFromHistory(context, library, post),
-            onRemoveAll: library.history.isEmpty
+            onRemoveAll: history.isEmpty
                 ? null
                 : () => _clearHistory(context, library),
           ),
