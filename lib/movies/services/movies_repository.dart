@@ -8,16 +8,17 @@ import '../models/movie_models.dart';
 import '../models/movie_provider.dart';
 import 'eon_movies_service.dart';
 import 'hdhub4u_service.dart';
+import 'ifallhub_service.dart';
 import 'movie_http_client.dart';
 import 'movie_source.dart';
 
-/// Everything Sidify Movies needs, across **both** catalogs.
+/// Everything Sidify Movies needs, across **all three** catalogs.
 ///
 /// * browsing (Recommended, Bollywood, …) is served by EonMovies — the catalog
 ///   that actually has those sections,
-/// * search asks both catalogs and merges the answers, so the same title shows
-///   up twice: once as a normal EonMovies row and once as a *premium* HDHub4U
-///   row,
+/// * search asks every catalog and merges the answers, so the same title shows
+///   up once as a normal EonMovies row, once as a *premium* HDHub4U row and
+///   once as an *ifallhub* row,
 /// * every model object carries its [MovieProvider], so resolving a quality,
 ///   expanding a season or listing a ZIP always goes back to the service that
 ///   produced the link.
@@ -25,20 +26,30 @@ class MoviesRepository {
   MoviesRepository({
     EonMoviesService? eon,
     Hdhub4uService? hdhub4u,
+    IfallhubService? ifallhub,
     bool? includePremiumProvider,
   })  : eon = eon ?? EonMoviesService(),
         hdhub4u = hdhub4u ?? Hdhub4uService(),
+        ifallhub = ifallhub,
         _includePremiumProvider = includePremiumProvider ?? !_runningTests;
 
   final EonMoviesService eon;
   final Hdhub4uService hdhub4u;
+
+  /// The Ifallhub-powered catalog. Optional so a widget test (which has no
+  /// network) can build a repository without it; the real app always passes
+  /// one.
+  final IfallhubService? ifallhub;
   final bool _includePremiumProvider;
 
-  /// Whether mixed search results include the premium catalog.
+  /// Whether mixed search results include the premium catalogs.
   bool get includesPremiumProvider => _includePremiumProvider;
 
-  /// Widget tests have no network: the premium catalog is skipped unless a
-  /// test builds a repository with its own fake transport and asks for it.
+  /// Whether the ifallhub catalog takes part in search and browsing.
+  bool get includesIfallhub => _includePremiumProvider && ifallhub != null;
+
+  /// Widget tests have no network: the premium catalogs are skipped unless a
+  /// test builds a repository with its own fake transport and asks for them.
   static bool get _runningTests {
     if (kIsWeb) return false;
     try {
@@ -54,6 +65,12 @@ class MoviesRepository {
         return eon;
       case MovieProvider.hdhub4u:
         return hdhub4u;
+      case MovieProvider.ifallhub:
+        final IfallhubService? hub = ifallhub;
+        if (hub == null) {
+          throw StateError('The ifallhub catalog is not available.');
+        }
+        return hub;
     }
   }
 
@@ -83,7 +100,24 @@ class MoviesRepository {
     }
   }
 
-  /// Mixed search: EonMovies rows first, then the premium HDHub4U rows.
+  /// Latest titles of the Ifallhub-powered catalog.
+  Future<List<MoviePost>> fetchIfallhubPosts({
+    MovieCategory category = MovieCategory.recommended,
+    int page = 1,
+  }) async {
+    final IfallhubService? hub = ifallhub;
+    if (!_includePremiumProvider || hub == null || page > 1) {
+      return const <MoviePost>[];
+    }
+    try {
+      return await hub.fetchPosts(category: category, page: page);
+    } catch (_) {
+      return const <MoviePost>[];
+    }
+  }
+
+  /// Mixed search: EonMovies rows first, then the premium HDHub4U rows, then
+  /// the ifallhub rows.
   Future<List<MoviePost>> search({
     required String query,
     int page = 1,
@@ -108,6 +142,13 @@ class MoviesRepository {
       try {
         addAll(await hdhub4u.searchPosts(query: trimmed, page: page));
       } catch (_) {}
+
+      final IfallhubService? hub = ifallhub;
+      if (hub != null) {
+        try {
+          addAll(await hub.searchPosts(query: trimmed, page: page));
+        } catch (_) {}
+      }
     }
 
     return results;
@@ -174,12 +215,18 @@ class MoviesRepository {
         return EonMoviesService.qualityForZipEpisode(pack, episode);
       case MovieProvider.hdhub4u:
         return Hdhub4uService.qualityForZipEpisode(pack, episode);
+      case MovieProvider.ifallhub:
+        throw StateError(
+          'Season ZIP packs are not part of the ifallhub catalog — '
+          'download an episode instead.',
+        );
     }
   }
 
   void dispose() {
     eon.dispose();
     hdhub4u.dispose();
+    ifallhub?.dispose();
   }
 }
 
@@ -187,7 +234,7 @@ class MoviesRepository {
 ///
 /// Widget tests (and any older page that only provided the EonMovies service)
 /// still work: a repository is then built around whichever service is
-/// registered, with the premium catalog switched off.
+/// registered, with the premium catalogs switched off.
 MoviesRepository moviesRepositoryOf(BuildContext context) {
   final MoviesRepository? provided = context.read<MoviesRepository?>();
   if (provided != null) return provided;

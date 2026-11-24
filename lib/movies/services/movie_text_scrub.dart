@@ -1,16 +1,26 @@
 /// Keeps a source site's own name out of everything a person can read.
 ///
-/// The second catalog's pages, file names and track titles are stamped with
-/// the site's name ("Movie.2025.1080p.x264-<site>.Ms.mkv", "Download … from
-/// <site>"). That name is an implementation detail: the app shows the catalog
-/// as "IMAX HD" and nothing else. Every visible string that originates from
-/// that catalog goes through [scrubSourceNames] before it is displayed.
+/// The extra catalogs' pages, file names and track titles are stamped with the
+/// site's name ("Movie.2025.1080p.x264-<site>.Ms.mkv", "Download … from
+/// <site>", "Avatar_2009_Full_<site>.com.mkv"). That name is an implementation
+/// detail: the app shows the catalog as "IMAX HD" or "ifallhub" and nothing
+/// else. Every visible string that originates from those catalogs goes through
+/// [scrubSourceNames] before it is displayed.
 ///
 /// Only the site's name is removed — the rest of the text is left exactly as
 /// it was written.
 library;
 
-const String _siteCore = r'(?:www\.)?hd[\s._-]?hub[\s._-]?4[\s._-]?u';
+/// The source sites behind the two extra catalogs: the IMAX HD catalog's own
+/// site, and the three sites the Ifallhub server fronts for. Spelled loosely
+/// (`Kimoi TV`, `kimoi.tv`, `4k HD Hub`, …) so a stamp in any of those shapes
+/// is caught.
+const String _siteCore = r'(?:www\.)?(?:'
+    r'hd[\s._-]?hub[\s._-]?4[\s._-]?u'
+    r'|kimoi[\s._-]?tv'
+    r'|4k[\s._-]?hd[\s._-]?hub'
+    r'|dra[\s._-]?machi'
+    r')';
 
 /// A domain ending glued to the name (`.ms`, `.com`, …, with any path behind
 /// it) — but never a media file extension, so `Movie-<site>.mkv` keeps its

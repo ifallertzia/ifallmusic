@@ -276,45 +276,62 @@ class MovieDownloadsActionButton extends StatelessWidget {
 }
 
 /// Poster grid card shared by Movies Home, Explore and related shelves.
-/// The little gold *IMAX HD* chip shown under results of the second catalog.
+/// The little chip shown under results of the extra catalogs: gold *IMAX HD*
+/// for the second catalog, violet *ifallhub* for the Ifallhub-powered one.
 ///
-/// Search lists both catalogs at once; that catalog's rows carry this chip
-/// (never the source's own name), while the normal rows stay plain.
+/// Search lists every catalog at once; those rows carry this chip (never the
+/// source's own name), while the normal rows stay plain.
 class PremiumProviderBadge extends StatelessWidget {
-  const PremiumProviderBadge({super.key, this.compact = false});
+  const PremiumProviderBadge({
+    super.key,
+    this.compact = false,
+    this.provider = MovieProvider.hdhub4u,
+  });
 
   final bool compact;
+  final MovieProvider provider;
 
   static const Color gold = Color(0xFFE7B84B);
 
+  /// Ifallhub's own accent: a cool violet, so the two extra catalogs never
+  /// look like the same badge twice.
+  static const Color hub = Color(0xFF9B8CFF);
+
+  Color get _accent =>
+      provider == MovieProvider.ifallhub ? hub : gold;
+
+  IconData get _icon =>
+      provider == MovieProvider.ifallhub ? Icons.hub_rounded : Icons.hd_rounded;
+
   @override
   Widget build(BuildContext context) {
+    final Color accent = _accent;
     return Container(
       padding: EdgeInsets.symmetric(
         horizontal: compact ? 5 : 7,
         vertical: compact ? 1.5 : 3,
       ),
       decoration: BoxDecoration(
-        color: gold.withValues(alpha: 0.16),
+        color: accent.withValues(alpha: 0.16),
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: gold.withValues(alpha: 0.55)),
+        border: Border.all(color: accent.withValues(alpha: 0.55)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           Icon(
-            Icons.hd_rounded,
+            _icon,
             size: compact ? 10 : 12,
-            color: gold,
+            color: accent,
           ),
           SizedBox(width: compact ? 3 : 4),
           Text(
-            MovieProvider.hdhub4u.badgeLabel,
+            provider.badgeLabel,
             style: TextStyle(
               fontSize: compact ? 7.5 : 9,
               letterSpacing: 0.6,
               fontWeight: FontWeight.w800,
-              color: gold,
+              color: accent,
             ),
           ),
         ],
@@ -386,13 +403,16 @@ class MovieGridCard extends StatelessWidget {
               style: SidifyText.caption(t.text2),
             ),
           ],
-          // The premium catalog is marked on its own row; the normal catalog
+          // The extra catalogs are marked on their own row; the normal catalog
           // row above stays exactly as it was.
           if (post.provider.premium) ...<Widget>[
             const SizedBox(height: 4),
-            const Align(
+            Align(
               alignment: Alignment.centerLeft,
-              child: PremiumProviderBadge(compact: true),
+              child: PremiumProviderBadge(
+                compact: true,
+                provider: post.provider,
+              ),
             ),
           ],
         ],
