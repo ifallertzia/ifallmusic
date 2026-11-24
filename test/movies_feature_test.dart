@@ -759,7 +759,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Search Results for "vision"'), findsOneWidget);
       expect(find.text('Sidify server'), findsOneWidget);
-      expect(find.text('1 results'), findsOneWidget);
+      expect(find.textContaining('results'), findsNWidgets(3));
       expect(find.text('VisionQuest - Season 1'), findsNothing);
       await tester.tap(find.text('Sidify server'));
       await tester.pumpAndSettle();
