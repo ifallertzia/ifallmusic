@@ -80,14 +80,14 @@ void main() {
     test('search maps the server items to ifallhub posts', () async {
       final _FakeHubTransport transport = _FakeHubTransport();
       transport.getRoutes['/api/search'] = (Uri uri) => _json(200, <Object>[
-            <String, Object>{
+            <String, Object?>{
               'id': <String, String>{'provider': 'moviebox', 'value': '42'},
               'media_type': 'movie',
               'poster_url': 'https://img.test/avatar.jpg',
               'title': 'Avatar [Hindi]',
               'year': '2009',
             },
-            <String, Object>{
+            <String, Object?>{
               'id': <String, String>{'provider': 'moviebox', 'value': '43'},
               'media_type': 'series',
               'poster_url': null,
@@ -121,7 +121,7 @@ void main() {
         () async {
       final _FakeHubTransport transport = _FakeHubTransport();
       transport.getRoutes['/api/details'] = (Uri uri) => _json(200,
-          <String, Object>{
+          <String, Object?>{
             'id': <String, String>{'provider': 'moviebox', 'value': '42'},
             'title': 'Avatar [Hindi]',
             'media_type': 'movie',
@@ -141,11 +141,11 @@ void main() {
       // its upstream); the server's other catalogue has the film.
       transport.getRoutes['/api/streams'] = (Uri uri) {
         if (uri.queryParameters['provider'] == 'dramachi') {
-          return _json(200, <String, Object>{
+          return _json(200, <String, Object?>{
             'stream_set_id': 'set-1',
             'blocked_addons': <Object>[],
             'releases': <Object>[
-              <String, Object>{
+              <String, Object?>{
                 'provider': 'dramachi',
                 'filename': 'Avatar_2009_Full.mkv',
                 'quality': '720p',
@@ -155,7 +155,7 @@ void main() {
                 'season': null,
                 'episode': null,
                 'mirrors': <Object>[
-                  <String, Object>{
+                  <String, Object?>{
                     'label': 'Dramachi CDN',
                     'resolver_url': '',
                     'headers': <Object>[],
@@ -172,7 +172,7 @@ void main() {
       transport.getRoutes['/api/search'] = (Uri uri) {
         if (uri.queryParameters['provider'] == 'dramachi') {
           return _json(200, <Object>[
-            <String, Object>{
+            <String, Object?>{
               'id': <String, String>{'provider': 'dramachi', 'value': '77'},
               'media_type': 'movie',
               'poster_url': 'https://img.test/a2.jpg',
@@ -222,7 +222,7 @@ void main() {
     test('series title page builds seasons and expands one episode', () async {
       final _FakeHubTransport transport = _FakeHubTransport();
       transport.getRoutes['/api/details'] = (Uri uri) => _json(200,
-          <String, Object>{
+          <String, Object?>{
             'id': <String, String>{'provider': 'moviebox', 'value': '9'},
             'title': 'Avatar: The Last Airbender S1-S2',
             'media_type': 'series',
@@ -232,26 +232,26 @@ void main() {
             'genres': <String>[],
             'dubs': <Object>[],
             'seasons': <Object>[
-              <String, Object>{
+              <String, Object?>{
                 'number': 1,
                 'episodes': <Object>[
-                  <String, Object>{'number': 1, 'season': 1},
-                  <String, Object>{'number': 2, 'season': 1},
+                  <String, Object?>{'number': 1, 'season': 1},
+                  <String, Object?>{'number': 2, 'season': 1},
                 ],
               },
-              <String, Object>{
+              <String, Object?>{
                 'number': 2,
                 'episodes': <Object>[
-                  <String, Object>{'number': 1, 'season': 2},
+                  <String, Object?>{'number': 1, 'season': 2},
                 ],
               },
             ],
           });
       transport.getRoutes['/api/streams'] = (Uri uri) => _json(200,
-          <String, Object>{
+          <String, Object?>{
             'stream_set_id': 'set-2',
             'releases': <Object>[
-              <String, Object>{
+              <String, Object?>{
                 'provider': 'moviebox',
                 'filename': 'TLA.S02E01.1080p.mkv',
                 'quality': '1080p',
@@ -261,7 +261,7 @@ void main() {
                 'season': 2,
                 'episode': 1,
                 'mirrors': <Object>[
-                  <String, Object>{'label': 'Direct', 'resolver_url': ''},
+                  <String, Object?>{'label': 'Direct', 'resolver_url': ''},
                 ],
                 'resource_id': null,
               },
@@ -310,7 +310,7 @@ void main() {
         expect(sent['stream_set_id'], 'set-1');
         expect(sent['release_index'], 0);
         expect(sent['mirror_index'], 0);
-        return _json(200, <String, Object>{
+        return _json(200, <String, Object?>{
           'playback_url': '/api/media/tok/https/cdn.test/movie.mp4',
           'stream_type': 'file',
           'source_label': 'Direct',
@@ -351,10 +351,10 @@ void main() {
     test('an expired stream list is refreshed before playing', () async {
       final _FakeHubTransport transport = _FakeHubTransport();
       transport.getRoutes['/api/streams'] = (Uri uri) => _json(200,
-          <String, Object>{
+          <String, Object?>{
             'stream_set_id': 'set-fresh',
             'releases': <Object>[
-              <String, Object>{
+              <String, Object?>{
                 'provider': 'dramachi',
                 'filename': 'movie.mp4',
                 'quality': '1080p',
@@ -364,7 +364,7 @@ void main() {
                 'season': null,
                 'episode': null,
                 'mirrors': <Object>[
-                  <String, Object>{'label': 'Direct', 'resolver_url': ''},
+                  <String, Object?>{'label': 'Direct', 'resolver_url': ''},
                 ],
                 'resource_id': null,
               },
@@ -378,7 +378,7 @@ void main() {
         if (sent['stream_set_id'] == 'set-old') {
           return _json(410, <String, String>{'error': 'Stream list expired.'});
         }
-        return _json(200, <String, Object>{
+        return _json(200, <String, Object?>{
           'playback_url': '/api/media/new/https/cdn.test/movie.mp4',
           'stream_type': 'file',
         });
@@ -412,7 +412,7 @@ void main() {
     test('download resolution uses the same media URL', () async {
       final _FakeHubTransport transport = _FakeHubTransport();
       transport.postRoutes['/api/play'] = (String body) => _json(200,
-          <String, Object>{
+          <String, Object?>{
             'playback_url': '/api/media/tok/https/cdn.test/movie.mkv',
             'stream_type': 'file',
           });

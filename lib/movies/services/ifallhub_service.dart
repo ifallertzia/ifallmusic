@@ -746,7 +746,7 @@ class IfallhubService implements MovieSource {
           release.language.isNotEmpty ? release.language : languages;
       out.add(
         MovieQualityLink(
-          id: 'ifallhub_${ref.provider}_${ref.id}_${season}_$episode_$i',
+          id: 'ifallhub_${ref.provider}_${ref.id}_${season}_${episode}_$i',
           rawLabel: quality,
           resolution: _resolutionOf(quality),
           codec: release.codec,
